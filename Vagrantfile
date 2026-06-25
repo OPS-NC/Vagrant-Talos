@@ -17,6 +17,8 @@
 #
 # Workflow complet : voir README.md
 
+require 'shellwords'
+
 ##############################################################################
 # Paramètres du lab
 ##############################################################################
@@ -100,6 +102,13 @@ end
 # réservations déterministes (MAC -> IP). Idempotente.
 ##############################################################################
 
+# Vagrant 2.4.x exécute un host trigger `run.inline` via Shellwords.split + exec
+# direct (PAS de shell) : un script multiligne casse ("executable 'set' not found").
+# On enveloppe donc le script dans `bash -c <script échappé>`.
+def host_inline(script)
+  { inline: "bash -c #{Shellwords.escape(script)}" }
+end
+
 def hostonly_dhcp_cmd(servers)
   reservations = servers.map do |s|
     mac = s[:mac].scan(/../).join(":").downcase
@@ -148,7 +157,7 @@ Vagrant.configure("2") do |config|
   # Télécharge l'ISO Talos une seule fois, avant le 1er `up`.
   config.trigger.before :up do |t|
     t.name = "Talos ISO #{TALOS_VERSION}"
-    t.run  = { inline: <<~SH }
+    t.run  = host_inline(<<~SH)
       set -e
       mkdir -p "#{File.dirname(ISO_PATH)}" "#{DISKS_DIR}"
       if [ ! -f "#{ISO_PATH}" ]; then
@@ -204,13 +213,13 @@ Vagrant.configure("2") do |config|
       # Relancé pour chaque node => l'état final laisse bien le DHCP actif.
       node.trigger.after :up do |t|
         t.name = "DHCP host-only (#{s[:name]} -> #{s[:ip]})"
-        t.run  = { inline: hostonly_dhcp_cmd(servers) }
+        t.run  = host_inline(hostonly_dhcp_cmd(servers))
       end
 
       # Nettoyage du disque dédié au destroy.
       node.trigger.after :destroy do |t|
         t.name = "Nettoyage disque #{s[:name]}"
-        t.run  = { inline: <<~SH }
+        t.run  = host_inline(<<~SH)
           VBoxManage closemedium disk "#{disk_path}" --delete >/dev/null 2>&1 || true
           rm -f "#{disk_path}"
         SH
