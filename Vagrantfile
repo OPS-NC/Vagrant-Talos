@@ -195,20 +195,26 @@ Vagrant.configure("2") do |config|
         # BIOS : boot ISO/disque déterministe (la box pace/empty est en UEFI)
         vb.customize ["modifyvm", :id, "--firmware", "bios"]
 
-        # Remplace le contrôleur SAS de la box par du SATA/AHCI (driver Talos sûr)
-        vb.customize ["storagectl", :id, "--name", "SAS", "--remove"]
-        vb.customize ["storagectl", :id, "--name", "SATA",
-                      "--add", "sata", "--controller", "IntelAhci", "--portcount", "2"]
+        # Storage : configuré UNE SEULE FOIS, à la création de la VM.
+        # `vb.customize` (pre-boot) est rejoué à chaque `vagrant up` ; or
+        # `storagectl --remove/--add` n'est pas idempotent (échoue au 2e passage).
+        # Sentinelle = présence du disque : s'il existe, la VM est déjà provisionnée.
+        unless File.exist?(disk_path)
+          # Remplace le contrôleur SAS de la box par du SATA/AHCI (driver Talos sûr)
+          vb.customize ["storagectl", :id, "--name", "SAS", "--remove"]
+          vb.customize ["storagectl", :id, "--name", "SATA",
+                        "--add", "sata", "--controller", "IntelAhci", "--portcount", "2"]
 
-        # Disque d'installation Talos (=> /dev/sda)
-        vb.customize ["createmedium", "disk", "--filename", disk_path,
-                      "--size", DISK_SIZE_MB.to_s, "--format", "VDI"]
-        vb.customize ["storageattach", :id, "--storagectl", "SATA",
-                      "--port", "0", "--device", "0", "--type", "hdd", "--medium", disk_path]
+          # Disque d'installation Talos (=> /dev/sda)
+          vb.customize ["createmedium", "disk", "--filename", disk_path,
+                        "--size", DISK_SIZE_MB.to_s, "--format", "VDI"]
+          vb.customize ["storageattach", :id, "--storagectl", "SATA",
+                        "--port", "0", "--device", "0", "--type", "hdd", "--medium", disk_path]
 
-        # ISO Talos en lecteur DVD
-        vb.customize ["storageattach", :id, "--storagectl", "SATA",
-                      "--port", "1", "--device", "0", "--type", "dvddrive", "--medium", ISO_PATH]
+          # ISO Talos en lecteur DVD
+          vb.customize ["storageattach", :id, "--storagectl", "SATA",
+                        "--port", "1", "--device", "0", "--type", "dvddrive", "--medium", ISO_PATH]
+        end
 
         # Boot : disque d'abord (après install), DVD en secours (1er boot)
         vb.customize ["modifyvm", :id, "--boot1", "disk", "--boot2", "dvd",
