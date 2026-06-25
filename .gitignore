@@ -1,0 +1,8 @@
+.vagrant
+harbor.txt
+
+# Talos
+iso/
+_out/
+kubeconfig
+talosconfig

@@ -1,0 +1,24 @@
+# Patch appliqué UNIQUEMENT aux control planes.
+#
+# - Pose la VIP (Virtual IP) de l'API Kubernetes sur la carte host-only.
+#   La VIP flotte entre les control planes (élection via etcd) : c'est elle
+#   qui sert d'endpoint stable https://192.168.56.5:6443, aussi bien en
+#   single (1 CP) qu'en HA (3 CP).
+# - On cible la carte par busPath et PAS par nom : depuis Talos 1.5 les
+#   interfaces ont des noms "prédictibles" (la host-only n'est donc PAS "eth1"
+#   mais "enp0s8"). busPath "0000:00:08.0" = 2e carte VirtualBox (host-only),
+#   indépendamment du nom. Vérifier au besoin : talosctl -n <ip> get links
+machine:
+  network:
+    interfaces:
+      - deviceSelector:
+          busPath: "0000:00:08.0"
+        dhcp: true
+        vip:
+          ip: 192.168.56.5
+
+cluster:
+  # etcd s'annonce et écoute sur le réseau host-only (et pas sur l'IP NAT).
+  etcd:
+    advertisedSubnets:
+      - 192.168.56.0/24

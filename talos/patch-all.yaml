@@ -1,0 +1,26 @@
+# Patch appliqué à TOUS les nodes (control planes + workers).
+#
+# Sur VirtualBox chaque VM a 2 cartes :
+#   - eth0 = NAT VirtualBox (10.0.2.15, IDENTIQUE sur toutes les VMs) -> Internet
+#   - eth1 = host-only 192.168.56.0/24 (IP réservée par MAC)         -> cluster
+#
+# On force donc kubelet (et donc l'IP de node) à utiliser le réseau host-only,
+# sinon tous les nodes s'annonceraient avec la même IP NAT 10.0.2.15.
+machine:
+  kubelet:
+    nodeIP:
+      validSubnets:
+        - 192.168.56.0/24
+
+cluster:
+  # Discovery "online" via le service externe discovery.talos.dev (registre "service").
+  # Le registre "kubernetes" est DÉPRÉCIÉ et incompatible avec Kubernetes >= 1.32
+  # (feature gate AuthorizeNodeWithSelectors) : on le désactive explicitement.
+  # talosctl gen config v1.13 déploie Kubernetes 1.36 par défaut.
+  discovery:
+    enabled: true
+    registries:
+      kubernetes:
+        disabled: true
+      service:
+        disabled: false
