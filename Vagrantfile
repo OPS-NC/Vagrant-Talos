@@ -152,6 +152,24 @@ def hostonly_dhcp_cmd(servers)
   SH
 end
 
+# Purge les baux DHCP du réseau host-only. VBoxManage honore un bail déjà
+# « acked » AVANT les réservations MAC->IP : un bail périmé (p.ex. .101 de
+# l'ancien DHCP par défaut de vboxnet0) écrase la réservation et le node
+# n'obtient pas son IP fixe. On supprime donc le fichier de baux à la
+# destruction pour qu'un `up` ultérieur reparte sur des réservations propres.
+def hostonly_purge_leases_cmd
+  <<~SH
+    set -e
+    IF=$(VBoxManage list hostonlyifs | awk '/^Name:/{n=$2} /^IPAddress:/{ if($2 ~ /^#{NETWORK.gsub('.', '\\.')}\\./) print n }' | head -n1)
+    [ -n "$IF" ] || exit 0
+    CFG="${VBOX_USER_HOME:-$HOME/.config/VirtualBox}"
+    rm -f "$CFG/HostInterfaceNetworking-$IF-Dhcpd.leases" \
+          "$CFG/HostInterfaceNetworking-$IF-Dhcpd.leases-prev"
+    VBoxManage dhcpserver restart --network "HostInterfaceNetworking-$IF" >/dev/null 2>&1 || true
+    echo "[talos] Baux DHCP périmés purgés pour $IF"
+  SH
+end
+
 ##############################################################################
 # Vagrant
 ##############################################################################
@@ -189,6 +207,13 @@ Vagrant.configure("2") do |config|
           "https://github.com/siderolabs/talos/releases/download/#{TALOS_VERSION}/metal-amd64.iso"
       fi
     SH
+  end
+
+  # Purge les baux DHCP périmés après destruction (cf. hostonly_purge_leases_cmd).
+  # Déclencheur global => rejoué pour chaque node détruit ; `rm -f` est idempotent.
+  config.trigger.after :destroy do |t|
+    t.name = "Purge baux DHCP host-only"
+    t.run  = host_inline(hostonly_purge_leases_cmd)
   end
 
   servers.each do |s|

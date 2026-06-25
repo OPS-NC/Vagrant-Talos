@@ -285,6 +285,27 @@ vagrant destroy -f             # tout supprimer (et les disques dédiés)
   Pour voir l'IP réelle d'une VM, ouvre sa console (mets `vb.gui = false` → `true` dans
   le `Vagrantfile`) : Talos affiche son IP à l'écran.
 
+- **Un node prend une IP `.101/.102/.103` au lieu de `.10/.20/.30` (baux DHCP périmés)**
+  `talosctl -n 192.168.56.10 ... --insecure` renvoie alors `no route to host`, alors que
+  `192.168.56.101` répond. Cause : VirtualBox honore un bail DHCP déjà `acked` **avant**
+  d'appliquer les réservations MAC→IP. Un vieux bail (typiquement `.101`, hérité du serveur
+  DHCP par défaut de `vboxnet0`) écrase la réservation `.10`.
+  Le trigger `after :destroy` purge désormais ces baux automatiquement. Pour corriger un
+  cluster **déjà démarré** sans tout détruire :
+  ```bash
+  # 1. éteindre les nodes (mode maintenance => aucune donnée perdue)
+  for v in box01 box02 box03; do VBoxManage controlvm "$v" poweroff; done
+
+  # 2. purger le fichier de baux du réseau host-only (adapter vboxnet0 si besoin)
+  CFG="${VBOX_USER_HOME:-$HOME/.config/VirtualBox}"
+  rm -f "$CFG"/HostInterfaceNetworking-vboxnet0-Dhcpd.leases*
+  VBoxManage dhcpserver restart --network HostInterfaceNetworking-vboxnet0
+
+  # 3. rallumer : les nodes refont un DHCP DISCOVER et obtiennent leur IP réservée
+  vagrant up
+  ```
+  Vérifier : `talosctl -n 192.168.56.10 version --insecure` doit répondre `NODE: 192.168.56.10`.
+
 - **VirtualBox refuse le réseau `192.168.56.0/24`**
   Autorise la plage dans `/etc/vbox/networks.conf` :
   ```
