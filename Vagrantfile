@@ -95,6 +95,22 @@ module VagrantPlugins
       def reset!(*)  ; true  ; end
     end
   end
+
+  # "dummy guest" : Vagrant cherche à détecter l'OS invité (action synced_folders
+  # appelle guest.capability? -> detect!) ; sur Talos la détection échoue et lève
+  # GuestNotDetected (fatal). On enregistre un invité bidon `detect? => true` SANS
+  # aucune capability : capability? renvoie false partout => aucune commande n'est
+  # jamais exécutée dans le guest. À coupler avec `config.vm.guest = :dummy`.
+  module DummyGuest
+    class Plugin < Vagrant.plugin("2")
+      name "dummy_guest"
+      guest("dummy") { Guest }
+    end
+
+    class Guest < Vagrant.plugin("2", :guest)
+      def detect?(_machine) ; true ; end
+    end
+  end
 end
 
 ##############################################################################
@@ -148,6 +164,7 @@ Vagrant.configure("2") do |config|
   config.vagrant.plugins = []
 
   config.vm.box           = "pace/empty"   # box VIDE (aucun OS) : on boote sur l'ISO
+  config.vm.guest         = :dummy         # évite la détection d'OS invité (Talos)
   config.vm.box_check_update = false
   config.vm.boot_timeout  = 1              # inutile d'attendre : pas de SSH
   config.ssh.insert_key   = false
