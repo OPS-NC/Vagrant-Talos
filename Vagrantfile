@@ -141,6 +141,12 @@ end
 ##############################################################################
 
 Vagrant.configure("2") do |config|
+  # La box pace/empty déclare `config.vagrant.plugins = ["vagrant-dummy-communicator"]`
+  # dans son _Vagrantfile, ce qui force l'install d'un gem (prompt => échec sans TTY).
+  # On définit notre propre communicator "dummy" inline (cf. plus haut) : pas besoin
+  # du gem. On écrase donc la déclaration de la box (merge = last-wins).
+  config.vagrant.plugins = []
+
   config.vm.box           = "pace/empty"   # box VIDE (aucun OS) : on boote sur l'ISO
   config.vm.box_check_update = false
   config.vm.boot_timeout  = 1              # inutile d'attendre : pas de SSH
