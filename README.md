@@ -49,6 +49,34 @@ kubectl version --client
 > (dans `iso/`). Aucune box ni plugin Vagrant à installer : le « dummy communicator »
 > (pas de SSH) et la box vide `pace/empty` sont gérés par le `Vagrantfile`.
 
+### Conflit VT-x : décharger KVM avant de lancer VirtualBox
+
+VirtualBox et KVM ne peuvent pas utiliser **VT-x** en même temps. Si le module
+noyau KVM est chargé, `vagrant up` échoue au boot de la VM :
+
+```
+VBoxManage: error: VT-x is being used by another hypervisor (VERR_VMX_IN_VMX_ROOT_MODE).
+VBoxManage: error: VirtualBox can't operate in VMX root mode.
+```
+
+Vérifier puis décharger KVM (nécessite un vrai terminal — `sudo` demande un mot
+de passe, donc pas exécutable de façon non interactive) :
+
+```bash
+# 1. KVM est-il chargé ? (Intel : kvm_intel ; AMD : kvm_amd)
+lsmod | grep kvm
+
+# 2. Décharger (échoue si une VM KVM/libvirt tourne encore — l'arrêter d'abord)
+sudo modprobe -r kvm_intel kvm      # AMD : sudo modprobe -r kvm_amd kvm
+```
+
+> **Persistance.** KVM est rechargé à chaque redémarrage. Si cet hôte ne sert
+> **jamais** à KVM/libvirt, le blacklister une fois pour toutes :
+> ```bash
+> echo -e "blacklist kvm_intel\nblacklist kvm" | sudo tee /etc/modprobe.d/disable-kvm.conf
+> ```
+> Pour revenir en arrière : supprimer ce fichier et redémarrer (ou `sudo modprobe kvm_intel`).
+
 ---
 
 ## 2. Plan d'adressage (réseau host-only `192.168.56.0/24`)
@@ -256,6 +284,27 @@ vagrant destroy -f             # tout supprimer (et les disques dédiés)
   via `vagrant reload <node>` (le trigger réactive le DHCP host-only avec les réservations).
   Pour voir l'IP réelle d'une VM, ouvre sa console (mets `vb.gui = false` → `true` dans
   le `Vagrantfile`) : Talos affiche son IP à l'écran.
+
+- **Un node prend une IP `.101/.102/.103` au lieu de `.10/.20/.30` (baux DHCP périmés)**
+  `talosctl -n 192.168.56.10 ... --insecure` renvoie alors `no route to host`, alors que
+  `192.168.56.101` répond. Cause : VirtualBox honore un bail DHCP déjà `acked` **avant**
+  d'appliquer les réservations MAC→IP. Un vieux bail (typiquement `.101`, hérité du serveur
+  DHCP par défaut de `vboxnet0`) écrase la réservation `.10`.
+  Le trigger `after :destroy` purge désormais ces baux automatiquement. Pour corriger un
+  cluster **déjà démarré** sans tout détruire :
+  ```bash
+  # 1. éteindre les nodes (mode maintenance => aucune donnée perdue)
+  for v in box01 box02 box03; do VBoxManage controlvm "$v" poweroff; done
+
+  # 2. purger le fichier de baux du réseau host-only (adapter vboxnet0 si besoin)
+  CFG="${VBOX_USER_HOME:-$HOME/.config/VirtualBox}"
+  rm -f "$CFG"/HostInterfaceNetworking-vboxnet0-Dhcpd.leases*
+  VBoxManage dhcpserver restart --network HostInterfaceNetworking-vboxnet0
+
+  # 3. rallumer : les nodes refont un DHCP DISCOVER et obtiennent leur IP réservée
+  vagrant up
+  ```
+  Vérifier : `talosctl -n 192.168.56.10 version --insecure` doit répondre `NODE: 192.168.56.10`.
 
 - **VirtualBox refuse le réseau `192.168.56.0/24`**
   Autorise la plage dans `/etc/vbox/networks.conf` :

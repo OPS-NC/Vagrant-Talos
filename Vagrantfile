@@ -17,6 +17,8 @@
 #
 # Workflow complet : voir README.md
 
+require 'shellwords'
+
 ##############################################################################
 # Paramètres du lab
 ##############################################################################
@@ -93,12 +95,35 @@ module VagrantPlugins
       def reset!(*)  ; true  ; end
     end
   end
+
+  # "dummy guest" : Vagrant cherche à détecter l'OS invité (action synced_folders
+  # appelle guest.capability? -> detect!) ; sur Talos la détection échoue et lève
+  # GuestNotDetected (fatal). On enregistre un invité bidon `detect? => true` SANS
+  # aucune capability : capability? renvoie false partout => aucune commande n'est
+  # jamais exécutée dans le guest. À coupler avec `config.vm.guest = :dummy`.
+  module DummyGuest
+    class Plugin < Vagrant.plugin("2")
+      name "dummy_guest"
+      guest("dummy") { Guest }
+    end
+
+    class Guest < Vagrant.plugin("2", :guest)
+      def detect?(_machine) ; true ; end
+    end
+  end
 end
 
 ##############################################################################
 # Construit la commande shell qui configure le DHCP host-only avec des
 # réservations déterministes (MAC -> IP). Idempotente.
 ##############################################################################
+
+# Vagrant 2.4.x exécute un host trigger `run.inline` via Shellwords.split + exec
+# direct (PAS de shell) : un script multiligne casse ("executable 'set' not found").
+# On enveloppe donc le script dans `bash -c <script échappé>`.
+def host_inline(script)
+  { inline: "bash -c #{Shellwords.escape(script)}" }
+end
 
 def hostonly_dhcp_cmd(servers)
   reservations = servers.map do |s|
@@ -127,12 +152,37 @@ def hostonly_dhcp_cmd(servers)
   SH
 end
 
+# Purge les baux DHCP du réseau host-only. VBoxManage honore un bail déjà
+# « acked » AVANT les réservations MAC->IP : un bail périmé (p.ex. .101 de
+# l'ancien DHCP par défaut de vboxnet0) écrase la réservation et le node
+# n'obtient pas son IP fixe. On supprime donc le fichier de baux à la
+# destruction pour qu'un `up` ultérieur reparte sur des réservations propres.
+def hostonly_purge_leases_cmd
+  <<~SH
+    set -e
+    IF=$(VBoxManage list hostonlyifs | awk '/^Name:/{n=$2} /^IPAddress:/{ if($2 ~ /^#{NETWORK.gsub('.', '\\.')}\\./) print n }' | head -n1)
+    [ -n "$IF" ] || exit 0
+    CFG="${VBOX_USER_HOME:-$HOME/.config/VirtualBox}"
+    rm -f "$CFG/HostInterfaceNetworking-$IF-Dhcpd.leases" \
+          "$CFG/HostInterfaceNetworking-$IF-Dhcpd.leases-prev"
+    VBoxManage dhcpserver restart --network "HostInterfaceNetworking-$IF" >/dev/null 2>&1 || true
+    echo "[talos] Baux DHCP périmés purgés pour $IF"
+  SH
+end
+
 ##############################################################################
 # Vagrant
 ##############################################################################
 
 Vagrant.configure("2") do |config|
+  # La box pace/empty déclare `config.vagrant.plugins = ["vagrant-dummy-communicator"]`
+  # dans son _Vagrantfile, ce qui force l'install d'un gem (prompt => échec sans TTY).
+  # On définit notre propre communicator "dummy" inline (cf. plus haut) : pas besoin
+  # du gem. On écrase donc la déclaration de la box (merge = last-wins).
+  config.vagrant.plugins = []
+
   config.vm.box           = "pace/empty"   # box VIDE (aucun OS) : on boote sur l'ISO
+  config.vm.guest         = :dummy         # évite la détection d'OS invité (Talos)
   config.vm.box_check_update = false
   config.vm.boot_timeout  = 1              # inutile d'attendre : pas de SSH
   config.ssh.insert_key   = false
@@ -148,7 +198,7 @@ Vagrant.configure("2") do |config|
   # Télécharge l'ISO Talos une seule fois, avant le 1er `up`.
   config.trigger.before :up do |t|
     t.name = "Talos ISO #{TALOS_VERSION}"
-    t.run  = { inline: <<~SH }
+    t.run  = host_inline(<<~SH)
       set -e
       mkdir -p "#{File.dirname(ISO_PATH)}" "#{DISKS_DIR}"
       if [ ! -f "#{ISO_PATH}" ]; then
@@ -157,6 +207,13 @@ Vagrant.configure("2") do |config|
           "https://github.com/siderolabs/talos/releases/download/#{TALOS_VERSION}/metal-amd64.iso"
       fi
     SH
+  end
+
+  # Purge les baux DHCP périmés après destruction (cf. hostonly_purge_leases_cmd).
+  # Déclencheur global => rejoué pour chaque node détruit ; `rm -f` est idempotent.
+  config.trigger.after :destroy do |t|
+    t.name = "Purge baux DHCP host-only"
+    t.run  = host_inline(hostonly_purge_leases_cmd)
   end
 
   servers.each do |s|
@@ -180,20 +237,26 @@ Vagrant.configure("2") do |config|
         # BIOS : boot ISO/disque déterministe (la box pace/empty est en UEFI)
         vb.customize ["modifyvm", :id, "--firmware", "bios"]
 
-        # Remplace le contrôleur SAS de la box par du SATA/AHCI (driver Talos sûr)
-        vb.customize ["storagectl", :id, "--name", "SAS", "--remove"]
-        vb.customize ["storagectl", :id, "--name", "SATA",
-                      "--add", "sata", "--controller", "IntelAhci", "--portcount", "2"]
+        # Storage : configuré UNE SEULE FOIS, à la création de la VM.
+        # `vb.customize` (pre-boot) est rejoué à chaque `vagrant up` ; or
+        # `storagectl --remove/--add` n'est pas idempotent (échoue au 2e passage).
+        # Sentinelle = présence du disque : s'il existe, la VM est déjà provisionnée.
+        unless File.exist?(disk_path)
+          # Remplace le contrôleur SAS de la box par du SATA/AHCI (driver Talos sûr)
+          vb.customize ["storagectl", :id, "--name", "SAS", "--remove"]
+          vb.customize ["storagectl", :id, "--name", "SATA",
+                        "--add", "sata", "--controller", "IntelAhci", "--portcount", "2"]
 
-        # Disque d'installation Talos (=> /dev/sda)
-        vb.customize ["createmedium", "disk", "--filename", disk_path,
-                      "--size", DISK_SIZE_MB.to_s, "--format", "VDI"]
-        vb.customize ["storageattach", :id, "--storagectl", "SATA",
-                      "--port", "0", "--device", "0", "--type", "hdd", "--medium", disk_path]
+          # Disque d'installation Talos (=> /dev/sda)
+          vb.customize ["createmedium", "disk", "--filename", disk_path,
+                        "--size", DISK_SIZE_MB.to_s, "--format", "VDI"]
+          vb.customize ["storageattach", :id, "--storagectl", "SATA",
+                        "--port", "0", "--device", "0", "--type", "hdd", "--medium", disk_path]
 
-        # ISO Talos en lecteur DVD
-        vb.customize ["storageattach", :id, "--storagectl", "SATA",
-                      "--port", "1", "--device", "0", "--type", "dvddrive", "--medium", ISO_PATH]
+          # ISO Talos en lecteur DVD
+          vb.customize ["storageattach", :id, "--storagectl", "SATA",
+                        "--port", "1", "--device", "0", "--type", "dvddrive", "--medium", ISO_PATH]
+        end
 
         # Boot : disque d'abord (après install), DVD en secours (1er boot)
         vb.customize ["modifyvm", :id, "--boot1", "disk", "--boot2", "dvd",
@@ -204,13 +267,13 @@ Vagrant.configure("2") do |config|
       # Relancé pour chaque node => l'état final laisse bien le DHCP actif.
       node.trigger.after :up do |t|
         t.name = "DHCP host-only (#{s[:name]} -> #{s[:ip]})"
-        t.run  = { inline: hostonly_dhcp_cmd(servers) }
+        t.run  = host_inline(hostonly_dhcp_cmd(servers))
       end
 
       # Nettoyage du disque dédié au destroy.
       node.trigger.after :destroy do |t|
         t.name = "Nettoyage disque #{s[:name]}"
-        t.run  = { inline: <<~SH }
+        t.run  = host_inline(<<~SH)
           VBoxManage closemedium disk "#{disk_path}" --delete >/dev/null 2>&1 || true
           rm -f "#{disk_path}"
         SH
