@@ -148,6 +148,15 @@ def hostonly_dhcp_cmd(servers)
       || VBoxManage dhcpserver modify --ifname "$IF" --ip #{NETWORK}.2 --netmask 255.255.255.0 \
            --lowerip #{NETWORK}.251 --upperip #{NETWORK}.254 --enable >/dev/null 2>&1 || true
 #{reservations}
+    # Purge les baux AVANT le boot des nodes : VBox honore un vieux bail déjà
+    # « acked » (p.ex. .101 hérité du DHCP par défaut de vboxnet0) AVANT
+    # d'appliquer la réservation MAC->IP. On efface donc les baux et on redémarre
+    # le dhcpd tant qu'il tourne à vide, pour que chaque node obtienne son IP
+    # réservée dès son 1er DHCP DISCOVER (cf. trigger `before :up`).
+    CFG="${VBOX_USER_HOME:-$HOME/.config/VirtualBox}"
+    rm -f "$CFG/HostInterfaceNetworking-$IF-Dhcpd.leases" \
+          "$CFG/HostInterfaceNetworking-$IF-Dhcpd.leases-prev"
+    VBoxManage dhcpserver restart --network "HostInterfaceNetworking-$IF" >/dev/null 2>&1 || true
     echo "[talos] DHCP host-only prêt sur $IF -> #{servers.map { |s| "#{s[:name]}=#{s[:ip]}" }.join(' ')}"
   SH
 end
@@ -209,6 +218,17 @@ Vagrant.configure("2") do |config|
     SH
   end
 
+  # (Ré)active le DHCP host-only AVANT le boot des VMs : réservations MAC->IP
+  # posées ET baux périmés purgés pendant que le dhcpd tourne à vide. C'est LE
+  # point clé : le node doit voir sa réservation .10/.20/.30 dès son 1er DHCP
+  # DISCOVER (au boot). Posées `after :up`, elles arrivaient trop tard et un vieux
+  # bail .101 gagnait. Trigger global => idempotent, rejoué avant chaque node
+  # (robuste aussi pour `vagrant up <node>` seul ou `vagrant reload`).
+  config.trigger.before :up do |t|
+    t.name = "DHCP host-only (réservations + purge baux)"
+    t.run  = host_inline(hostonly_dhcp_cmd(servers))
+  end
+
   # Purge les baux DHCP périmés après destruction (cf. hostonly_purge_leases_cmd).
   # Déclencheur global => rejoué pour chaque node détruit ; `rm -f` est idempotent.
   config.trigger.after :destroy do |t|
@@ -261,13 +281,6 @@ Vagrant.configure("2") do |config|
         # Boot : disque d'abord (après install), DVD en secours (1er boot)
         vb.customize ["modifyvm", :id, "--boot1", "disk", "--boot2", "dvd",
                       "--boot3", "none", "--boot4", "none"]
-      end
-
-      # Après le démarrage : (ré)active le DHCP host-only avec les réservations.
-      # Relancé pour chaque node => l'état final laisse bien le DHCP actif.
-      node.trigger.after :up do |t|
-        t.name = "DHCP host-only (#{s[:name]} -> #{s[:ip]})"
-        t.run  = host_inline(hostonly_dhcp_cmd(servers))
       end
 
       # Nettoyage du disque dédié au destroy.

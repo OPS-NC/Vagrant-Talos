@@ -290,8 +290,10 @@ vagrant destroy -f             # tout supprimer (et les disques dédiés)
   `192.168.56.101` répond. Cause : VirtualBox honore un bail DHCP déjà `acked` **avant**
   d'appliquer les réservations MAC→IP. Un vieux bail (typiquement `.101`, hérité du serveur
   DHCP par défaut de `vboxnet0`) écrase la réservation `.10`.
-  Le trigger `after :destroy` purge désormais ces baux automatiquement. Pour corriger un
-  cluster **déjà démarré** sans tout détruire :
+  Le trigger **`before :up`** pose désormais les réservations MAC→IP **et** purge ces baux
+  **avant** le boot des VMs (dhcpd redémarré à vide), pour que chaque node obtienne son IP
+  réservée dès son 1er `DHCP DISCOVER`. Le trigger `after :destroy` purge aussi au destroy.
+  Pour corriger un cluster **déjà démarré** sans tout détruire :
   ```bash
   # 1. éteindre les nodes (mode maintenance => aucune donnée perdue)
   for v in box01 box02 box03; do VBoxManage controlvm "$v" poweroff; done
@@ -316,6 +318,38 @@ vagrant destroy -f             # tout supprimer (et les disques dédiés)
   Le node n'est pas encore en mode maintenance, ou n'a pas d'IP host-only. Vérifie
   `talosctl -n <ip> get disks --insecure` et la section ci-dessus.
 
+- **Les pods pingent Internet mais n'ont pas de DNS (résolution KO)**
+  Symptôme : `ping 1.1.1.1` OK depuis un pod, mais `nslookup`/`apk update` échouent
+  (`DNS: transient error`). Cause : **flannel** choisit l'IP publique de son tunnel VXLAN
+  sur l'interface de la **route par défaut** = la carte **NAT** (`10.0.2.15`, *identique*
+  sur toutes les VMs). Tous les VTEP pointent alors vers un NAT isolé → le trafic pod
+  **cross-node** est cassé. Le DNS échoue car les pods CoreDNS tournent souvent sur un
+  **autre node** que le pod client (l'egress Internet, lui, sort par le NAT *local* → il marche).
+  Vérifier : les 3 nodes annoncent la **même** IP publique NAT au lieu de leur IP host-only :
+  ```bash
+  kubectl get nodes -o custom-columns='NODE:.metadata.name,\
+FLANNEL-IP:.metadata.annotations.flannel\.alpha\.coreos\.com/public-ip'
+  # KO si FLANNEL-IP = 10.0.2.15 partout ; OK si = 192.168.56.10/.20/.30
+  ```
+  Correctif (déjà dans `talos/patch-cp.yaml`) : forcer flannel sur l'interface host-only via
+  `--iface-can-reach=192.168.56.1`. Sur un **rebuild** (`FORCE=1`/`destroy`) c'est pris au
+  bootstrap. Sur un cluster **déjà démarré**, Talos ne repousse pas la MàJ du manifeste tout
+  seul → patcher le DaemonSet à la main :
+  ```bash
+  kubectl -n kube-system patch ds kube-flannel --type=json \
+    -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--iface-can-reach=192.168.56.1"}]'
+  kubectl -n kube-system rollout status ds/kube-flannel
+  ```
+
+- **La console Talos (dashboard) affiche `KUBERNETES: n/a`**
+  Normal **avant** `apply-config`. Le dashboard dérive cette version du tag de l'image kubelet
+  dans la ressource `KubeletSpec` (`k8s` namespace) — laquelle n'existe qu'une fois la
+  **machineconfig appliquée** (créée par le `KubeletSpecController`). En **mode maintenance**
+  (1er boot, avant l'étape 4.3 / `cluster-up.sh`), aucun kubelet n'est configuré → `n/a`.
+  Une fois le cluster monté, la console affiche la version (ex. `v1.36.2`). Rien à corriger :
+  regarder la console **après** avoir appliqué la config. Vérif hors console :
+  `talosctl -n <ip> get kubeletspec` (colonne image → tag) ou `kubectl get nodes`.
+
 - **La VIP `192.168.56.5` est injoignable**
   La VIP n'apparaît qu'**après le `bootstrap`** d'etcd. Vérifie que la carte host-only
   est bien `0000:00:08.0` : `talosctl -n 192.168.56.10 get links` puis `get addresses`.
@@ -339,7 +373,8 @@ vagrant destroy -f             # tout supprimer (et les disques dédiés)
 - **Pas de box Talos** → on part de la box vide `pace/empty` et on fait booter l'ISO
   `metal-amd64.iso` (lecteur DVD SATA, BIOS, boot disque puis DVD).
 - **IP déterministes** → MAC fixe par VM + réservations DHCP host-only
-  (`VBoxManage dhcpserver ... --fixed-address`) posées par un trigger `after :up`.
+  (`VBoxManage dhcpserver ... --fixed-address`) posées par un trigger `before :up`
+  (avant le boot, baux périmés purgés) → le node prend son IP réservée dès le 1er DHCP.
 - **VIP / HA** → `talos/patch-cp.yaml` pose une VIP partagée entre control planes ;
   l'endpoint **kube-apiserver** (`https://192.168.56.5:6443`) reste stable même si un
   CP tombe. (L'API Talos, elle, se contacte toujours sur les IP de nodes réelles.)
