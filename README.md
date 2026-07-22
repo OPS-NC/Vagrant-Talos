@@ -85,11 +85,12 @@ sudo modprobe -r kvm_intel kvm      # AMD : sudo modprobe -r kvm_amd kvm
 |--------------------|-------------------|
 | Hôte (host-only)   | `192.168.56.1`    |
 | **VIP API K8s**    | **`192.168.56.5`**|
-| `box01`            | `192.168.56.10`   |
-| `box02`            | `192.168.56.20`   |
-| `box03`            | `192.168.56.30`   |
-| `box04`            | `192.168.56.40`   |
-| `box05`            | `192.168.56.50`   |
+| `talos-cp1`        | `192.168.56.10`   |
+| `talos-cp2`        | `192.168.56.20`   |
+| `talos-cp3`        | `192.168.56.30`   |
+| `talos-w1`         | `192.168.56.40`   |
+| `talos-w2`         | `192.168.56.50`   |
+| `talos-w3`         | `192.168.56.60`   |
 
 Les IP sont **déterministes** : chaque VM a une MAC fixe et une **réservation DHCP**
 sur le réseau host-only de VirtualBox (configurée automatiquement par le `Vagrantfile`).
@@ -112,14 +113,15 @@ En haut du `Vagrantfile` :
 
 ```ruby
 TALOS_VERSION  = "v1.13.5"
-CONTROL_PLANES = 1     # 1 = single ; 3 = HA
-WORKERS        = 2
+CONTROL_PLANES = 3     # 1 = single ; 3 = HA (défaut)
+WORKERS        = 3
 ```
 
-- **Single (défaut)** : `CONTROL_PLANES = 1` → `box01` (CP) + `box02`/`box03` (workers).
-- **HA** : `CONTROL_PLANES = 3` → `box01`/`box02`/`box03` (CP) + workers à partir de `box04`.
+- **HA (défaut)** : `CONTROL_PLANES = 3` → `talos-cp1/cp2/cp3` (CP) + `talos-w1/w2/w3` (workers).
+- **Single** : `CONTROL_PLANES = 1` → `talos-cp1` (CP) + workers `talos-w1`, `talos-w2`, …
 
-Le 1er control plane est toujours `box01` (`192.168.56.10`).
+Le 1er control plane est toujours `talos-cp1` (`192.168.56.10`). Le nom de VM
+VirtualBox/Vagrant est **identique** au hostname Talos (cf. §8).
 
 ---
 
@@ -132,14 +134,14 @@ vagrant up
 ```
 
 À la fin, les VMs bootent sur l'ISO Talos en **mode maintenance** et obtiennent leur IP
-réservée (`box01` → `.10`, etc.). Vérifie qu'un node répond :
+réservée (`talos-cp1` → `.10`, etc.). Vérifie qu'un node répond :
 
 ```bash
 talosctl -n 192.168.56.10 get disks --insecure   # doit lister /dev/sda
 ```
 
 > Si un node n'a pas d'IP, attends ~30 s (Talos réessaie le DHCP) ou fais
-> `vagrant reload box01`. Voir [Dépannage](#7-dépannage).
+> `vagrant reload talos-cp1`. Voir [Dépannage](#7-dépannage).
 
 ### 4.2 Générer la configuration Talos
 
@@ -167,7 +169,7 @@ single comme en HA.
 **Control plane(s) :**
 
 ```bash
-# single : seulement box01 ; HA : box01, box02, box03
+# single : seulement talos-cp1 ; HA : talos-cp1, talos-cp2, talos-cp3
 talosctl apply-config --insecure -n 192.168.56.10 --file _out/controlplane.yaml
 # (HA uniquement)
 # talosctl apply-config --insecure -n 192.168.56.20 --file _out/controlplane.yaml
@@ -196,7 +198,7 @@ talosctl config node     192.168.56.10
 talosctl bootstrap -n 192.168.56.10
 ```
 
-> ⚠️ `bootstrap` ne se lance **qu'une seule fois**, sur **un seul** control plane (`box01`).
+> ⚠️ `bootstrap` ne se lance **qu'une seule fois**, sur **un seul** control plane (`talos-cp1`).
 > En HA, les autres CP rejoignent etcd automatiquement (discovery online).
 
 ### 4.6 Récupérer le kubeconfig
@@ -226,11 +228,11 @@ en attendant que chaque node soit prêt. À lancer **après `vagrant up`** :
 ```bash
 vagrant up
 
-# single (défaut)
+# défaut = 3 CP / 3 workers (HA)
 ./talos/cluster-up.sh
 
-# HA : aligner les variables sur le Vagrantfile
-CONTROL_PLANES=3 WORKERS=2 ./talos/cluster-up.sh
+# autre topologie : aligner les variables sur le Vagrantfile
+CONTROL_PLANES=1 WORKERS=2 ./talos/cluster-up.sh   # ex. single
 ```
 
 À la fin il affiche les `export` à faire et `kubectl get nodes`.
@@ -296,7 +298,7 @@ vagrant destroy -f             # tout supprimer (et les disques dédiés)
   Pour corriger un cluster **déjà démarré** sans tout détruire :
   ```bash
   # 1. éteindre les nodes (mode maintenance => aucune donnée perdue)
-  for v in box01 box02 box03; do VBoxManage controlvm "$v" poweroff; done
+  for v in talos-cp1 talos-cp2 talos-cp3; do VBoxManage controlvm "$v" poweroff; done
 
   # 2. purger le fichier de baux du réseau host-only (adapter vboxnet0 si besoin)
   CFG="${VBOX_USER_HOME:-$HOME/.config/VirtualBox}"
@@ -375,6 +377,10 @@ FLANNEL-IP:.metadata.annotations.flannel\.alpha\.coreos\.com/public-ip'
 - **IP déterministes** → MAC fixe par VM + réservations DHCP host-only
   (`VBoxManage dhcpserver ... --fixed-address`) posées par un trigger `before :up`
   (avant le boot, baux périmés purgés) → le node prend son IP réservée dès le 1er DHCP.
+- **Hostnames déterministes** → `cluster-up.sh` applique un patch `HostnameConfig`
+  par node (`auto: "off"` + `hostname:` fixe) au lieu du nom auto-généré par Talos
+  (`talos-xxxxx`) : control planes = `talos-cp1/cp2/cp3`, workers = `talos-w1/w2/w3`.
+  Les VMs VirtualBox/Vagrant portent le **même** nom (défini dans le `Vagrantfile`).
 - **VIP / HA** → `talos/patch-cp.yaml` pose une VIP partagée entre control planes ;
   l'endpoint **kube-apiserver** (`https://192.168.56.5:6443`) reste stable même si un
   CP tombe. (L'API Talos, elle, se contacte toujours sur les IP de nodes réelles.)

@@ -13,8 +13,8 @@
 set -euo pipefail
 
 # --- Paramètres (à garder alignés avec le Vagrantfile) ----------------------
-CONTROL_PLANES="${CONTROL_PLANES:-1}"
-WORKERS="${WORKERS:-2}"
+CONTROL_PLANES="${CONTROL_PLANES:-3}"
+WORKERS="${WORKERS:-3}"
 NETWORK="${NETWORK:-192.168.56}"
 VIP="${VIP:-${NETWORK}.5}"
 CLUSTER_NAME="${CLUSTER_NAME:-talos-lab}"
@@ -29,7 +29,7 @@ for bin in talosctl kubectl; do
   command -v "$bin" >/dev/null 2>&1 || { echo "ERREUR : '$bin' introuvable dans le PATH." >&2; exit 1; }
 done
 
-# --- Calcul des IP (box01=.10, box02=.20, ...) ------------------------------
+# --- Calcul des IP (talos-cp1=.10, cp2=.20, cp3=.30 ; talos-w1=.40, ...) -----
 cp_ips=() ; worker_ips=() ; idx=0
 for ((i = 1; i <= CONTROL_PLANES; i++)); do idx=$((idx + 1)); cp_ips+=("${NETWORK}.$((idx * 10))"); done
 for ((i = 1; i <= WORKERS;        i++)); do idx=$((idx + 1)); worker_ips+=("${NETWORK}.$((idx * 10))"); done
@@ -43,6 +43,18 @@ wait_maintenance() {
   printf '    - attente du mode maintenance sur %s ' "$ip"
   until talosctl -n "$ip" get disks --insecure >/dev/null 2>&1; do printf '.'; sleep 5; done
   echo ' OK'
+}
+
+# Applique une config en fixant un hostname DÉTERMINISTE passé en argument
+# (talos-cp1/cp2/... pour les control planes, talos-w1/w2/... pour les workers)
+# au lieu du nom auto-généré par Talos (talos-xxxxx). Depuis Talos 1.13 le hostname
+# vit dans un document `HostnameConfig` distinct : on désactive la génération auto
+# (`auto: "off"`) et on pose le nom fixe (les deux sont exclusifs).
+apply_config() {
+  local ip="$1" file="$2" hostname="$3"
+  printf '    - %s -> hostname %s\n' "$ip" "$hostname"
+  talosctl apply-config --insecure -n "$ip" --file "$file" \
+    --config-patch "$(printf 'apiVersion: v1alpha1\nkind: HostnameConfig\nauto: "off"\nhostname: %s\n' "$hostname")"
 }
 
 # --- 1. Génération de la configuration --------------------------------------
@@ -71,16 +83,20 @@ export TALOSCONFIG="${ROOT_DIR}/${OUT}/talosconfig"
 
 # --- 2. Application de la config (mode maintenance, --insecure) --------------
 echo "==> [2/5] Application de la config aux control planes"
+n=0
 for ip in "${cp_ips[@]}"; do
+  n=$((n + 1))
   wait_maintenance "$ip"
-  talosctl apply-config --insecure -n "$ip" --file "${OUT}/controlplane.yaml"
+  apply_config "$ip" "${OUT}/controlplane.yaml" "talos-cp${n}"
 done
 
 if [ "${WORKERS}" -gt 0 ]; then
   echo "==> [2/5] Application de la config aux workers"
+  n=0
   for ip in "${worker_ips[@]}"; do
+    n=$((n + 1))
     wait_maintenance "$ip"
-    talosctl apply-config --insecure -n "$ip" --file "${OUT}/worker.yaml"
+    apply_config "$ip" "${OUT}/worker.yaml" "talos-w${n}"
   done
 fi
 

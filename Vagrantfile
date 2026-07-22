@@ -13,7 +13,7 @@
 #     (pace/empty) que l'on fait booter sur l'ISO `metal-amd64.iso`.
 #   - Vagrant ne peut pas configurer l'IP dans le guest (pas de SSH) :
 #     les IP sont fixées de façon déterministe via des réservations DHCP
-#     par adresse MAC sur le réseau host-only (voir trigger `after :up`).
+#     par adresse MAC sur le réseau host-only (voir trigger `before :up`).
 #
 # Workflow complet : voir README.md
 
@@ -25,8 +25,8 @@ require 'shellwords'
 
 TALOS_VERSION  = "v1.13.5"   # https://github.com/siderolabs/talos/releases
 
-CONTROL_PLANES = 1           # 1 = single ; 3 = HA (avec VIP)
-WORKERS        = 2           # nombre de workers
+CONTROL_PLANES = 3           # 1 = single ; 3 = HA (avec VIP)
+WORKERS        = 3           # nombre de workers
 
 CP_MEM  = 2048 ; CP_CPU = 2  # ressources control plane
 WK_MEM  = 2048 ; WK_CPU = 2  # ressources worker
@@ -41,20 +41,21 @@ DISKS_DIR  = File.join(__dir__, ".vagrant", "talos-disks")
 
 ##############################################################################
 # Construction de la liste des nodes
-#   box01 = 1er control plane = .10, box02 = .20, ... (.role = controlplane/worker)
+#   CP    : talos-cp1=.10, talos-cp2=.20, talos-cp3=.30 (idx 1..CONTROL_PLANES)
+#   Worker: talos-w1=.40, talos-w2=.50, ...  (le nom de VM = le hostname Talos)
 ##############################################################################
 
 servers = []
 idx = 0
-(1..CONTROL_PLANES).each do
+(1..CONTROL_PLANES).each do |i|
   idx += 1
-  servers << { name: ("box%02d" % idx), role: "controlplane",
+  servers << { name: ("talos-cp%d" % i), role: "controlplane",
                ip: "#{NETWORK}.#{idx * 10}", mac: ("080027AA00%02X" % idx),
                mem: CP_MEM, cpu: CP_CPU }
 end
-(1..WORKERS).each do
+(1..WORKERS).each do |i|
   idx += 1
-  servers << { name: ("box%02d" % idx), role: "worker",
+  servers << { name: ("talos-w%d" % i), role: "worker",
                ip: "#{NETWORK}.#{idx * 10}", mac: ("080027AA00%02X" % idx),
                mem: WK_MEM, cpu: WK_CPU }
 end
