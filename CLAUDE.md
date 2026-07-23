@@ -33,6 +33,10 @@ Pour tester un patch sur une config existante sans l'appliquer :
   ALIGNÉES entre `Vagrantfile` et `talos/cluster-up.sh`. CP = `.10/.20/.30`, workers = `.101+`.
 - **Renommer les VMs** : détruire (`vagrant destroy`) AVANT de changer `s[:name]` dans le
   `Vagrantfile`, sinon les anciennes VMs deviennent orphelines dans VirtualBox.
+- **`vagrant up` KO après `destroy`** (`VERR_ALREADY_EXISTS` au rename `temp_clone_…`) :
+  VirtualBox 7.x laisse des dossiers `~/VirtualBox VMs/talos-*/` orphelins + des entrées
+  mortes dans le registre média. Purge : `./talos/virtualbox-cleanup.sh` (idempotent,
+  `DRY_RUN=1` pour voir ; ne touche que le préfixe `talos-`). JAMAIS sur un cluster en route.
 - **CNI** : c'est **Talos** qui installe le CNI au bootstrap (`cluster.network.cni`).
   Le choix est piloté par `CNI=flannel|none` (patchs `talos/cni-*.yaml`). Toute commande
   `gen config` manuelle DOIT inclure `--config-patch-control-plane @talos/cni-<CNI>.yaml`.
