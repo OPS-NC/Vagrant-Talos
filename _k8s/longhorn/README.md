@@ -19,15 +19,19 @@ Talos** qu'il faut poser AVANT le `helm install` :
 | Fichier | Rôle |
 |---------|------|
 | `schematic.yaml` | Schematic **Image Factory** → installeur Talos avec `iscsi-tools` + `util-linux-tools` |
-| `patch-longhorn.yaml` | Patch machine config : `install.image` (factory) + `kubelet.extraMounts` `/var/lib/longhorn` |
+| `patch-longhorn.yaml` | Patch machine config : `kubelet.extraMounts` `/var/lib/longhorn` (rshared) |
 | `values.yaml` | Valeurs Helm (chemin de données, réplicas, StorageClass par défaut) |
 | `httproute.yaml` | `HTTPRoute` HTTPS `longhorn.talos.lab.ops.nc` → `longhorn-frontend:80` sur `main-gateway` |
 
-> **Raccourci si l'installeur factory est déjà posé** (cas de ce lab : `INSTALLER_IMAGE`
-> dans `lab.env` pointe déjà l'image factory → extensions bakées dès la création). Pas
-> besoin de rejouer `install.image` : appliquer seulement le `kubelet.extraMounts` du patch
-> aux **workers** (les CP sont `NoSchedule`), sans reboot :
-> `talosctl -n <worker-ip> patch mc --patch @<extrait extraMounts>`.
+> **Deux prérequis, deux endroits :**
+> - **Extensions** (image d'installeur) → variable **`INSTALLER_IMAGE`** de `lab.env`
+>   (cf. §1). C'est LÀ qu'on choisit installeur *classic* vs *factory* (avec iscsi-tools).
+> - **Montage kubelet** → `patch-longhorn.yaml` (ci-dessus), appliqué aux **workers**
+>   (les CP sont `NoSchedule`).
+>
+> Cas de ce lab : `INSTALLER_IMAGE` pointe déjà l'image factory (extensions bakées dès la
+> création) → il ne reste qu'à appliquer le montage, sans reboot :
+> `talosctl -n 192.168.56.101 patch mc --patch @_k8s/longhorn/patch-longhorn.yaml`.
 
 ---
 
@@ -39,34 +43,44 @@ SCHEMATIC_ID=$(curl -sX POST --data-binary @_k8s/longhorn/schematic.yaml \
 echo "factory.talos.dev/installer/${SCHEMATIC_ID}:v1.13.5"
 ```
 
-Reporte cette référence dans `patch-longhorn.yaml` (`machine.install.image`, remplace
-`<SCHEMATIC_ID>`). Pas besoin de changer l'ISO de boot du lab : les extensions sont
-tirées de l'**installeur** au moment où Talos s'installe sur le disque.
+Mets cette référence dans **`INSTALLER_IMAGE`** de `lab.env` (lue par `cluster-up.sh` →
+`--install-image`) :
 
-## 2. Appliquer le patch Talos aux nodes
+```bash
+# dans lab.env
+INSTALLER_IMAGE=factory.talos.dev/installer/${SCHEMATIC_ID}:v1.13.5
+```
 
-**Cluster neuf (recommandé — cf. CLAUDE.md : ne pas régénérer un cluster en route).**
-Ajoute le patch à la génération de config. Soit dans un `talosctl gen config` manuel
-(cf. README §4.2), soit en l'ajoutant aux patchs de `cluster-up.sh`, avec au minimum :
+C'est **le point de choix classic vs longhorn** : sans `INSTALLER_IMAGE`, cluster-up prend
+l'installeur *classic* `ghcr.io/siderolabs/installer:${TALOS_VERSION}` (aucune extension).
+Pas besoin de changer l'ISO de boot : les extensions sont tirées de l'**installeur** au
+moment où Talos s'installe sur le disque.
+
+## 2. Poser le montage kubelet (l'image, elle, vient de `INSTALLER_IMAGE`)
+
+**Cluster neuf (recommandé).** `INSTALLER_IMAGE` (lab.env) fournit l'image avec extensions ;
+il ne reste qu'à ajouter le patch de montage au `gen config`. Avec `cluster-up.sh` c'est
+automatique via lab.env ; en manuel :
 
 ```bash
 talosctl gen config talos-lab https://192.168.56.5:6443 --install-disk /dev/sda \
+  --install-image "$INSTALLER_IMAGE" \
   --config-patch @talos/patch-all.yaml \
   --config-patch-control-plane @talos/patch-cp.yaml \
-  --config-patch-control-plane @talos/cni-flannel.yaml \
+  --config-patch-control-plane @talos/cni-none.yaml \
   --config-patch @_k8s/longhorn/patch-longhorn.yaml \
   --output-dir _out
 talosctl validate --config _out/controlplane.yaml --mode metal
 # puis apply-config + bootstrap habituels (cluster-up.sh)
 ```
 
-**Cluster existant.** Upgrade vers l'installeur factory (les extensions arrivent avec),
-`--preserve` pour ne pas perdre les données, puis patch des montages kubelet :
+**Cluster existant sans les extensions.** Upgrade vers l'installeur factory (`--preserve`
+pour garder les données), puis patch du montage sur chaque worker :
 
 ```bash
 talosctl -n 192.168.56.101 upgrade \
   --image factory.talos.dev/installer/${SCHEMATIC_ID}:v1.13.5 --preserve
-talosctl -n 192.168.56.101 patch mc -p @_k8s/longhorn/patch-longhorn.yaml
+talosctl -n 192.168.56.101 patch mc --patch @_k8s/longhorn/patch-longhorn.yaml
 ```
 
 **Vérifier les extensions** (sur un node, après reboot) :
