@@ -30,12 +30,27 @@ apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
   name: main-gateway
+  annotations:
+    # cert-manager émet et renouvelle le wildcard TLS tout seul (DNS-01 Cloudflare).
+    cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
   gatewayClassName: envoy
   listeners:
     - name: http
       protocol: HTTP
       port: 80
+      allowedRoutes:
+        namespaces:
+          from: All
+    - name: https
+      protocol: HTTPS
+      port: 443
+      hostname: "*.talos.lab.ops.nc"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: wildcard-talos-lab-ops-nc-tls   # rempli automatiquement par cert-manager
       allowedRoutes:
         namespaces:
           from: All
