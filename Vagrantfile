@@ -13,7 +13,7 @@
 #     (pace/empty) que l'on fait booter sur l'ISO `metal-amd64.iso`.
 #   - Vagrant ne peut pas configurer l'IP dans le guest (pas de SSH) :
 #     les IP sont fixées de façon déterministe via des réservations DHCP
-#     par adresse MAC sur le réseau host-only (voir trigger `after :up`).
+#     par adresse MAC sur le réseau host-only (voir trigger `before :up`).
 #
 # Workflow complet : voir README.md
 
@@ -25,8 +25,8 @@ require 'shellwords'
 
 TALOS_VERSION  = "v1.13.5"   # https://github.com/siderolabs/talos/releases
 
-CONTROL_PLANES = 1           # 1 = single ; 3 = HA (avec VIP)
-WORKERS        = 2           # nombre de workers
+CONTROL_PLANES = 3           # 1 = single ; 3 = HA (avec VIP)
+WORKERS        = 3           # nombre de workers
 
 CP_MEM  = 2048 ; CP_CPU = 2  # ressources control plane
 WK_MEM  = 2048 ; WK_CPU = 2  # ressources worker
@@ -36,32 +36,41 @@ VIP          = "#{NETWORK}.5"        # VIP de l'API Kubernetes (HA)
 HOST_IP      = "#{NETWORK}.1"        # passerelle host-only
 DISK_SIZE_MB = 20480                 # disque d'installation par node (20 Go)
 
+# Schéma d'adressage host-only (variabilisable, surchargeable par variables d'env) :
+#   control plane i -> NETWORK.(CP_IP_START + (i-1)*CP_IP_STEP)  => .10, .20, .30, ...
+#   worker       i  -> NETWORK.(WK_IP_START + (i-1)*WK_IP_STEP)  => .101, .102, .103, ...
+# Garder ces valeurs alignées avec talos/cluster-up.sh (mêmes noms de variables).
+CP_IP_START = (ENV["CP_IP_START"] || 10).to_i  ; CP_IP_STEP = (ENV["CP_IP_STEP"] || 10).to_i
+WK_IP_START = (ENV["WK_IP_START"] || 101).to_i ; WK_IP_STEP = (ENV["WK_IP_STEP"] || 1).to_i
+
 ISO_PATH   = File.join(__dir__, "iso", "metal-amd64.iso")
 DISKS_DIR  = File.join(__dir__, ".vagrant", "talos-disks")
 
 ##############################################################################
 # Construction de la liste des nodes
-#   box01 = 1er control plane = .10, box02 = .20, ... (.role = controlplane/worker)
+#   CP    : talos-cp1=.10, talos-cp2=.20, ...   (voir CP_IP_START / CP_IP_STEP)
+#   Worker: talos-w1=.101, talos-w2=.102, ...   (voir WK_IP_START / WK_IP_STEP)
+#   Le nom de VM = le hostname Talos. La MAC reste indexée par `idx` (unique).
 ##############################################################################
 
 servers = []
 idx = 0
-(1..CONTROL_PLANES).each do
+(1..CONTROL_PLANES).each do |i|
   idx += 1
-  servers << { name: ("box%02d" % idx), role: "controlplane",
-               ip: "#{NETWORK}.#{idx * 10}", mac: ("080027AA00%02X" % idx),
+  servers << { name: ("talos-cp%d" % i), role: "controlplane",
+               ip: "#{NETWORK}.#{CP_IP_START + (i - 1) * CP_IP_STEP}", mac: ("080027AA00%02X" % idx),
                mem: CP_MEM, cpu: CP_CPU }
 end
-(1..WORKERS).each do
+(1..WORKERS).each do |i|
   idx += 1
-  servers << { name: ("box%02d" % idx), role: "worker",
-               ip: "#{NETWORK}.#{idx * 10}", mac: ("080027AA00%02X" % idx),
+  servers << { name: ("talos-w%d" % i), role: "worker",
+               ip: "#{NETWORK}.#{WK_IP_START + (i - 1) * WK_IP_STEP}", mac: ("080027AA00%02X" % idx),
                mem: WK_MEM, cpu: WK_CPU }
 end
 
 # Garde-fou : .100 = serveur DHCP host-only PAR DÉFAUT de VirtualBox (réservé) ;
 # .1/.2/.5 = passerelle / serveur DHCP / VIP. Un node ne doit jamais tomber
-# dessus (n'arrive qu'avec ~10 nodes, car idx*10 = 100).
+# dessus (dépend du schéma d'adressage ci-dessus : p.ex. 10 CP => .100).
 reserved_ips = ["#{NETWORK}.1", "#{NETWORK}.2", "#{NETWORK}.5", "#{NETWORK}.100"]
 servers.each do |s|
   if reserved_ips.include?(s[:ip])
@@ -148,6 +157,15 @@ def hostonly_dhcp_cmd(servers)
       || VBoxManage dhcpserver modify --ifname "$IF" --ip #{NETWORK}.2 --netmask 255.255.255.0 \
            --lowerip #{NETWORK}.251 --upperip #{NETWORK}.254 --enable >/dev/null 2>&1 || true
 #{reservations}
+    # Purge les baux AVANT le boot des nodes : VBox honore un vieux bail déjà
+    # « acked » (p.ex. .101 hérité du DHCP par défaut de vboxnet0) AVANT
+    # d'appliquer la réservation MAC->IP. On efface donc les baux et on redémarre
+    # le dhcpd tant qu'il tourne à vide, pour que chaque node obtienne son IP
+    # réservée dès son 1er DHCP DISCOVER (cf. trigger `before :up`).
+    CFG="${VBOX_USER_HOME:-$HOME/.config/VirtualBox}"
+    rm -f "$CFG/HostInterfaceNetworking-$IF-Dhcpd.leases" \
+          "$CFG/HostInterfaceNetworking-$IF-Dhcpd.leases-prev"
+    VBoxManage dhcpserver restart --network "HostInterfaceNetworking-$IF" >/dev/null 2>&1 || true
     echo "[talos] DHCP host-only prêt sur $IF -> #{servers.map { |s| "#{s[:name]}=#{s[:ip]}" }.join(' ')}"
   SH
 end
@@ -209,6 +227,17 @@ Vagrant.configure("2") do |config|
     SH
   end
 
+  # (Ré)active le DHCP host-only AVANT le boot des VMs : réservations MAC->IP
+  # posées ET baux périmés purgés pendant que le dhcpd tourne à vide. C'est LE
+  # point clé : le node doit voir sa réservation .10/.20/.30 dès son 1er DHCP
+  # DISCOVER (au boot). Posées `after :up`, elles arrivaient trop tard et un vieux
+  # bail .101 gagnait. Trigger global => idempotent, rejoué avant chaque node
+  # (robuste aussi pour `vagrant up <node>` seul ou `vagrant reload`).
+  config.trigger.before :up do |t|
+    t.name = "DHCP host-only (réservations + purge baux)"
+    t.run  = host_inline(hostonly_dhcp_cmd(servers))
+  end
+
   # Purge les baux DHCP périmés après destruction (cf. hostonly_purge_leases_cmd).
   # Déclencheur global => rejoué pour chaque node détruit ; `rm -f` est idempotent.
   config.trigger.after :destroy do |t|
@@ -261,13 +290,6 @@ Vagrant.configure("2") do |config|
         # Boot : disque d'abord (après install), DVD en secours (1er boot)
         vb.customize ["modifyvm", :id, "--boot1", "disk", "--boot2", "dvd",
                       "--boot3", "none", "--boot4", "none"]
-      end
-
-      # Après le démarrage : (ré)active le DHCP host-only avec les réservations.
-      # Relancé pour chaque node => l'état final laisse bien le DHCP actif.
-      node.trigger.after :up do |t|
-        t.name = "DHCP host-only (#{s[:name]} -> #{s[:ip]})"
-        t.run  = host_inline(hostonly_dhcp_cmd(servers))
       end
 
       # Nettoyage du disque dédié au destroy.

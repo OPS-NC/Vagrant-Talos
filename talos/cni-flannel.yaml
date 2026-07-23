@@ -1,0 +1,19 @@
+# CNI = Flannel (défaut). Appliqué aux control planes par cluster-up.sh
+# (variable CNI=flannel) => Talos rend et déploie le manifeste flannel au bootstrap.
+#
+# Par défaut flannel choisit l'IP publique de son tunnel VXLAN sur l'interface de
+# la ROUTE PAR DÉFAUT = la carte NAT (eth0, 10.0.2.15, IDENTIQUE sur toutes les VMs).
+# Résultat : tous les VTEP pointent vers un NAT isolé => le trafic pod cross-node
+# (donc le DNS vers CoreDNS sur un autre node) est cassé. On force flannel à choisir
+# l'interface qui atteint le réseau host-only (--iface-can-reach = l'hôte
+# 192.168.56.1) => VTEP sur enp0s8.
+#
+# NB : rendu dans le manifeste au bootstrap. Sur un cluster DÉJÀ démarré, Talos ne
+# repousse pas la MàJ tout seul (cf. README §7) ; patcher le DaemonSet à la main.
+cluster:
+  network:
+    cni:
+      name: flannel
+      flannel:
+        extraArgs:
+          - --iface-can-reach=192.168.56.1

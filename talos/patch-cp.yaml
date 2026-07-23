@@ -22,3 +22,7 @@ cluster:
   etcd:
     advertisedSubnets:
       - 192.168.56.0/24
+
+# NB : le choix du CNI n'est PAS ici — il est piloté par un patch dédié
+# (talos/cni-flannel.yaml par défaut, talos/cni-none.yaml pour Cilium & co),
+# sélectionné par la variable CNI de cluster-up.sh. Voir README §9.

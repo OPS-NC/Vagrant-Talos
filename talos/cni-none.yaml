@@ -1,0 +1,15 @@
+# CNI = none : Talos n'installe AUCUN CNI. À utiliser quand tu déploies toi-même
+# un CNI tiers (Cilium, Calico...). Sélectionné par CNI=none dans cluster-up.sh.
+#
+# Après le bootstrap, les nodes restent NotReady tant qu'aucun CNI n'est installé
+# (c'est normal). Voir README §9 pour installer Cilium en mode VXLAN.
+#
+# Option courante avec Cilium : déléguer kube-proxy à Cilium. Si tu veux ça,
+# décommente `proxy.disabled: true` ci-dessous ET installe Cilium avec
+# kubeProxyReplacement=true + k8sServiceHost=<VIP> k8sServicePort=6443.
+cluster:
+  network:
+    cni:
+      name: none
+  # proxy:
+  #   disabled: true

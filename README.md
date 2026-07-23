@@ -85,14 +85,21 @@ sudo modprobe -r kvm_intel kvm      # AMD : sudo modprobe -r kvm_amd kvm
 |--------------------|-------------------|
 | Hôte (host-only)   | `192.168.56.1`    |
 | **VIP API K8s**    | **`192.168.56.5`**|
-| `box01`            | `192.168.56.10`   |
-| `box02`            | `192.168.56.20`   |
-| `box03`            | `192.168.56.30`   |
-| `box04`            | `192.168.56.40`   |
-| `box05`            | `192.168.56.50`   |
+| `talos-cp1`        | `192.168.56.10`   |
+| `talos-cp2`        | `192.168.56.20`   |
+| `talos-cp3`        | `192.168.56.30`   |
+| `talos-w1`         | `192.168.56.101`  |
+| `talos-w2`         | `192.168.56.102`  |
+| `talos-w3`         | `192.168.56.103`  |
 
 Les IP sont **déterministes** : chaque VM a une MAC fixe et une **réservation DHCP**
 sur le réseau host-only de VirtualBox (configurée automatiquement par le `Vagrantfile`).
+
+> **Schéma d'adressage variabilisable.** CP et workers suivent deux formules,
+> réglables en haut du `Vagrantfile` (et surchargeables par variables d'env, à
+> garder alignées avec `cluster-up.sh`) :
+> `CP_IP_START`/`CP_IP_STEP` (défaut `10`/`10` → `.10, .20, .30`) et
+> `WK_IP_START`/`WK_IP_STEP` (défaut `101`/`1` → `.101, .102, .103`).
 
 Chaque VM possède 2 cartes : NIC1 = NAT VirtualBox (Internet) et NIC2 = host-only
 `192.168.56.x` (réseau du cluster / API).
@@ -112,14 +119,15 @@ En haut du `Vagrantfile` :
 
 ```ruby
 TALOS_VERSION  = "v1.13.5"
-CONTROL_PLANES = 1     # 1 = single ; 3 = HA
-WORKERS        = 2
+CONTROL_PLANES = 3     # 1 = single ; 3 = HA (défaut)
+WORKERS        = 3
 ```
 
-- **Single (défaut)** : `CONTROL_PLANES = 1` → `box01` (CP) + `box02`/`box03` (workers).
-- **HA** : `CONTROL_PLANES = 3` → `box01`/`box02`/`box03` (CP) + workers à partir de `box04`.
+- **HA (défaut)** : `CONTROL_PLANES = 3` → `talos-cp1/cp2/cp3` (CP) + `talos-w1/w2/w3` (workers).
+- **Single** : `CONTROL_PLANES = 1` → `talos-cp1` (CP) + workers `talos-w1`, `talos-w2`, …
 
-Le 1er control plane est toujours `box01` (`192.168.56.10`).
+Le 1er control plane est toujours `talos-cp1` (`192.168.56.10`). Le nom de VM
+VirtualBox/Vagrant est **identique** au hostname Talos (cf. §8).
 
 ---
 
@@ -132,14 +140,14 @@ vagrant up
 ```
 
 À la fin, les VMs bootent sur l'ISO Talos en **mode maintenance** et obtiennent leur IP
-réservée (`box01` → `.10`, etc.). Vérifie qu'un node répond :
+réservée (`talos-cp1` → `.10`, etc.). Vérifie qu'un node répond :
 
 ```bash
 talosctl -n 192.168.56.10 get disks --insecure   # doit lister /dev/sda
 ```
 
 > Si un node n'a pas d'IP, attends ~30 s (Talos réessaie le DHCP) ou fais
-> `vagrant reload box01`. Voir [Dépannage](#7-dépannage).
+> `vagrant reload talos-cp1`. Voir [Dépannage](#7-dépannage).
 
 ### 4.2 Générer la configuration Talos
 
@@ -149,6 +157,7 @@ talosctl gen config talos-lab https://192.168.56.5:6443 \
   --additional-sans 192.168.56.5,192.168.56.10,192.168.56.20,192.168.56.30 \
   --config-patch       @talos/patch-all.yaml \
   --config-patch-control-plane @talos/patch-cp.yaml \
+  --config-patch-control-plane @talos/cni-flannel.yaml \
   --output-dir _out
 
 export TALOSCONFIG="$PWD/_out/talosconfig"
@@ -167,21 +176,26 @@ single comme en HA.
 **Control plane(s) :**
 
 ```bash
-# single : seulement box01 ; HA : box01, box02, box03
+# single : seulement talos-cp1 ; HA : talos-cp1, talos-cp2, talos-cp3
 talosctl apply-config --insecure -n 192.168.56.10 --file _out/controlplane.yaml
 # (HA uniquement)
 # talosctl apply-config --insecure -n 192.168.56.20 --file _out/controlplane.yaml
 # talosctl apply-config --insecure -n 192.168.56.30 --file _out/controlplane.yaml
 ```
 
-**Workers** (single : `.20`/`.30` ; HA : à partir de `.40`) :
+**Workers** (`.101`, `.102`, `.103`, … — indépendant du nombre de CP) :
 
 ```bash
-talosctl apply-config --insecure -n 192.168.56.20 --file _out/worker.yaml
-talosctl apply-config --insecure -n 192.168.56.30 --file _out/worker.yaml
+talosctl apply-config --insecure -n 192.168.56.101 --file _out/worker.yaml
+talosctl apply-config --insecure -n 192.168.56.102 --file _out/worker.yaml
+talosctl apply-config --insecure -n 192.168.56.103 --file _out/worker.yaml
 ```
 
 Chaque node s'installe sur `/dev/sda` puis reboote sur le disque.
+
+> Ces commandes manuelles laissent le hostname auto-généré (`talos-xxxxx`). Pour
+> les noms déterministes (`talos-cp<N>`/`talos-w<N>`), ajoute à chaque `apply-config`
+> un `--config-patch` `HostnameConfig` — c'est ce que fait `cluster-up.sh` (§5).
 
 ### 4.4 Pointer `talosctl` sur le cluster
 
@@ -196,7 +210,7 @@ talosctl config node     192.168.56.10
 talosctl bootstrap -n 192.168.56.10
 ```
 
-> ⚠️ `bootstrap` ne se lance **qu'une seule fois**, sur **un seul** control plane (`box01`).
+> ⚠️ `bootstrap` ne se lance **qu'une seule fois**, sur **un seul** control plane (`talos-cp1`).
 > En HA, les autres CP rejoignent etcd automatiquement (discovery online).
 
 ### 4.6 Récupérer le kubeconfig
@@ -226,11 +240,11 @@ en attendant que chaque node soit prêt. À lancer **après `vagrant up`** :
 ```bash
 vagrant up
 
-# single (défaut)
+# défaut = 3 CP / 3 workers (HA)
 ./talos/cluster-up.sh
 
-# HA : aligner les variables sur le Vagrantfile
-CONTROL_PLANES=3 WORKERS=2 ./talos/cluster-up.sh
+# autre topologie : aligner les variables sur le Vagrantfile
+CONTROL_PLANES=1 WORKERS=2 ./talos/cluster-up.sh   # ex. single
 ```
 
 À la fin il affiche les `export` à faire et `kubectl get nodes`.
@@ -242,15 +256,16 @@ vagrant up
 
 talosctl gen config talos-lab https://192.168.56.5:6443 \
   --install-disk /dev/sda \
-  --additional-sans 192.168.56.5,192.168.56.10,192.168.56.20,192.168.56.30 \
+  --additional-sans 192.168.56.5,192.168.56.10 \
   --config-patch @talos/patch-all.yaml \
   --config-patch-control-plane @talos/patch-cp.yaml \
+  --config-patch-control-plane @talos/cni-flannel.yaml \
   --output-dir _out
 export TALOSCONFIG="$PWD/_out/talosconfig"
 
 talosctl apply-config --insecure -n 192.168.56.10 --file _out/controlplane.yaml
-talosctl apply-config --insecure -n 192.168.56.20 --file _out/worker.yaml
-talosctl apply-config --insecure -n 192.168.56.30 --file _out/worker.yaml
+talosctl apply-config --insecure -n 192.168.56.101 --file _out/worker.yaml
+talosctl apply-config --insecure -n 192.168.56.102 --file _out/worker.yaml
 
 talosctl config endpoint 192.168.56.10
 talosctl config node     192.168.56.10
@@ -275,6 +290,46 @@ vagrant destroy -f             # tout supprimer (et les disques dédiés)
 > Après un `destroy`, supprime aussi l'ancien état Talos local avant de recommencer :
 > `rm -rf _out kubeconfig`.
 
+### 6.1 Ajouter des workers (à chaud, sans casser le cluster)
+
+Pour agrandir un cluster **déjà en route**, on démarre les nouvelles VMs et on
+leur applique la config worker **existante** (mêmes secrets). Deux règles :
+
+- **NE PAS régénérer `_out/`** (ni `FORCE=1`) : de nouveaux secrets casseraient
+  le cluster existant.
+- **NE PAS relancer `cluster-up.sh`** : il attendrait le mode maintenance sur les
+  nodes déjà installés (mode sécurisé) et bloquerait.
+
+Exemple : passer de 3 à 5 workers (ajoute `talos-w4`=`.104` et `talos-w5`=`.105`).
+
+1. Augmenter `WORKERS` dans le `Vagrantfile` (ici `WORKERS = 5`).
+2. Démarrer **uniquement** les nouvelles VMs (les autres restent intactes) :
+   ```bash
+   vagrant up talos-w4 talos-w5
+   ```
+3. Appliquer la config worker existante à chaque nouveau node en fixant son
+   hostname (le Nᵉ worker = `talos-w<N>`, IP = `.<WK_IP_START + (N-1)*WK_IP_STEP>`) :
+   ```bash
+   export TALOSCONFIG="$PWD/_out/talosconfig"
+   WK_IP_START=101 ; WK_IP_STEP=1              # mêmes valeurs que le Vagrantfile
+   for n in 4 5; do
+     ip="192.168.56.$(( WK_IP_START + (n - 1) * WK_IP_STEP ))"
+     until talosctl -n "$ip" get disks --insecure >/dev/null 2>&1; do sleep 5; done
+     talosctl apply-config --insecure -n "$ip" --file _out/worker.yaml \
+       --config-patch "$(printf 'apiVersion: v1alpha1\nkind: HostnameConfig\nauto: "off"\nhostname: talos-w%s\n' "$n")"
+   done
+   ```
+4. Les workers rejoignent automatiquement (la config worker pointe déjà sur la
+   VIP). Vérifier : `kubectl get nodes -o wide` → `talos-w4`/`talos-w5` passent `Ready`.
+
+> **Retirer un worker** : `kubectl drain talos-w5 --ignore-daemonsets --delete-emptydir-data`
+> puis `vagrant destroy -f talos-w5`, `kubectl delete node talos-w5`, et réduire
+> `WORKERS` dans le `Vagrantfile`.
+>
+> Ajouter des **control planes** suit la même logique (VM + `apply-config` de
+> `controlplane.yaml`, hostname `talos-cp<N>`) ; ils rejoignent etcd via discovery,
+> **sans** relancer `bootstrap` (qui ne se fait qu'une fois, cf. §4.5).
+
 ---
 
 ## 7. Dépannage
@@ -285,16 +340,20 @@ vagrant destroy -f             # tout supprimer (et les disques dédiés)
   Pour voir l'IP réelle d'une VM, ouvre sa console (mets `vb.gui = false` → `true` dans
   le `Vagrantfile`) : Talos affiche son IP à l'écran.
 
-- **Un node prend une IP `.101/.102/.103` au lieu de `.10/.20/.30` (baux DHCP périmés)**
-  `talosctl -n 192.168.56.10 ... --insecure` renvoie alors `no route to host`, alors que
-  `192.168.56.101` répond. Cause : VirtualBox honore un bail DHCP déjà `acked` **avant**
-  d'appliquer les réservations MAC→IP. Un vieux bail (typiquement `.101`, hérité du serveur
-  DHCP par défaut de `vboxnet0`) écrase la réservation `.10`.
-  Le trigger `after :destroy` purge désormais ces baux automatiquement. Pour corriger un
-  cluster **déjà démarré** sans tout détruire :
+- **Un node prend une IP inattendue au lieu de sa réservation (baux DHCP périmés)**
+  Symptôme : `talosctl -n <ip-réservée> ... --insecure` renvoie `no route to host`, alors
+  qu'une **autre** IP répond. Cause : VirtualBox honore un bail DHCP déjà `acked` **avant**
+  d'appliquer les réservations MAC→IP. Un vieux bail (typiquement dans la plage ~`.100`,
+  héritée du serveur DHCP par défaut de `vboxnet0`) écrase la réservation.
+  ⚠️ Les workers utilisant désormais `.101+`, un bail périmé de cette plage peut aussi
+  entrer en conflit avec une réservation worker — la purge `before :up` couvre ce cas.
+  Le trigger **`before :up`** pose désormais les réservations MAC→IP **et** purge ces baux
+  **avant** le boot des VMs (dhcpd redémarré à vide), pour que chaque node obtienne son IP
+  réservée dès son 1er `DHCP DISCOVER`. Le trigger `after :destroy` purge aussi au destroy.
+  Pour corriger un cluster **déjà démarré** sans tout détruire :
   ```bash
   # 1. éteindre les nodes (mode maintenance => aucune donnée perdue)
-  for v in box01 box02 box03; do VBoxManage controlvm "$v" poweroff; done
+  for v in talos-cp1 talos-cp2 talos-cp3; do VBoxManage controlvm "$v" poweroff; done
 
   # 2. purger le fichier de baux du réseau host-only (adapter vboxnet0 si besoin)
   CFG="${VBOX_USER_HOME:-$HOME/.config/VirtualBox}"
@@ -315,6 +374,38 @@ vagrant destroy -f             # tout supprimer (et les disques dédiés)
 - **`talosctl ... --insecure` ne répond pas**
   Le node n'est pas encore en mode maintenance, ou n'a pas d'IP host-only. Vérifie
   `talosctl -n <ip> get disks --insecure` et la section ci-dessus.
+
+- **Les pods pingent Internet mais n'ont pas de DNS (résolution KO)**
+  Symptôme : `ping 1.1.1.1` OK depuis un pod, mais `nslookup`/`apk update` échouent
+  (`DNS: transient error`). Cause : **flannel** choisit l'IP publique de son tunnel VXLAN
+  sur l'interface de la **route par défaut** = la carte **NAT** (`10.0.2.15`, *identique*
+  sur toutes les VMs). Tous les VTEP pointent alors vers un NAT isolé → le trafic pod
+  **cross-node** est cassé. Le DNS échoue car les pods CoreDNS tournent souvent sur un
+  **autre node** que le pod client (l'egress Internet, lui, sort par le NAT *local* → il marche).
+  Vérifier : les 3 nodes annoncent la **même** IP publique NAT au lieu de leur IP host-only :
+  ```bash
+  kubectl get nodes -o custom-columns='NODE:.metadata.name,\
+FLANNEL-IP:.metadata.annotations.flannel\.alpha\.coreos\.com/public-ip'
+  # KO si FLANNEL-IP = 10.0.2.15 partout ; OK si = 192.168.56.10/.20/.30
+  ```
+  Correctif (déjà dans `talos/patch-cp.yaml`) : forcer flannel sur l'interface host-only via
+  `--iface-can-reach=192.168.56.1`. Sur un **rebuild** (`FORCE=1`/`destroy`) c'est pris au
+  bootstrap. Sur un cluster **déjà démarré**, Talos ne repousse pas la MàJ du manifeste tout
+  seul → patcher le DaemonSet à la main :
+  ```bash
+  kubectl -n kube-system patch ds kube-flannel --type=json \
+    -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--iface-can-reach=192.168.56.1"}]'
+  kubectl -n kube-system rollout status ds/kube-flannel
+  ```
+
+- **La console Talos (dashboard) affiche `KUBERNETES: n/a`**
+  Normal **avant** `apply-config`. Le dashboard dérive cette version du tag de l'image kubelet
+  dans la ressource `KubeletSpec` (`k8s` namespace) — laquelle n'existe qu'une fois la
+  **machineconfig appliquée** (créée par le `KubeletSpecController`). En **mode maintenance**
+  (1er boot, avant l'étape 4.3 / `cluster-up.sh`), aucun kubelet n'est configuré → `n/a`.
+  Une fois le cluster monté, la console affiche la version (ex. `v1.36.2`). Rien à corriger :
+  regarder la console **après** avoir appliqué la config. Vérif hors console :
+  `talosctl -n <ip> get kubeletspec` (colonne image → tag) ou `kubectl get nodes`.
 
 - **La VIP `192.168.56.5` est injoignable**
   La VIP n'apparaît qu'**après le `bootstrap`** d'etcd. Vérifie que la carte host-only
@@ -339,7 +430,12 @@ vagrant destroy -f             # tout supprimer (et les disques dédiés)
 - **Pas de box Talos** → on part de la box vide `pace/empty` et on fait booter l'ISO
   `metal-amd64.iso` (lecteur DVD SATA, BIOS, boot disque puis DVD).
 - **IP déterministes** → MAC fixe par VM + réservations DHCP host-only
-  (`VBoxManage dhcpserver ... --fixed-address`) posées par un trigger `after :up`.
+  (`VBoxManage dhcpserver ... --fixed-address`) posées par un trigger `before :up`
+  (avant le boot, baux périmés purgés) → le node prend son IP réservée dès le 1er DHCP.
+- **Hostnames déterministes** → `cluster-up.sh` applique un patch `HostnameConfig`
+  par node (`auto: "off"` + `hostname:` fixe) au lieu du nom auto-généré par Talos
+  (`talos-xxxxx`) : control planes = `talos-cp1/cp2/cp3`, workers = `talos-w1/w2/w3`.
+  Les VMs VirtualBox/Vagrant portent le **même** nom (défini dans le `Vagrantfile`).
 - **VIP / HA** → `talos/patch-cp.yaml` pose une VIP partagée entre control planes ;
   l'endpoint **kube-apiserver** (`https://192.168.56.5:6443`) reste stable même si un
   CP tombe. (L'API Talos, elle, se contacte toujours sur les IP de nodes réelles.)
@@ -350,3 +446,57 @@ Références : [Talos Linux](https://www.talos.dev/) ·
 [siderolabs/talos](https://github.com/siderolabs/talos) ·
 [rgl/talos-vagrant](https://github.com/rgl/talos-vagrant) ·
 [bjwschaap/vagrant-empty-box](https://github.com/bjwschaap/vagrant-empty-box)
+
+---
+
+## 9. CNI : Flannel (défaut) ou Cilium (VXLAN)
+
+### Qui installe le CNI ?
+
+**Talos lui-même**, au `bootstrap`, à partir du champ `cluster.network.cni` de la
+config des control planes. Rien dans le `Vagrantfile` ni un `kubectl apply` : Talos
+rend un manifeste interne (ressource `05-flannel` = le DaemonSet `kube-flannel`) et
+l'applique. Le `Vagrantfile` ne fait que créer les VMs.
+
+Ici le CNI est piloté par un **patch dédié** choisi via la variable `CNI` de
+`cluster-up.sh` :
+
+| `CNI=` | Patch appliqué | Effet |
+|--------|----------------|-------|
+| `flannel` *(défaut)* | `talos/cni-flannel.yaml` | `cni.name: flannel` + `--iface-can-reach=192.168.56.1` (fix VXLAN host-only, cf. §7) |
+| `none` | `talos/cni-none.yaml` | `cni.name: none` — Talos n'installe **aucun** CNI (à toi de le faire) |
+
+```bash
+CNI=none ./talos/cluster-up.sh      # ex. pour installer Cilium ensuite
+```
+
+### Passer à Cilium (mode VXLAN)
+
+1. **Config sans CNI** : `CNI=none ./talos/cluster-up.sh`. Après le bootstrap, les
+   nodes restent `NotReady` tant que Cilium n'est pas installé — c'est normal.
+2. **Installer Cilium** en tunnel VXLAN, avec les valeurs spécifiques à Talos
+   (cgroup, capabilities) et — **point clé, équivalent du fix flannel** — en
+   épinglant l'interface **host-only** (sinon Cilium prend la carte de la route par
+   défaut = le NAT → VTEP cassés). Vérifier le nom : `talosctl -n 192.168.56.10 get
+   links` (host-only = `enp0s8`, busPath `0000:00:08.0`).
+   ```bash
+   helm repo add cilium https://helm.cilium.io/ && helm repo update
+   helm install cilium cilium/cilium --namespace kube-system \
+     --set ipam.mode=kubernetes \
+     --set routingMode=tunnel --set tunnelProtocol=vxlan \
+     --set devices=enp0s8 \
+     --set cgroup.autoMount.enabled=false --set cgroup.hostRoot=/sys/fs/cgroup \
+     --set securityContext.capabilities.ciliumAgent="{CHOWN,KILL,NET_ADMIN,NET_RAW,IPC_LOCK,SYS_ADMIN,SYS_RESOURCE,DAC_OVERRIDE,FOWNER,SETGID,SETUID}" \
+     --set securityContext.capabilities.cleanCiliumState="{NET_ADMIN,SYS_ADMIN,SYS_RESOURCE}"
+   # épingle une version stable : --version <x.y.z>
+   ```
+3. *(Optionnel)* **Cilium remplace kube-proxy** : décommente `proxy.disabled: true`
+   dans `talos/cni-none.yaml`, puis ajoute à l'install :
+   `--set kubeProxyReplacement=true --set k8sServiceHost=192.168.56.5 --set k8sServicePort=6443`
+   (la VIP). Sinon on garde le kube-proxy de Talos.
+4. Vérifier : `kubectl -n kube-system get pods -l k8s-app=cilium` puis
+   `kubectl get nodes` → `Ready`.
+
+> Le fix `kubelet.nodeIP.validSubnets` (`talos/patch-all.yaml`) reste valable avec
+> Cilium : l'`INTERNAL-IP` des nodes (source des VTEP) est déjà sur
+> `192.168.56.0/24`. Réf : [Talos — Deploying Cilium](https://www.talos.dev/latest/kubernetes-guides/network/deploying-cilium/).
