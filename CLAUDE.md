@@ -29,8 +29,10 @@ Pour tester un patch sur une config existante sans l'appliquer :
   fait `get disks --insecure` en boucle ; un node en mode sécurisé n'y répond jamais → blocage.
 - **Ne PAS régénérer `_out/` (ni `FORCE=1`) sur un cluster en route** : nouveaux
   secrets/CA => cluster cassé. Régénérer uniquement après `vagrant destroy`.
-- **Adressage** : garder les variables `CP_IP_START/STEP` et `WK_IP_START/STEP`
-  ALIGNÉES entre `Vagrantfile` et `talos/cluster-up.sh`. CP = `.10/.20/.30`, workers = `.101+`.
+- **Adressage** : topologie et adressage vivent dans **`lab.env`** (source unique lue par
+  le `Vagrantfile` ET `talos/cluster-up.sh` — plus rien à « garder aligné » à la main).
+  Modèle versionné `lab.env.example` ; `lab.env` est gitignoré. CP = `.10/.20/.30`, workers = `.101+`.
+  Une vraie variable d'env reste prioritaire (`WORKERS=6 vagrant up`).
 - **Renommer les VMs** : détruire (`vagrant destroy`) AVANT de changer `s[:name]` dans le
   `Vagrantfile`, sinon les anciennes VMs deviennent orphelines dans VirtualBox.
 - **`vagrant up` KO après `destroy`** (`VERR_ALREADY_EXISTS` au rename `temp_clone_…`) :
@@ -53,5 +55,5 @@ Pour tester un patch sur une config existante sans l'appliquer :
 ## Conventions
 - Commentaires, doc et messages de commit en **français**. Commits conventionnels
   (`fix(...)`, `feat(...)`, `docs: ...`). Brancher depuis `main`, PR ensuite.
-- Ne pas commiter un changement de topologie (`CONTROL_PLANES`/`WORKERS`) « de test » :
-  le laisser en local et garder le défaut du repo (3 CP / 3 workers).
+- Topologie « de test » : éditer **`lab.env`** (gitignoré, donc jamais commité). Le défaut
+  du repo reste dans `lab.env.example` (3 CP / 3 workers) — ne pas le modifier « pour tester ».
