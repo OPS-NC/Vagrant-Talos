@@ -111,14 +111,24 @@ printf '    - attente du retour de %s en mode sécurisé ' "${first_cp}"
 until talosctl -n "${first_cp}" version >/dev/null 2>&1; do printf '.'; sleep 5; done
 echo ' OK'
 
-if ! err="$(talosctl bootstrap -n "${first_cp}" 2>&1)"; then
-  if echo "$err" | grep -qiE "already|AlreadyExists"; then
-    echo "    - etcd déjà bootstrapé, on continue"
-  else
-    echo "$err" >&2
-    exit 1
+# `talosctl version` peut répondre (apid up) AVANT qu'etcd soit prêt à être
+# bootstrapé : Talos renvoie alors "bootstrap is not available yet"
+# (FailedPrecondition) le temps qu'etcd finisse son pre-state. On retente donc
+# jusqu'à ce que ça passe (ou que ce soit déjà bootstrapé), au lieu d'échouer.
+bootstrapped=0
+for _ in $(seq 1 30); do
+  if err="$(talosctl bootstrap -n "${first_cp}" 2>&1)"; then
+    bootstrapped=1 ; break
   fi
-fi
+  if echo "$err" | grep -qiE "already|AlreadyExists"; then
+    echo "    - etcd déjà bootstrapé, on continue" ; bootstrapped=1 ; break
+  fi
+  if echo "$err" | grep -qiE "not available yet|FailedPrecondition|Unavailable|connection refused"; then
+    printf '    - etcd pas encore prêt, nouvelle tentative...\n' ; sleep 5 ; continue
+  fi
+  echo "$err" >&2 ; exit 1   # erreur non transitoire => on s'arrête
+done
+[ "$bootstrapped" = 1 ] || { echo "ERREUR : bootstrap etcd échoué après plusieurs tentatives." >&2 ; exit 1 ; }
 
 # --- 5. Kubeconfig + santé --------------------------------------------------
 echo "==> [5/5] Récupération du kubeconfig"
