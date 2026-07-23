@@ -1,6 +1,6 @@
 # `cert-manager/` — TLS wildcard automatique (ACME DNS-01 Cloudflare)
 
-Fournit et **renouvelle tout seul** le certificat wildcard `*.lab.ops.nc` que le Gateway
+Fournit et **renouvelle tout seul** le certificat wildcard `*.talos.lab.ops.nc` que le Gateway
 Envoy sert en HTTPS. On passe par **Let's Encrypt en DNS-01 Cloudflare** : le challenge se
 joue sur un enregistrement TXT DNS, **sans exposer le cluster à Internet** — indispensable
 ici puisque le VIP `.200` est une IP privée joignable seulement via Tailscale.
@@ -8,9 +8,9 @@ ici puisque le VIP `.200` est une IP privée joignable seulement via Tailscale.
 ## Pourquoi DNS-01 (et pas HTTP-01) + pourquoi Let's Encrypt
 
 - **DNS-01** : Let's Encrypt vérifie que tu contrôles le domaine via un TXT
-  `_acme-challenge.lab.ops.nc`, posé par cert-manager avec le token Cloudflare. Aucune
+  `_acme-challenge.talos.lab.ops.nc`, posé par cert-manager avec le token Cloudflare. Aucune
   connexion entrante requise → marche derrière un réseau host-only + Tailscale.
-- **Wildcard** : seul DNS-01 permet un cert `*.lab.ops.nc` (HTTP-01 ne sait pas).
+- **Wildcard** : seul DNS-01 permet un cert `*.talos.lab.ops.nc` (HTTP-01 ne sait pas).
 - **Let's Encrypt, pas Cloudflare Origin CA** : comme Cloudflare est en **DNS-only (gris)**,
   le TLS est terminé par **Envoy**, pas par l'edge Cloudflare. Le navigateur valide donc le
   cert d'Envoy → il doit être **publiquement trusté**. Un cert *Origin CA* (trusté seulement
@@ -19,7 +19,7 @@ ici puisque le VIP `.200` est une IP privée joignable seulement via Tailscale.
 ## Prérequis
 
 - Gateway `main-gateway` en place (voir `../Envoy-Proxy/README.md`).
-- Zone `ops.nc` gérée par Cloudflare, avec `*.lab.ops.nc → 192.168.56.200` en **DNS-only**.
+- Zone `ops.nc` gérée par Cloudflare, avec `*.talos.lab.ops.nc → 192.168.56.200` en **DNS-only**.
 - Un **token API Cloudflare** : permissions `Zone/DNS/Edit` + `Zone/Zone/Read`, scopé `ops.nc`.
 
 ## Installation (Helm)
@@ -65,25 +65,25 @@ kubectl apply -f _k8s/cert-manager/04-gateway-https-example.yaml
 | `01-cloudflare-api-token.example.yaml` | **Gabarit** du secret token (ne pas committer le vrai — cf. commande ci-dessus) |
 | `02-clusterissuer-staging.yaml` | `ClusterIssuer` LE **staging** (quotas larges, cert non trusté) |
 | `03-clusterissuer-prod.yaml` | `ClusterIssuer` LE **prod** (cert trusté) |
-| `04-gateway-https-example.yaml` | `Gateway` avec écouteur **HTTPS:443 `*.lab.ops.nc`** + annotation `cluster-issuer` |
+| `04-gateway-https-example.yaml` | `Gateway` avec écouteur **HTTPS:443 `*.talos.lab.ops.nc`** + annotation `cluster-issuer` |
 
 ## Comment le cert est émis (intégration Gateway API)
 
 Grâce à `config.enableGatewayAPI=true`, cert-manager surveille les `Gateway`. Sur
 `main-gateway` il voit l'annotation `cert-manager.io/cluster-issuer` et l'écouteur TLS
-dont le `certificateRefs` pointe le Secret `wildcard-lab-ops-nc-tls`. Il en déduit un
-`Certificate` (dnsNames = `*.lab.ops.nc`, le `hostname` de l'écouteur), le résout en
+dont le `certificateRefs` pointe le Secret `wildcard-talos-lab-ops-nc-tls`. Il en déduit un
+`Certificate` (dnsNames = `*.talos.lab.ops.nc`, le `hostname` de l'écouteur), le résout en
 DNS-01 Cloudflare, puis remplit le Secret. **Aucun `Certificate` à écrire à la main.**
 
 ## Vérifier
 
 ```bash
 kubectl get clusterissuer                              # READY=True
-kubectl get certificate -A                             # wildcard-lab-ops-nc-tls, READY=True
-kubectl describe certificate wildcard-lab-ops-nc-tls   # events: Order → Challenge (dns-01) → issued
+kubectl get certificate -A                             # wildcard-talos-lab-ops-nc-tls, READY=True
+kubectl describe certificate wildcard-talos-lab-ops-nc-tls   # events: Order → Challenge (dns-01) → issued
 kubectl get challenges -A                              # vide une fois validé
 # test end-to-end (depuis un client Tailscale avec la route .200)
-curl -v https://hello.lab.ops.nc/       # cert *.lab.ops.nc trusté, servi par Envoy
+curl -v https://hello.talos.lab.ops.nc/       # cert *.talos.lab.ops.nc trusté, servi par Envoy
 ```
 
 ## Dépannage
@@ -99,6 +99,6 @@ curl -v https://hello.lab.ops.nc/       # cert *.lab.ops.nc trusté, servi par E
 ## Alternative sans intégration Gateway API
 
 Si tu préfères ne pas activer `config.enableGatewayAPI`, écris un `Certificate` explicite
-(`spec.dnsNames: ["*.lab.ops.nc"]`, `issuerRef: letsencrypt-prod`,
-`secretName: wildcard-lab-ops-nc-tls`) et référence ce Secret dans `certificateRefs`.
+(`spec.dnsNames: ["*.talos.lab.ops.nc"]`, `issuerRef: letsencrypt-prod`,
+`secretName: wildcard-talos-lab-ops-nc-tls`) et référence ce Secret dans `certificateRefs`.
 Le résultat est identique ; c'est juste toi qui crées le `Certificate` au lieu de cert-manager.

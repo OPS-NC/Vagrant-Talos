@@ -50,7 +50,7 @@ kubectl apply -f _k8s/Envoy-Proxy/GW-Example.yml     # démo, optionnel
 kubectl get gateway main-gateway                      # PROGRAMMED=True, ADDRESS=192.168.56.200
 ```
 
-## Passer en HTTPS wildcard (`*.lab.ops.nc`)
+## Passer en HTTPS wildcard (`*.talos.lab.ops.nc`)
 
 Les routes de démo matchent par **chemin** : le header `Host`/SNI est ignoré. Pour
 exposer en HTTPS derrière le wildcard Cloudflare, il faut **(a)** un écouteur HTTPS avec
@@ -64,7 +64,7 @@ spec:
     - name: main-gateway
       sectionName: https          # cible l'écouteur TLS
   hostnames:
-    - hello.lab.ops.nc            # doit matcher le wildcard *.lab.ops.nc
+    - hello.talos.lab.ops.nc            # doit matcher le wildcard *.talos.lab.ops.nc
   rules:
     - backendRefs:
         - name: hello-nginx
