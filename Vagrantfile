@@ -36,13 +36,21 @@ VIP          = "#{NETWORK}.5"        # VIP de l'API Kubernetes (HA)
 HOST_IP      = "#{NETWORK}.1"        # passerelle host-only
 DISK_SIZE_MB = 20480                 # disque d'installation par node (20 Go)
 
+# Schéma d'adressage host-only (variabilisable, surchargeable par variables d'env) :
+#   control plane i -> NETWORK.(CP_IP_START + (i-1)*CP_IP_STEP)  => .10, .20, .30, ...
+#   worker       i  -> NETWORK.(WK_IP_START + (i-1)*WK_IP_STEP)  => .101, .102, .103, ...
+# Garder ces valeurs alignées avec talos/cluster-up.sh (mêmes noms de variables).
+CP_IP_START = (ENV["CP_IP_START"] || 10).to_i  ; CP_IP_STEP = (ENV["CP_IP_STEP"] || 10).to_i
+WK_IP_START = (ENV["WK_IP_START"] || 101).to_i ; WK_IP_STEP = (ENV["WK_IP_STEP"] || 1).to_i
+
 ISO_PATH   = File.join(__dir__, "iso", "metal-amd64.iso")
 DISKS_DIR  = File.join(__dir__, ".vagrant", "talos-disks")
 
 ##############################################################################
 # Construction de la liste des nodes
-#   CP    : talos-cp1=.10, talos-cp2=.20, talos-cp3=.30 (idx 1..CONTROL_PLANES)
-#   Worker: talos-w1=.40, talos-w2=.50, ...  (le nom de VM = le hostname Talos)
+#   CP    : talos-cp1=.10, talos-cp2=.20, ...   (voir CP_IP_START / CP_IP_STEP)
+#   Worker: talos-w1=.101, talos-w2=.102, ...   (voir WK_IP_START / WK_IP_STEP)
+#   Le nom de VM = le hostname Talos. La MAC reste indexée par `idx` (unique).
 ##############################################################################
 
 servers = []
@@ -50,19 +58,19 @@ idx = 0
 (1..CONTROL_PLANES).each do |i|
   idx += 1
   servers << { name: ("talos-cp%d" % i), role: "controlplane",
-               ip: "#{NETWORK}.#{idx * 10}", mac: ("080027AA00%02X" % idx),
+               ip: "#{NETWORK}.#{CP_IP_START + (i - 1) * CP_IP_STEP}", mac: ("080027AA00%02X" % idx),
                mem: CP_MEM, cpu: CP_CPU }
 end
 (1..WORKERS).each do |i|
   idx += 1
   servers << { name: ("talos-w%d" % i), role: "worker",
-               ip: "#{NETWORK}.#{idx * 10}", mac: ("080027AA00%02X" % idx),
+               ip: "#{NETWORK}.#{WK_IP_START + (i - 1) * WK_IP_STEP}", mac: ("080027AA00%02X" % idx),
                mem: WK_MEM, cpu: WK_CPU }
 end
 
 # Garde-fou : .100 = serveur DHCP host-only PAR DÉFAUT de VirtualBox (réservé) ;
 # .1/.2/.5 = passerelle / serveur DHCP / VIP. Un node ne doit jamais tomber
-# dessus (n'arrive qu'avec ~10 nodes, car idx*10 = 100).
+# dessus (dépend du schéma d'adressage ci-dessus : p.ex. 10 CP => .100).
 reserved_ips = ["#{NETWORK}.1", "#{NETWORK}.2", "#{NETWORK}.5", "#{NETWORK}.100"]
 servers.each do |s|
   if reserved_ips.include?(s[:ip])

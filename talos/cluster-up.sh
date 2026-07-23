@@ -20,6 +20,14 @@ VIP="${VIP:-${NETWORK}.5}"
 CLUSTER_NAME="${CLUSTER_NAME:-talos-lab}"
 INSTALL_DISK="${INSTALL_DISK:-/dev/sda}"
 OUT="${OUT:-_out}"
+# Schéma d'adressage (À GARDER ALIGNÉ avec le Vagrantfile) :
+#   control plane i -> NETWORK.(CP_IP_START + (i-1)*CP_IP_STEP)  => .10, .20, .30
+#   worker       i  -> NETWORK.(WK_IP_START + (i-1)*WK_IP_STEP)  => .101, .102, ...
+CP_IP_START="${CP_IP_START:-10}"  ; CP_IP_STEP="${CP_IP_STEP:-10}"
+WK_IP_START="${WK_IP_START:-101}" ; WK_IP_STEP="${WK_IP_STEP:-1}"
+# CNI installé par Talos au bootstrap : "flannel" (défaut, avec le fix host-only)
+# ou "none" (aucun CNI => tu installes Cilium & co toi-même, cf. README §9).
+CNI="${CNI:-flannel}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
@@ -29,10 +37,10 @@ for bin in talosctl kubectl; do
   command -v "$bin" >/dev/null 2>&1 || { echo "ERREUR : '$bin' introuvable dans le PATH." >&2; exit 1; }
 done
 
-# --- Calcul des IP (talos-cp1=.10, cp2=.20, cp3=.30 ; talos-w1=.40, ...) -----
-cp_ips=() ; worker_ips=() ; idx=0
-for ((i = 1; i <= CONTROL_PLANES; i++)); do idx=$((idx + 1)); cp_ips+=("${NETWORK}.$((idx * 10))"); done
-for ((i = 1; i <= WORKERS;        i++)); do idx=$((idx + 1)); worker_ips+=("${NETWORK}.$((idx * 10))"); done
+# --- Calcul des IP (CP: .10/.20/.30 ; workers: .101/.102/... — cf. schéma ci-dessus)
+cp_ips=() ; worker_ips=()
+for ((i = 1; i <= CONTROL_PLANES; i++)); do cp_ips+=("${NETWORK}.$((CP_IP_START + (i - 1) * CP_IP_STEP))"); done
+for ((i = 1; i <= WORKERS;        i++)); do worker_ips+=("${NETWORK}.$((WK_IP_START + (i - 1) * WK_IP_STEP))"); done
 first_cp="${cp_ips[0]}"
 
 echo "==> Topologie : ${CONTROL_PLANES} control plane(s) [${cp_ips[*]}] + ${WORKERS} worker(s) [${worker_ips[*]:-aucun}]"
@@ -63,14 +71,17 @@ apply_config() {
 # seulement si la config est absente, ou explicitement via FORCE=1 (typiquement
 # après un `vagrant destroy`). Sinon on réutilise la config existante.
 if [ "${FORCE:-0}" = "1" ] || [ ! -f "${OUT}/controlplane.yaml" ]; then
-  echo "==> [1/5] Génération de la config Talos (${OUT}/)"
+  echo "==> [1/5] Génération de la config Talos (${OUT}/) — CNI=${CNI}"
+  [ -f "talos/cni-${CNI}.yaml" ] || { echo "ERREUR : CNI '${CNI}' inconnu (talos/cni-${CNI}.yaml absent)." >&2; exit 1; }
   sans="${VIP}"
   for ip in "${cp_ips[@]}"; do sans="${sans},${ip}"; done
+  # Le CNI est piloté par le patch talos/cni-${CNI}.yaml (flannel = défaut ; none = Cilium & co).
   talosctl gen config "${CLUSTER_NAME}" "https://${VIP}:6443" \
     --install-disk "${INSTALL_DISK}" \
     --additional-sans "${sans}" \
     --config-patch               @talos/patch-all.yaml \
     --config-patch-control-plane @talos/patch-cp.yaml \
+    --config-patch-control-plane "@talos/cni-${CNI}.yaml" \
     --output-dir "${OUT}" --force
 else
   echo "==> [1/5] Config existante réutilisée (${OUT}/)."
