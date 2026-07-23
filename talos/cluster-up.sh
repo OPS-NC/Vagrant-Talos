@@ -39,6 +39,10 @@ WK_IP_START="${WK_IP_START:-101}" ; WK_IP_STEP="${WK_IP_STEP:-1}"
 # CNI installé par Talos au bootstrap : "flannel" (défaut, avec le fix host-only)
 # ou "none" (aucun CNI => tu installes Cilium & co toi-même, cf. README §9).
 CNI="${CNI:-flannel}"
+# Version Talos = ISO (Vagrant) ET image d'installeur épinglée ci-dessous : sans ce
+# pin, la version INSTALLÉE suivait celle du binaire talosctl (skew avec l'ISO).
+TALOS_VERSION="${TALOS_VERSION:-v1.13.7}"
+INSTALLER_IMAGE="${INSTALLER_IMAGE:-ghcr.io/siderolabs/installer:${TALOS_VERSION}}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
@@ -89,6 +93,7 @@ if [ "${FORCE:-0}" = "1" ] || [ ! -f "${OUT}/controlplane.yaml" ]; then
   # Le CNI est piloté par le patch talos/cni-${CNI}.yaml (flannel = défaut ; none = Cilium & co).
   talosctl gen config "${CLUSTER_NAME}" "https://${VIP}:6443" \
     --install-disk "${INSTALL_DISK}" \
+    --install-image "${INSTALLER_IMAGE}" \
     --additional-sans "${sans}" \
     --config-patch               @talos/patch-all.yaml \
     --config-patch-control-plane @talos/patch-cp.yaml \
