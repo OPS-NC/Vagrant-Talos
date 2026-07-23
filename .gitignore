@@ -1,6 +1,9 @@
 .vagrant
 harbor.txt
 
+# Topologie locale : partir de Vagrantfile.example (cp Vagrantfile.example Vagrantfile)
+/Vagrantfile
+
 # Talos
 iso/
 _out/

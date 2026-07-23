@@ -5,6 +5,10 @@
 # ----------------
 # Monte un cluster Talos Linux sur VirtualBox.
 #
+# ⚠️  MODÈLE VERSIONNÉ (défaut du repo : 3 CP / 3 workers). Le `Vagrantfile` réel est
+#     gitignoré : copie ce fichier puis édite ta topologie en local, sans la committer.
+#         cp Vagrantfile.example Vagrantfile
+#
 # Particularités Talos :
 #   - Talos n'a PAS de SSH : tout se pilote avec `talosctl` depuis l'hôte.
 #     => on enregistre un "dummy communicator" pour que `vagrant up`
