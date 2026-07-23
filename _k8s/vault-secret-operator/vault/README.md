@@ -23,7 +23,7 @@ JWT du SA (audience "vault")  ─►  auth/kubernetes/config (TokenReview)  ─�
 ## Prérequis
 
 ```bash
-export VAULT_ADDR="https://vault.lab.ops.nc"     # ou http://127.0.0.1:8200 via port-forward
+export VAULT_ADDR="https://vault.talos.lab.ops.nc"     # ou http://127.0.0.1:8200 via port-forward
 export VAULT_TOKEN="<token-admin>"               # droits d'admin, le temps du setup
 vault status                                     # doit répondre Sealed=false
 ```

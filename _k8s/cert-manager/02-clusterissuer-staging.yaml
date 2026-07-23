@@ -19,4 +19,4 @@ spec:
               key: api-token
         selector:
           dnsZones:
-            - ops.nc                           # zone Cloudflare gérant *.lab.ops.nc
+            - ops.nc                           # zone Cloudflare gérant *.talos.lab.ops.nc

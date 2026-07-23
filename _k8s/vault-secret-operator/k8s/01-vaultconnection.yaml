@@ -9,10 +9,10 @@ metadata:
 spec:
   # In-cluster (chart hashicorp/vault dans le ns "vault") :
   address: http://vault.vault.svc.cluster.local:8200
-  # Externe / via Gateway du lab : https://vault.lab.ops.nc
+  # Externe / via Gateway du lab : https://vault.talos.lab.ops.nc
   # En HTTPS avec CA privée, référencer le Secret (clé "ca.crt") + le nom TLS :
   # caCertSecretRef: vault-ca
-  # tlsServerName: vault.lab.ops.nc
+  # tlsServerName: vault.talos.lab.ops.nc
   # skipTLSVerify=true : LAB UNIQUEMENT.
   skipTLSVerify: false
   # headers: {}        # en-têtes HTTP custom éventuels (proxy, namespace HCP...)

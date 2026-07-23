@@ -13,7 +13,7 @@ spec:
   vaultAuthRef: vault-auth-pki        # -> role Vault vso-pki -> policy vso-pki
   mount: pki                          # moteur pki monté sur pki/
   role: demo                          # role PKI (borne domaines/durées, cf. 00-secrets-engines.sh)
-  commonName: demo-app.lab.ops.nc     # CN du certificat (doit rester dans allowed_domains du role)
+  commonName: demo-app.talos.lab.ops.nc     # CN du certificat (doit rester dans allowed_domains du role)
   # altNames: demo-app.demo.svc       # SAN DNS supplémentaires
   format: pem
   ttl: 24h                            # durée du cert

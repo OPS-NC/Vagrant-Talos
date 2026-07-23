@@ -42,8 +42,9 @@ TALOS_VERSION  = ENV["TALOS_VERSION"] || "v1.13.5"   # https://github.com/sidero
 CONTROL_PLANES = (ENV["CONTROL_PLANES"] || 3).to_i   # 1 = single ; 3 = HA (avec VIP)
 WORKERS        = (ENV["WORKERS"] || 3).to_i          # nombre de workers
 
-CP_MEM  = 2048 ; CP_CPU = 2  # ressources control plane
-WK_MEM  = 2048 ; WK_CPU = 2  # ressources worker
+# Ressources par rôle — pilotées depuis lab.env (une vraie var d'env l'emporte).
+CP_MEM  = (ENV["CP_MEM"] || 2048).to_i ; CP_CPU = (ENV["CP_CPU"] || 2).to_i  # control plane
+WK_MEM  = (ENV["WK_MEM"] || 2048).to_i ; WK_CPU = (ENV["WK_CPU"] || 2).to_i  # worker
 
 NETWORK      = ENV["NETWORK"] || "192.168.56"    # réseau host-only
 VIP          = ENV["VIP"] || "#{NETWORK}.5"      # VIP de l'API Kubernetes (HA)

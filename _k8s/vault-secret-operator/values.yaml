@@ -8,7 +8,7 @@ defaultVaultConnection:
   enabled: true
   # Adresse du serveur Vault. In-cluster (chart hashicorp/vault dans le ns "vault") :
   address: "http://vault.vault.svc.cluster.local:8200"
-  # Externe / exposé par le Gateway du lab : "https://vault.lab.ops.nc"
+  # Externe / exposé par le Gateway du lab : "https://vault.talos.lab.ops.nc"
   # En HTTPS avec une CA privée, référencer le Secret contenant le CA (clé "ca.crt") :
   # caCertSecret: "vault-ca"
   # skipTLSVerify=true : LAB UNIQUEMENT (accepte n'importe quel cert). À NE PAS faire ailleurs.
