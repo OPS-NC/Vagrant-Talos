@@ -4,6 +4,9 @@ harbor.txt
 # Topologie locale : partir de lab.env.example (cp lab.env.example lab.env)
 /lab.env
 
+# Projet Terraform Proxmox : lab local, non versionné (state, secrets, images, tfvars)
+/proxmox
+
 # Talos
 iso/
 _out/
