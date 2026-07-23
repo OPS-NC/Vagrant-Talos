@@ -277,6 +277,45 @@ vagrant destroy -f             # tout supprimer (et les disques dédiés)
 > Après un `destroy`, supprime aussi l'ancien état Talos local avant de recommencer :
 > `rm -rf _out kubeconfig`.
 
+### 6.1 Ajouter des workers (à chaud, sans casser le cluster)
+
+Pour agrandir un cluster **déjà en route**, on démarre les nouvelles VMs et on
+leur applique la config worker **existante** (mêmes secrets). Deux règles :
+
+- **NE PAS régénérer `_out/`** (ni `FORCE=1`) : de nouveaux secrets casseraient
+  le cluster existant.
+- **NE PAS relancer `cluster-up.sh`** : il attendrait le mode maintenance sur les
+  nodes déjà installés (mode sécurisé) et bloquerait.
+
+Exemple : passer de 3 à 5 workers (ajoute `talos-w4`=`.70` et `talos-w5`=`.80`).
+
+1. Augmenter `WORKERS` dans le `Vagrantfile` (ici `WORKERS = 5`).
+2. Démarrer **uniquement** les nouvelles VMs (les autres restent intactes) :
+   ```bash
+   vagrant up talos-w4 talos-w5
+   ```
+3. Appliquer la config worker existante à chaque nouveau node en fixant son
+   hostname (le Nᵉ worker = `talos-w<N>`, IP = `.<(nbCP + N) x 10>`) :
+   ```bash
+   export TALOSCONFIG="$PWD/_out/talosconfig"
+   for n in 4 5; do
+     ip="192.168.56.$(( (3 + n) * 10 ))"          # 3 = nombre de control planes
+     until talosctl -n "$ip" get disks --insecure >/dev/null 2>&1; do sleep 5; done
+     talosctl apply-config --insecure -n "$ip" --file _out/worker.yaml \
+       --config-patch "$(printf 'apiVersion: v1alpha1\nkind: HostnameConfig\nauto: "off"\nhostname: talos-w%s\n' "$n")"
+   done
+   ```
+4. Les workers rejoignent automatiquement (la config worker pointe déjà sur la
+   VIP). Vérifier : `kubectl get nodes -o wide` → `talos-w4`/`talos-w5` passent `Ready`.
+
+> **Retirer un worker** : `kubectl drain talos-w5 --ignore-daemonsets --delete-emptydir-data`
+> puis `vagrant destroy -f talos-w5`, `kubectl delete node talos-w5`, et réduire
+> `WORKERS` dans le `Vagrantfile`.
+>
+> Ajouter des **control planes** suit la même logique (VM + `apply-config` de
+> `controlplane.yaml`, hostname `talos-cp<N>`) ; ils rejoignent etcd via discovery,
+> **sans** relancer `bootstrap` (qui ne se fait qu'une fois, cf. §4.5).
+
 ---
 
 ## 7. Dépannage
