@@ -290,6 +290,35 @@ vagrant destroy -f             # tout supprimer (et les disques dédiés)
 > Après un `destroy`, supprime aussi l'ancien état Talos local avant de recommencer :
 > `rm -rf _out kubeconfig`.
 
+#### Purge des résidus VirtualBox (si `vagrant up` échoue après un `destroy`)
+
+VirtualBox 7.x (clones liés) ne nettoie pas toujours après un `destroy`. Symptôme
+au `up` suivant :
+
+```
+The name of your virtual machine couldn't be set because VirtualBox
+is reporting another VM with that name already exists.
+VBoxManage: error: Could not rename the directory '.../temp_clone_...'
+to '.../talos-cp1' ... (VERR_ALREADY_EXISTS)
+```
+
+Deux couches de résidus se cumulent : des **dossiers orphelins**
+`~/VirtualBox VMs/talos-*/` (le clone ne peut pas se renommer) **et** des entrées
+mortes du **registre média** (disques `talos-*` encore enregistrés + entrées
+`inaccessible` accumulées au fil des cycles), qui feraient ensuite échouer le `up`
+sur « medium already registered ».
+
+Le script `talos/virtualbox-cleanup.sh` purge tout ça (idempotent, ne touche que
+le préfixe `talos-` et jamais la box de base `empty-*`) :
+
+```bash
+DRY_RUN=1 ./talos/virtualbox-cleanup.sh   # montre ce qui serait supprimé
+./talos/virtualbox-cleanup.sh             # purge réellement
+```
+
+> ⚠️ À lancer **APRÈS** `vagrant destroy`, jamais sur un cluster en route.
+> Variable `PREFIX=` pour cibler un autre préfixe de nom de VM.
+
 ### 6.1 Ajouter des workers (à chaud, sans casser le cluster)
 
 Pour agrandir un cluster **déjà en route**, on démarre les nouvelles VMs et on
@@ -384,8 +413,7 @@ Exemple : passer de 3 à 5 workers (ajoute `talos-w4`=`.104` et `talos-w5`=`.105
   **autre node** que le pod client (l'egress Internet, lui, sort par le NAT *local* → il marche).
   Vérifier : les 3 nodes annoncent la **même** IP publique NAT au lieu de leur IP host-only :
   ```bash
-  kubectl get nodes -o custom-columns='NODE:.metadata.name,\
-FLANNEL-IP:.metadata.annotations.flannel\.alpha\.coreos\.com/public-ip'
+  kubectl get nodes -o custom-columns='NODE:.metadata.name,FLANNEL-IP:.metadata.annotations.flannel\.alpha\.coreos\.com/public-ip'
   # KO si FLANNEL-IP = 10.0.2.15 partout ; OK si = 192.168.56.10/.20/.30
   ```
   Correctif (déjà dans `talos/patch-cp.yaml`) : forcer flannel sur l'interface host-only via
