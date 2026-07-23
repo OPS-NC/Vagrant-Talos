@@ -1,0 +1,23 @@
+# Expose l'UI Longhorn via la Gateway API, en HTTPS, sous `longhorn.talos.lab.ops.nc`.
+# Cert = wildcard `*.talos.lab.ops.nc` déjà porté par l'écouteur `https` de main-gateway
+# (cert-manager) — aucun nouveau Certificate nécessaire.
+#
+# ⚠️ L'UI Longhorn n'a AUCUNE authentification native. Derrière ce Gateway elle est
+# accessible à quiconque atteint le VIP (via Tailscale). Pour la protéger, ajouter une
+# SecurityPolicy Envoy Gateway (Basic Auth / OIDC) — cf. README.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: longhorn-frontend
+  namespace: longhorn-system
+spec:
+  parentRefs:
+    - name: main-gateway
+      namespace: default
+      sectionName: https           # écouteur TLS :443
+  hostnames:
+    - longhorn.talos.lab.ops.nc     # matche le wildcard *.talos.lab.ops.nc
+  rules:
+    - backendRefs:
+        - name: longhorn-frontend
+          port: 80
