@@ -96,8 +96,8 @@ Les IP sont **déterministes** : chaque VM a une MAC fixe et une **réservation 
 sur le réseau host-only de VirtualBox (configurée automatiquement par le `Vagrantfile`).
 
 > **Schéma d'adressage variabilisable.** CP et workers suivent deux formules,
-> réglables en haut du `Vagrantfile` (et surchargeables par variables d'env, à
-> garder alignées avec `cluster-up.sh`) :
+> définies dans `lab.env` (source unique lue par le `Vagrantfile` et `cluster-up.sh`,
+> surchargeables ponctuellement par variables d'env) :
 > `CP_IP_START`/`CP_IP_STEP` (défaut `10`/`10` → `.10, .20, .30`) et
 > `WK_IP_START`/`WK_IP_STEP` (défaut `101`/`1` → `.101, .102, .103`).
 
@@ -115,13 +115,20 @@ Chaque VM possède 2 cartes : NIC1 = NAT VirtualBox (Internet) et NIC2 = host-on
 
 ## 3. Choisir la topologie
 
-En haut du `Vagrantfile` :
+La topologie vit dans **`lab.env`** (source unique lue par le `Vagrantfile` **et**
+`talos/cluster-up.sh`). Partir du modèle versionné puis l'éditer (`lab.env` est gitignoré) :
 
-```ruby
-TALOS_VERSION  = "v1.13.5"
-CONTROL_PLANES = 3     # 1 = single ; 3 = HA (défaut)
-WORKERS        = 3
+```bash
+cp lab.env.example lab.env
 ```
+```bash
+TALOS_VERSION=v1.13.5
+CONTROL_PLANES=3     # 1 = single ; 3 = HA (défaut)
+WORKERS=3
+```
+
+> Astuce : pour un essai ponctuel, une variable d'env l'emporte sans toucher `lab.env`,
+> p.ex. `CONTROL_PLANES=1 vagrant up`.
 
 - **HA (défaut)** : `CONTROL_PLANES = 3` → `talos-cp1/cp2/cp3` (CP) + `talos-w1/w2/w3` (workers).
 - **Single** : `CONTROL_PLANES = 1` → `talos-cp1` (CP) + workers `talos-w1`, `talos-w2`, …
@@ -243,7 +250,7 @@ vagrant up
 # défaut = 3 CP / 3 workers (HA)
 ./talos/cluster-up.sh
 
-# autre topologie : aligner les variables sur le Vagrantfile
+# autre topologie : éditer lab.env, ou surcharger ponctuellement en variables d'env
 CONTROL_PLANES=1 WORKERS=2 ./talos/cluster-up.sh   # ex. single
 ```
 
@@ -331,7 +338,7 @@ leur applique la config worker **existante** (mêmes secrets). Deux règles :
 
 Exemple : passer de 3 à 5 workers (ajoute `talos-w4`=`.104` et `talos-w5`=`.105`).
 
-1. Augmenter `WORKERS` dans le `Vagrantfile` (ici `WORKERS = 5`).
+1. Augmenter `WORKERS` dans `lab.env` (ici `WORKERS=5`).
 2. Démarrer **uniquement** les nouvelles VMs (les autres restent intactes) :
    ```bash
    vagrant up talos-w4 talos-w5
@@ -340,7 +347,7 @@ Exemple : passer de 3 à 5 workers (ajoute `talos-w4`=`.104` et `talos-w5`=`.105
    hostname (le Nᵉ worker = `talos-w<N>`, IP = `.<WK_IP_START + (N-1)*WK_IP_STEP>`) :
    ```bash
    export TALOSCONFIG="$PWD/_out/talosconfig"
-   WK_IP_START=101 ; WK_IP_STEP=1              # mêmes valeurs que le Vagrantfile
+   WK_IP_START=101 ; WK_IP_STEP=1              # mêmes valeurs que lab.env
    for n in 4 5; do
      ip="192.168.56.$(( WK_IP_START + (n - 1) * WK_IP_STEP ))"
      until talosctl -n "$ip" get disks --insecure >/dev/null 2>&1; do sleep 5; done
@@ -353,7 +360,7 @@ Exemple : passer de 3 à 5 workers (ajoute `talos-w4`=`.104` et `talos-w5`=`.105
 
 > **Retirer un worker** : `kubectl drain talos-w5 --ignore-daemonsets --delete-emptydir-data`
 > puis `vagrant destroy -f talos-w5`, `kubectl delete node talos-w5`, et réduire
-> `WORKERS` dans le `Vagrantfile`.
+> `WORKERS` dans `lab.env`.
 >
 > Ajouter des **control planes** suit la même logique (VM + `apply-config` de
 > `controlplane.yaml`, hostname `talos-cp<N>`) ; ils rejoignent etcd via discovery,
