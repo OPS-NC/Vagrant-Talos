@@ -509,19 +509,31 @@ CNI=none ./talos/cluster-up.sh      # ex. pour installer Cilium ensuite
    links` (host-only = `enp0s8`, busPath `0000:00:08.0`).
    ```bash
    helm repo add cilium https://helm.cilium.io/ && helm repo update
-   helm install cilium cilium/cilium --namespace kube-system \
+   helm upgrade --install cilium cilium/cilium -n kube-system --create-namespace \
+     --set kubeProxyReplacement=false \
+     --set routingMode=tunnel \
+     --set tunnelProtocol=vxlan \
      --set ipam.mode=kubernetes \
-     --set routingMode=tunnel --set tunnelProtocol=vxlan \
+     --set l2announcements.enabled=true \
+     --set externalIPs.enabled=true \
+     --set hubble.enabled=true \
+     --set hubble.relay.enabled=true \
+     --set hubble.ui.enabled=true \
+     --set bandwidthManager.enabled=true \
      --set devices=enp0s8 \
      --set cgroup.autoMount.enabled=false --set cgroup.hostRoot=/sys/fs/cgroup \
      --set securityContext.capabilities.ciliumAgent="{CHOWN,KILL,NET_ADMIN,NET_RAW,IPC_LOCK,SYS_ADMIN,SYS_RESOURCE,DAC_OVERRIDE,FOWNER,SETGID,SETUID}" \
      --set securityContext.capabilities.cleanCiliumState="{NET_ADMIN,SYS_ADMIN,SYS_RESOURCE}"
    # épingle une version stable : --version <x.y.z>
    ```
+   > ⚠️ **Ne PAS ajouter `--set autoDirectNodeRoutes=true`** (ni `ipv4NativeRoutingCIDR`) :
+   > ce sont des options de **routage natif**, incompatibles avec le mode **tunnel** —
+   > l'agent Cilium sort en `fatal` (« auto-direct-node-routes cannot be used with
+   > tunneling ») et boucle en `CrashLoopBackOff`.
 3. *(Optionnel)* **Cilium remplace kube-proxy** : décommente `proxy.disabled: true`
-   dans `talos/cni-none.yaml`, puis ajoute à l'install :
-   `--set kubeProxyReplacement=true --set k8sServiceHost=192.168.56.5 --set k8sServicePort=6443`
-   (la VIP). Sinon on garde le kube-proxy de Talos.
+   dans `talos/cni-none.yaml`, puis passe `kubeProxyReplacement` à `true` et ajoute
+   `--set k8sServiceHost=192.168.56.5 --set k8sServicePort=6443` (la VIP). Sinon on
+   garde le kube-proxy de Talos (`kubeProxyReplacement=false`, valeur par défaut ci-dessus).
 4. Vérifier : `kubectl -n kube-system get pods -l k8s-app=cilium` puis
    `kubectl get nodes` → `Ready`.
 
