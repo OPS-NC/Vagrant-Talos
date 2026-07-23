@@ -1,14 +1,18 @@
-# Patch machine config Talos pour Longhorn — à appliquer à TOUS les nodes.
-# (iscsiadm est requis partout où un pod monte un volume Longhorn ; les données, elles,
-#  ne sont stockées que sur les nodes planifiables — les workers ici.)
+# Patch machine config Talos pour Longhorn — kubelet.extraMounts.
 #
-# 1. install.image : l'installeur Image Factory AVEC les extensions (cf. schematic.yaml).
-#    >>> REMPLACE <SCHEMATIC_ID> par l'ID généré, garde la version = TALOS_VERSION du lab.
-# 2. kubelet.extraMounts : /var/lib/longhorn partagé en `rshared` — indispensable pour la
-#    propagation de montage bidirectionnelle du longhorn-manager (kubelet conteneurisé).
+# `/var/lib/longhorn` partagé en `rshared` : indispensable pour la propagation de montage
+# bidirectionnelle du longhorn-manager (kubelet Talos conteneurisé). À appliquer là où des
+# volumes Longhorn seront montés — ici les WORKERS (les CP sont `NoSchedule`).
+#
+# L'installeur AVEC les extensions (iscsi-tools + util-linux-tools, cf. schematic.yaml)
+# n'est PLUS géré ici : il est piloté par `INSTALLER_IMAGE` dans `lab.env`
+# (cluster-up.sh --install-image). Ce patch ne fait donc QUE le montage.
+#
+# Application :
+#   - cluster neuf : `--config-patch @_k8s/longhorn/patch-longhorn.yaml` au gen config ;
+#   - cluster en route : `talosctl -n <worker-ip> patch mc --patch @_k8s/longhorn/patch-longhorn.yaml`
+#     (appliqué sans reboot).
 machine:
-  install:
-    image: factory.talos.dev/installer/<SCHEMATIC_ID>:v1.13.5
   kubelet:
     extraMounts:
       - destination: /var/lib/longhorn
