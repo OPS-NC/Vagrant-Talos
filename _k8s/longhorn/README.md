@@ -21,6 +21,13 @@ Talos** qu'il faut poser AVANT le `helm install` :
 | `schematic.yaml` | Schematic **Image Factory** → installeur Talos avec `iscsi-tools` + `util-linux-tools` |
 | `patch-longhorn.yaml` | Patch machine config : `install.image` (factory) + `kubelet.extraMounts` `/var/lib/longhorn` |
 | `values.yaml` | Valeurs Helm (chemin de données, réplicas, StorageClass par défaut) |
+| `httproute.yaml` | `HTTPRoute` HTTPS `longhorn.talos.lab.ops.nc` → `longhorn-frontend:80` sur `main-gateway` |
+
+> **Raccourci si l'installeur factory est déjà posé** (cas de ce lab : `INSTALLER_IMAGE`
+> dans `lab.env` pointe déjà l'image factory → extensions bakées dès la création). Pas
+> besoin de rejouer `install.image` : appliquer seulement le `kubelet.extraMounts` du patch
+> aux **workers** (les CP sont `NoSchedule`), sans reboot :
+> `talosctl -n <worker-ip> patch mc --patch @<extrait extraMounts>`.
 
 ---
 
@@ -113,8 +120,19 @@ kubectl get pvc test-longhorn                           # Bound
 kubectl delete pvc test-longhorn
 ```
 
-Accès à l'UI Longhorn : via une `HTTPRoute` (cf. `../Envoy-Proxy/`) ou en direct
-`kubectl -n longhorn-system port-forward svc/longhorn-frontend 8080:80`.
+## 6. Exposer l'UI via la Gateway
+
+```bash
+kubectl apply -f _k8s/longhorn/httproute.yaml    # https://longhorn.talos.lab.ops.nc
+```
+
+Route HTTPS sur `main-gateway` (cert wildcard `*.talos.lab.ops.nc` de cert-manager, rien à
+émettre). Alternative sans exposition : `kubectl -n longhorn-system port-forward
+svc/longhorn-frontend 8080:80`.
+
+> ⚠️ **L'UI Longhorn n'a aucune authentification.** Exposée ainsi, elle est accessible à
+> quiconque atteint le VIP (via Tailscale). Pour la protéger : `SecurityPolicy` Envoy
+> Gateway (Basic Auth / OIDC) ciblant cette `HTTPRoute`.
 
 ---
 
