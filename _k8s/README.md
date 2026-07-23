@@ -18,6 +18,13 @@ cluster sans CNI (CNI=none)  ─►  Cilium installé en Helm (README §9)
 Chaque maillon suppose le précédent en place : pas de VIP `.200` sans le pool Cilium,
 pas d'HTTPS sans le Gateway, pas de cert sans cert-manager.
 
+## Installer toute la plateforme d'un coup
+
+Après `./talos/cluster-up.sh` (avec `CNI=none`), **`./_k8s/platform-up.sh`** enchaîne
+dans le bon ordre Cilium + pool L2 + Envoy Gateway + metrics-server + cert-manager
+(secret Cloudflare lu depuis `lab.env`) + Argo CD. Idempotent (`helm upgrade --install`),
+relançable. **N'installe PAS** `vault-secret-operator/` ni `longhorn/` (à poser à part).
+
 ## Contenu
 
 | Chemin | Rôle | Détail |
@@ -29,6 +36,7 @@ pas d'HTTPS sans le Gateway, pas de cert sans cert-manager.
 | `vault-secret-operator/` | Secrets **HashiCorp Vault** synchronisés en `Secret` K8s natifs via le **Vault Secrets Operator** (static/dynamic/PKI) — côtés K8s **et** Vault | voir `vault-secret-operator/README.md` |
 | `argocd/` | **Argo CD** (GitOps), UI/API exposées en HTTPS sous `argo.talos.lab.ops.nc` via `main-gateway` (TLS wildcard cert-manager) | voir `argocd/README.md` |
 | `metric-server.yaml` | `metrics-server` v0.9.0 **adapté Talos** (`--kubelet-insecure-tls`, port sécurisé 10250) | `kubectl apply -f _k8s/metric-server.yaml` |
+| `platform-up.sh` | Installe la plateforme complète (Cilium → L2 → Envoy → metrics → cert-manager → Argo), idempotent, **hors** vault/longhorn | `./_k8s/platform-up.sh` |
 
 > **metrics-server** : le flag `--kubelet-insecure-tls` évite d'exiger un approbateur de
 > CSR kubelet (pas nécessaire pour un lab). Vérif : `kubectl top nodes`.
