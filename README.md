@@ -510,6 +510,7 @@ CNI=none ./talos/cluster-up.sh      # ex. pour installer Cilium ensuite
    ```bash
    helm repo add cilium https://helm.cilium.io/ && helm repo update
    helm upgrade --install cilium cilium/cilium -n kube-system --create-namespace \
+     --set envoy.enabled=false \
      --set kubeProxyReplacement=false \
      --set routingMode=tunnel \
      --set tunnelProtocol=vxlan \
