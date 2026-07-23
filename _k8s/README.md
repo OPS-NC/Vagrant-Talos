@@ -25,6 +25,7 @@ pas d'HTTPS sans le Gateway, pas de cert sans cert-manager.
 | `Cilium/` | Attribue et **annonce en L2** les IP des Services `LoadBalancer` sur le réseau host-only | voir `Cilium/README.md` |
 | `Envoy-Proxy/` | Contrôleur **Envoy Gateway** + `GatewayClass`/`Gateway` + apps de démo | voir `Envoy-Proxy/README.md` |
 | `cert-manager/` | Certificats TLS wildcard automatiques (ACME **DNS-01 Cloudflare**) branchés sur le Gateway | voir `cert-manager/README.md` |
+| `longhorn/` | Stockage bloc distribué **Longhorn** (StorageClass `longhorn`) + prérequis Talos (extensions, montages) | voir `longhorn/README.md` |
 | `metric-server.yaml` | `metrics-server` v0.9.0 **adapté Talos** (`--kubelet-insecure-tls`, port sécurisé 10250) | `kubectl apply -f _k8s/metric-server.yaml` |
 
 > **metrics-server** : le flag `--kubelet-insecure-tls` évite d'exiger un approbateur de

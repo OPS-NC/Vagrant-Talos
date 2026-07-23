@@ -1,0 +1,14 @@
+# Valeurs Helm Longhorn adaptées au lab Talos.
+defaultSettings:
+  # Sur Talos, /var/lib/longhorn vit sur la partition EPHEMERAL (persistante aux reboots,
+  # PAS à un reset/reinstall sans --preserve). Le disque d'install fait 20 Go et est
+  # PARTAGÉ avec l'OS → pour du vrai stockage, préférer un disque dédié monté en
+  # /var/mnt/longhorn (cf. README, section « Disque dédié »).
+  defaultDataPath: /var/lib/longhorn
+  # Nb de réplicas = nb de nodes de stockage disponibles. 3 workers par défaut dans le
+  # lab ; BAISSER à 1 ou 2 si tu tournes avec moins de workers (sinon volumes "Degraded").
+  defaultReplicaCount: 3
+persistence:
+  # StorageClass `longhorn` posée par défaut du cluster.
+  defaultClass: true
+  defaultClassReplicaCount: 3
