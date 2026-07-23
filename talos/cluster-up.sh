@@ -12,7 +12,18 @@
 #
 set -euo pipefail
 
-# --- Paramètres (à garder alignés avec le Vagrantfile) ----------------------
+# --- Topologie : source unique lab.env (partagée avec le Vagrantfile) -------
+# Chargée sans écraser une variable déjà exportée (override CLI prioritaire).
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [ -f "${REPO_DIR}/lab.env" ]; then
+  while IFS='=' read -r key val; do
+    case "$key" in ''|\#*) continue ;; esac   # ignore lignes vides et commentaires
+    val="${val%%#*}" ; val="${val// /}"       # retire commentaire inline + espaces
+    eval ": \${$key:=\"$val\"}"               # := : ne pose que si non défini
+  done < "${REPO_DIR}/lab.env"
+fi
+
+# --- Paramètres (défauts = filet si lab.env absent) -------------------------
 CONTROL_PLANES="${CONTROL_PLANES:-3}"
 WORKERS="${WORKERS:-3}"
 NETWORK="${NETWORK:-192.168.56}"
@@ -20,7 +31,7 @@ VIP="${VIP:-${NETWORK}.5}"
 CLUSTER_NAME="${CLUSTER_NAME:-talos-lab}"
 INSTALL_DISK="${INSTALL_DISK:-/dev/sda}"
 OUT="${OUT:-_out}"
-# Schéma d'adressage (À GARDER ALIGNÉ avec le Vagrantfile) :
+# Schéma d'adressage (défini dans lab.env) :
 #   control plane i -> NETWORK.(CP_IP_START + (i-1)*CP_IP_STEP)  => .10, .20, .30
 #   worker       i  -> NETWORK.(WK_IP_START + (i-1)*WK_IP_STEP)  => .101, .102, ...
 CP_IP_START="${CP_IP_START:-10}"  ; CP_IP_STEP="${CP_IP_STEP:-10}"

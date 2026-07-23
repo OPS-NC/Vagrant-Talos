@@ -1,8 +1,8 @@
 .vagrant
 harbor.txt
 
-# Topologie locale : partir de Vagrantfile.example (cp Vagrantfile.example Vagrantfile)
-/Vagrantfile
+# Topologie locale : partir de lab.env.example (cp lab.env.example lab.env)
+/lab.env
 
 # Talos
 iso/

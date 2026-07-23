@@ -5,9 +5,9 @@
 # ----------------
 # Monte un cluster Talos Linux sur VirtualBox.
 #
-# ⚠️  MODÈLE VERSIONNÉ (défaut du repo : 3 CP / 3 workers). Le `Vagrantfile` réel est
-#     gitignoré : copie ce fichier puis édite ta topologie en local, sans la committer.
-#         cp Vagrantfile.example Vagrantfile
+# La TOPOLOGIE (nb de nodes, réseau, adressage) vit dans `lab.env` (gitignoré),
+# source unique partagée avec talos/cluster-up.sh. Partir du modèle :
+#     cp lab.env.example lab.env
 #
 # Particularités Talos :
 #   - Talos n'a PAS de SSH : tout se pilote avec `talosctl` depuis l'hôte.
@@ -24,26 +24,35 @@
 require 'shellwords'
 
 ##############################################################################
-# Paramètres du lab
+# Paramètres du lab — chargés depuis lab.env (source unique, cf. cluster-up.sh).
+# Une variable d'environnement réelle l'emporte (ex. `WORKERS=6 vagrant up`).
 ##############################################################################
 
-TALOS_VERSION  = "v1.13.5"   # https://github.com/siderolabs/talos/releases
+lab_env = File.join(__dir__, "lab.env")
+if File.exist?(lab_env)
+  File.foreach(lab_env) do |line|
+    next if line =~ /\A\s*(#|$)/           # ignore commentaires et lignes vides
+    key, val = line.strip.split("=", 2)
+    ENV[key] ||= val if key && val         # ||= : une vraie var d'env reste prioritaire
+  end
+end
 
-CONTROL_PLANES = 3           # 1 = single ; 3 = HA (avec VIP)
-WORKERS        = 3           # nombre de workers
+TALOS_VERSION  = ENV["TALOS_VERSION"] || "v1.13.5"   # https://github.com/siderolabs/talos/releases
+
+CONTROL_PLANES = (ENV["CONTROL_PLANES"] || 3).to_i   # 1 = single ; 3 = HA (avec VIP)
+WORKERS        = (ENV["WORKERS"] || 3).to_i          # nombre de workers
 
 CP_MEM  = 2048 ; CP_CPU = 2  # ressources control plane
 WK_MEM  = 2048 ; WK_CPU = 2  # ressources worker
 
-NETWORK      = "192.168.56"          # réseau host-only (inchangé)
-VIP          = "#{NETWORK}.5"        # VIP de l'API Kubernetes (HA)
-HOST_IP      = "#{NETWORK}.1"        # passerelle host-only
-DISK_SIZE_MB = 20480                 # disque d'installation par node (20 Go)
+NETWORK      = ENV["NETWORK"] || "192.168.56"    # réseau host-only
+VIP          = ENV["VIP"] || "#{NETWORK}.5"      # VIP de l'API Kubernetes (HA)
+HOST_IP      = "#{NETWORK}.1"                     # passerelle host-only
+DISK_SIZE_MB = 20480                             # disque d'installation par node (20 Go)
 
-# Schéma d'adressage host-only (variabilisable, surchargeable par variables d'env) :
+# Schéma d'adressage host-only (défini dans lab.env) :
 #   control plane i -> NETWORK.(CP_IP_START + (i-1)*CP_IP_STEP)  => .10, .20, .30, ...
 #   worker       i  -> NETWORK.(WK_IP_START + (i-1)*WK_IP_STEP)  => .101, .102, .103, ...
-# Garder ces valeurs alignées avec talos/cluster-up.sh (mêmes noms de variables).
 CP_IP_START = (ENV["CP_IP_START"] || 10).to_i  ; CP_IP_STEP = (ENV["CP_IP_STEP"] || 10).to_i
 WK_IP_START = (ENV["WK_IP_START"] || 101).to_i ; WK_IP_STEP = (ENV["WK_IP_STEP"] || 1).to_i
 
