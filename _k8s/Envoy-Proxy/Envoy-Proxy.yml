@@ -30,8 +30,10 @@ apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
   name: main-gateway
+  namespace: envoy-gateway-system      # Gateway + cert wildcard hors du ns default
   annotations:
     # cert-manager émet et renouvelle le wildcard TLS tout seul (DNS-01 Cloudflare).
+    # Le Certificate + le Secret wildcard-talos-lab-ops-nc-tls sont créés dans CE namespace.
     cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
   gatewayClassName: envoy

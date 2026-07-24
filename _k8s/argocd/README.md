@@ -41,7 +41,7 @@ kubectl apply -f _k8s/argocd/httproute.yaml
 kubectl -n argocd get httproute argocd-server        # PROGRAMMED/Accepted=True
 ```
 
-La route vit dans le namespace `argocd` et s'attache à `main-gateway` (namespace `default`)
+La route vit dans le namespace `argocd` et s'attache à `main-gateway` (namespace `envoy-gateway-system`)
 via `sectionName: https` — possible car le Gateway ouvre ses écouteurs à `from: All`. Le
 hostname `argo.talos.lab.ops.nc` matche le wildcard de l'écouteur TLS.
 
