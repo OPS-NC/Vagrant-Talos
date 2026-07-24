@@ -21,7 +21,7 @@
 #     évite le deadlock « Kyverno KO => plus aucun pod ne peut être créé/supprimé ».
 #   - couplé à `validationFailureAction: Audit` sur les policies (les verdicts sont des
 #     rapports, pas des rejets). Pour un vrai blocage ciblé, repasser une policy en Enforce.
-config:
+features:
   forceFailurePolicyIgnore:
     enabled: true
 
