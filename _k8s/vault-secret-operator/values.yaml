@@ -36,10 +36,14 @@ controller:
     #   direct-encrypted  -> cache persisté ET chiffré via le moteur Transit de Vault.
     #                        Les leases survivent au redémarrage -> pas d'orphelins. Recommandé.
     clientCache:
-      persistenceModel: "direct-encrypted"
+      # "none" : cache en RAM, sans dépendance au moteur Transit de Vault. Suffisant pour
+      # des secrets STATIQUES (pas de leases dynamiques à préserver). Repasser à
+      # "direct-encrypted" (+ storageEncryption.enabled=true + moteur transit + role
+      # vso-transit) le jour où on synchronise des creds dynamiques (DB, PKI courtes).
+      persistenceModel: "none"
       cacheSize: 10000
       storageEncryption:
-        enabled: true
+        enabled: false
         # Le cache est chiffré par une clé Transit dédiée (cf. vault/policies/vso-transit-cache.hcl
         # et vault/00-secrets-engines.sh). L'opérateur s'authentifie pour ce chiffrement via SON
         # propre ServiceAccount et un role Vault dédié (vso-transit).

@@ -1,0 +1,83 @@
+# Démo end-to-end VSO : un secret Vault (talos-lab/nginx-test/config) synchronisé en
+# Secret K8s, injecté en variables d'env dans nginx, avec REDÉMARRAGE AUTO du Deployment
+# quand le secret change dans Vault (rolloutRestartTargets + refreshAfter).
+#
+# Prérequis : opérateur VSO déployé + ./vault/talos-lab.sh exécuté (engine + role + secret).
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nginx-test
+---
+# SA présenté à Vault. Doit matcher le role nginx-test (bound_service_account_*).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nginx-test
+  namespace: nginx-test
+---
+# COMMENT s'authentifier à Vault (méthode kubernetes, role nginx-test).
+# Pas de vaultConnectionRef -> utilise la VaultConnection "default" de l'opérateur
+# (values.yaml : http://vault.vault.svc.cluster.local:8200).
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultAuth
+metadata:
+  name: nginx-test
+  namespace: nginx-test
+spec:
+  method: kubernetes
+  mount: kubernetes
+  kubernetes:
+    role: nginx-test
+    serviceAccount: nginx-test
+    audiences:
+      - vault
+---
+# QUOI synchroniser : talos-lab/nginx-test/config (KV-v2) -> Secret K8s "nginx-test-config".
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultStaticSecret
+metadata:
+  name: nginx-test-config
+  namespace: nginx-test
+spec:
+  vaultAuthRef: nginx-test
+  type: kv-v2
+  mount: talos-lab
+  path: nginx-test/config
+  refreshAfter: 30s              # VSO relit Vault toutes les 30s
+  hmacSecretData: true           # détecte la dérive sans logguer les valeurs
+  # Le cœur de la demande : quand le Secret change, VSO redémarre ces cibles.
+  rolloutRestartTargets:
+    - kind: Deployment
+      name: nginx-test
+  destination:
+    create: true                 # VSO crée/maintient le Secret
+    name: nginx-test-config
+---
+# L'appli : nginx qui reçoit le secret en variables d'environnement (envFrom).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-test
+  namespace: nginx-test
+  labels: { app: nginx-test }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: nginx-test }
+  template:
+    metadata:
+      labels: { app: nginx-test }
+    spec:
+      serviceAccountName: nginx-test
+      containers:
+        - name: nginx
+          image: nginx:1.27-alpine
+          envFrom:
+            - secretRef:
+                name: nginx-test-config    # APP_GREETING / APP_COLOR / APP_SECRET_TOKEN
+          ports:
+            - containerPort: 80
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { memory: 96Mi }
