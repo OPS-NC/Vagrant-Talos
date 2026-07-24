@@ -24,7 +24,7 @@ for bin in kubectl helm; do
   command -v "$bin" >/dev/null 2>&1 || { echo "ERREUR : '$bin' introuvable." >&2; exit 1; }
 done
 kubectl get --raw='/readyz' >/dev/null 2>&1 || { echo "ERREUR : apiserver injoignable (KUBECONFIG=${KUBECONFIG})." >&2; exit 1; }
-kubectl get storageclass longhorn >/dev/null 2>&1 || { echo "ERREUR : StorageClass 'longhorn' absente (installe _k8s/longhorn/ d'abord)." >&2; exit 1; }
+kubectl get storageclass longhorn-r1 >/dev/null 2>&1 || { echo "ERREUR : StorageClass 'longhorn-r1' absente. Installe Longhorn puis applique le socle : kubectl apply -f _k8s/longhorn/longhorn-r1-storageclass.yaml" >&2; exit 1; }
 
 log() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 

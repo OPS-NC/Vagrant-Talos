@@ -42,7 +42,8 @@ dans le bon ordre **Cilium** (+ pool L2, via `_k8s/cilium/cilium-up.sh`) + **Env
 | `argocd/` | **Argo CD** (GitOps), UI/API sous `argo.talos.lab.ops.nc` via `main-gateway` — **addon à part** (`argocd/argocd-up.sh`), plus dans `platform-up.sh` | voir `argocd/README.md` |
 | `kyverno/` | **Kyverno** (policy engine : validate/mutate/generate) + **Policy Reporter** (UI) sous `kyverno.talos.lab.ops.nc` ; policies pédagogiques en mode Audit | voir `kyverno/README.md` |
 | `trivy-operator/` | **Trivy Operator** (scanner sécurité continu : CVE, config, secrets, RBAC, CIS) ; rapports remontés dans l'UI Policy Reporter (plugin trivy) | voir `trivy-operator/README.md` |
-| `cloudnative-pg/` | **CloudNativePG** : opérateur PostgreSQL HA déclaratif + cluster de démo 3 nœuds (1Gi RWO sur Longhorn), failover auto | voir `cloudnative-pg/README.md` |
+| `cloudnative-pg/` | **CloudNativePG** : opérateur PostgreSQL HA déclaratif + cluster de démo 3 nœuds (1Gi RWO sur `longhorn-r1`), failover auto | voir `cloudnative-pg/README.md` |
+| `observability/` | **kube-prometheus-stack** (Prometheus/Grafana/Alertmanager) + **Loki** + **Alloy** (logs) ; UI sous `grafana\|prometheus\|alertmanager.talos.lab.ops.nc` ; stockage `longhorn-r1` | voir `observability/README.md` |
 | `metric-server.yaml` | `metrics-server` v0.9.0 **adapté Talos** (`--kubelet-insecure-tls`, port sécurisé 10250) | `kubectl apply -f _k8s/metric-server.yaml` |
 | `platform-up.sh` | Installe la plateforme **de base** (Cilium+L2 → Envoy → metrics → cert-manager), idempotent. **Sans** argocd/vault/longhorn/kyverno/… (addons à part) | `./_k8s/platform-up.sh` |
 
