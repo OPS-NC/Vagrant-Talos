@@ -87,6 +87,8 @@ des autres addons (Trivy Operator, CloudNativePG) pour voir leurs métriques + d
 - **CP qui saturent / apiserver qui flappe** → CP à 3 Go : passer à **4 Go** (`CP_MEM`, `vagrant reload` des CP un par un).
 - **PVC `Pending` / `ReplicaSchedulingFailure`** → `longhorn-r1` absente, ou disque plein (baisser rétention/ tailles).
 - **Pas de logs dans Loki** → un Alloy par node en `2/2` ? `kubectl -n monitoring get ds alloy`. Vérifier `loki.write` (logs Alloy).
+- **Un pod « sans logs »** → souvent juste une **plage temporelle** trop courte : les pods sains (prometheus, node-exporter…) loguent au démarrage puis se taisent. Élargir la fenêtre Grafana (12-24 h).
+- **Logs du control-plane (apiserver/scheduler/controller-manager)** → ce sont des **static pods** : leur dossier `/var/log/pods` est nommé `<ns>_<pod>_<HASH>` (hash de config), pas `<uid>` API. Le `__path__` d'Alloy matche par `<ns>_<pod>_*` pour les couvrir. **etcd** échappe à Loki : sur Talos ce n'est **pas** un pod k8s mais un **service Talos** → `talosctl logs etcd` (nécessiterait un shipper dédié pour Loki).
 
 ## Sources
 
