@@ -1,0 +1,73 @@
+# kube-prometheus-stack-values.yaml — pile métriques du lab Talos.
+#
+# Fournit : Prometheus (+ opérateur & CRDs ServiceMonitor/PodMonitor), Grafana,
+# Alertmanager, node-exporter, kube-state-metrics. C'est la base de tout module « ops »
+# (PromQL, dashboards, alerting).
+#
+# Choix « lab » :
+#   - stockage sur `longhorn-r1` (1 réplica bloc, StorageClass créée par l'addon
+#     cloudnative-pg/) → PVC légers, pas de saturation du disque OS partagé.
+#   - rétention courte (2 j) + resources bornées (CP/workers modestes).
+#   - composants control-plane (etcd/scheduler/controller-manager/proxy) DÉSACTIVÉS :
+#     sur Talos ils ne sont pas scrapables sans config TLS dédiée → évite des cibles
+#     « down » bruyantes en formation.
+
+grafana:
+  # Mot de passe admin par défaut du chart : admin / prom-operator (à changer, cf. README).
+  persistence:
+    enabled: true
+    storageClassName: longhorn-r1
+    size: 1Gi
+  grafana.ini:
+    server:
+      # Grafana est exposé à la racine d'un hôte dédié (pas de sous-chemin).
+      domain: grafana.talos.lab.ops.nc
+      root_url: https://grafana.talos.lab.ops.nc
+  # Ajoute Loki comme source de logs (l'addon Loki tourne dans le même namespace).
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      access: proxy
+      url: http://loki-gateway.monitoring.svc.cluster.local
+      jsonData:
+        maxLines: 1000
+
+prometheus:
+  prometheusSpec:
+    retention: 2d
+    externalUrl: https://prometheus.talos.lab.ops.nc
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+      limits:
+        memory: 1Gi
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: longhorn-r1
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 3Gi
+    # Scrape TOUS les ServiceMonitor/PodMonitor du cluster (pas seulement ceux portant
+    # le label de CE release). Indispensable pour récupérer trivy-operator, CloudNativePG, etc.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+
+alertmanager:
+  alertmanagerSpec:
+    externalUrl: https://alertmanager.talos.lab.ops.nc
+    # Pas de PVC : stockage emptyDir (défaut) — l'historique d'alertes n'a pas besoin de survivre dans un lab.
+
+# --- Control-plane Talos : non scrapable par défaut → on désactive ces moniteurs --------
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeEtcd:
+  enabled: false
+kubeProxy:
+  enabled: false

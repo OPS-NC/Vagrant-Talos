@@ -22,6 +22,7 @@ Talos** qu'il faut poser AVANT le `helm install` :
 | `patch-longhorn.yaml` | Patch machine config : `kubelet.extraMounts` `/var/lib/longhorn` (rshared) |
 | `values.yaml` | Valeurs Helm (chemin de données, réplicas, StorageClass par défaut) |
 | `httproute.yaml` | `HTTPRoute` HTTPS `longhorn.talos.lab.ops.nc` → `longhorn-frontend:80` sur `main-gateway` |
+| `longhorn-r1-storageclass.yaml` | StorageClass **socle** `longhorn-r1` (1 réplica bloc) — mutualisée par `cloudnative-pg/` et `observability/` (donnée reconstructible / répliquée au niveau applicatif) |
 
 > **Deux prérequis, deux endroits :**
 > - **Extensions** (image d'installeur) → variable **`INSTALLER_IMAGE`** de `lab.env`
@@ -134,7 +135,26 @@ kubectl get pvc test-longhorn                           # Bound
 kubectl delete pvc test-longhorn
 ```
 
-## 6. Exposer l'UI via la Gateway
+## 6. StorageClass socle `longhorn-r1` (1 réplica) — pour les addons
+
+En plus de `longhorn` (3 réplicas, défaut), on pose une StorageClass **`longhorn-r1`** à
+**1 réplica bloc**, mutualisée par les addons qui n'ont pas besoin de la réplication bloc :
+
+- **`observability/`** (Prometheus, Loki, Grafana) : donnée reconstructible/jetable ;
+- **`cloudnative-pg/`** : PostgreSQL réplique déjà au niveau applicatif (3 instances).
+
+Elle évite de tripler la conso disque (crucial sur le disque OS ~20 Go/node partagé, où
+empiler des volumes 3-réplicas déclenche des `ReplicaSchedulingFailure`).
+
+```bash
+kubectl apply -f _k8s/longhorn/longhorn-r1-storageclass.yaml
+kubectl get storageclass          # longhorn (default, 3 rép.) + longhorn-r1 (1 rép.)
+```
+
+> Définie **une seule fois** ici (socle) ; consommée par les autres addons. Sur une base
+> **critique**, garder `longhorn` (3 réplicas) ou déléguer la résilience à l'appli.
+
+## 7. Exposer l'UI via la Gateway
 
 ```bash
 kubectl apply -f _k8s/longhorn/httproute.yaml    # https://longhorn.talos.lab.ops.nc

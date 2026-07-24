@@ -1,0 +1,13 @@
+# Namespace de la pile d'observabilité.
+#
+# PodSecurity `privileged` : requis par node-exporter (hostNetwork/hostPID/hostPath/hostPort)
+# ET par Alloy (hostPath /var/log/pods pour lire les logs). Le défaut Talos est `baseline`,
+# qui refuserait ces pods. On pose donc le niveau `privileged` sur CE namespace uniquement.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged
