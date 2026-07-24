@@ -65,13 +65,13 @@ echo "    attente des nodes Ready..."
 kubectl wait --for=condition=Ready nodes --all --timeout=300s
 
 log "[2/6] Pool L2 Cilium (IP LoadBalancer .200-.230 + annonce ARP)"
-kubectl apply -f _k8s/Cilium/cilium-l2.yml
+kubectl apply -f _k8s/cilium/cilium-l2.yml
 
 log "[3/6] Envoy Gateway ${ENVOY_GW_VERSION} + main-gateway"
 helm upgrade --install eg oci://docker.io/envoyproxy/gateway-helm \
   --version "${ENVOY_GW_VERSION}" -n envoy-gateway-system --create-namespace
 kubectl -n envoy-gateway-system rollout status deploy/envoy-gateway --timeout=180s
-kubectl apply -f _k8s/Envoy-Proxy/Envoy-Proxy.yml
+kubectl apply -f _k8s/envoy-gateway/Envoy-Proxy.yml
 echo "    attente de l'IP LoadBalancer (annonce L2)..."
 for _ in $(seq 1 30); do
   ip="$(kubectl -n envoy-gateway-system get svc -o jsonpath='{.items[?(@.spec.type=="LoadBalancer")].status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)"

@@ -1,4 +1,4 @@
-# `Cilium/` — IP LoadBalancer + annonce L2 (ARP)
+# `cilium/` — IP LoadBalancer + annonce L2 (ARP)
 
 Donne aux Services `type: LoadBalancer` une IP **réelle sur le réseau host-only**
 `192.168.56.0/24`, sans cloud provider ni MetalLB : c'est **Cilium** qui joue le rôle,
@@ -37,7 +37,7 @@ Service reste en `<pending>`.
 ## Appliquer
 
 ```bash
-kubectl apply -f _k8s/Cilium/cilium-l2.yml
+kubectl apply -f _k8s/cilium/cilium-l2.yml
 ```
 
 ## Vérifier
