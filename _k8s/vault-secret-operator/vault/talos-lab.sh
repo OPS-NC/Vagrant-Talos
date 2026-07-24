@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Config côté serveur Vault pour le lab : auth Kubernetes + moteur KV-v2 "talos-lab/"
-# (un sous-dossier par appli) + policy/role de l'appli de démo "nginx-test".
+# (un sous-dossier par appli) + policy/role de l'appli de démo "nginx-test-vault".
 #
 # Idempotent : relançable sans casse. À lancer depuis l'hôte avec le CLI vault :
 #   export VAULT_ADDR=https://vault.talos.lab.ops.nc
@@ -27,26 +27,26 @@ vault secrets enable -path=talos-lab -version=2 kv 2>/dev/null \
   || echo "   (moteur talos-lab/ déjà activé)"
 
 echo "==> 3. Secrets de démo (un sous-dossier par appli)"
-# Convention : talos-lab/<appli>/<clé-logique>. Ici l'appli nginx-test.
-vault kv put talos-lab/nginx-test/config \
+# Convention : talos-lab/<appli>/<clé-logique>. Ici l'appli nginx-test-vault.
+vault kv put talos-lab/nginx-test-vault/config \
   APP_GREETING="Bonjour depuis Vault" \
   APP_COLOR="blue" \
   APP_SECRET_TOKEN="s3cr3t-v1" >/dev/null
-echo "   talos-lab/nginx-test/config écrit"
+echo "   talos-lab/nginx-test-vault/config écrit"
 
-echo "==> 4. Policy (lecture du sous-dossier nginx-test uniquement)"
-vault policy write talos-lab-nginx-test "$HERE/policies/talos-lab-nginx-test.hcl"
+echo "==> 4. Policy (lecture du sous-dossier nginx-test-vault uniquement)"
+vault policy write talos-lab-nginx-test-vault "$HERE/policies/talos-lab-nginx-test-vault.hcl"
 
-echo "==> 5. Role auth/kubernetes 'nginx-test' -> SA nginx-test / ns nginx-test"
+echo "==> 5. Role auth/kubernetes 'nginx-test-vault' -> SA nginx-test-vault / ns nginx-test-vault"
 # bound_service_account_* = QUI peut se logger (identité exacte du pod applicatif).
 # audience "vault" DOIT matcher VaultAuth.spec.kubernetes.audiences côté K8s.
-vault write auth/kubernetes/role/nginx-test \
-  bound_service_account_names="nginx-test" \
-  bound_service_account_namespaces="nginx-test" \
+vault write auth/kubernetes/role/nginx-test-vault \
+  bound_service_account_names="nginx-test-vault" \
+  bound_service_account_namespaces="nginx-test-vault" \
   audience="vault" \
-  token_policies="talos-lab-nginx-test" \
+  token_policies="talos-lab-nginx-test-vault" \
   token_ttl="15m" >/dev/null
 
 echo "==> OK. Vérifs :"
-echo "   vault kv get talos-lab/nginx-test/config"
-echo "   vault read auth/kubernetes/role/nginx-test"
+echo "   vault kv get talos-lab/nginx-test-vault/config"
+echo "   vault read auth/kubernetes/role/nginx-test-vault"
