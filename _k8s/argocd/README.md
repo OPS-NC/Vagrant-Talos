@@ -5,6 +5,10 @@ Déploie **Argo CD** dans le cluster Talos et expose son UI/API en **HTTPS** sou
 du lab. Le TLS est assuré par le **wildcard `*.talos.lab.ops.nc`** déjà émis par
 cert-manager — rien de neuf côté certificat.
 
+> **Addon à part** : Argo CD n'est **pas** installé par `platform-up.sh` (qui ne pose que
+> Cilium + Envoy + metrics-server + cert-manager). On l'installe à la demande, comme
+> `longhorn/`, `vault-cluster/`, `kyverno/`… : `./_k8s/argocd/argocd-up.sh`.
+
 ## Le montage en une phrase
 
 **Envoy termine le TLS, argocd-server parle en clair.** On règle `server.insecure=true` :
@@ -20,9 +24,15 @@ de redirection**. C'est le mode recommandé derrière un ingress/gateway qui gè
   (comme le reste de `*.talos.lab.ops.nc`). Pour un test local sans DNS, voir plus bas.
 - Rien de spécial côté Talos : Argo CD n'a besoin d'aucun privilège ni hostPath.
 
-## Installation (Helm)
+## Installation
 
-Chart `argo/argo-cd` épinglé (cf. [releases argo-helm](https://github.com/argoproj/argo-helm/releases)) ;
+Tout-en-un, idempotent (helm + HTTPRoute) :
+
+```bash
+./_k8s/argocd/argocd-up.sh
+```
+
+Ou à la main. Chart `argo/argo-cd` épinglé (cf. [releases argo-helm](https://github.com/argoproj/argo-helm/releases)) ;
 `values.yaml` porte le mode `insecure` + l'URL publique + l'allègement (Dex/notifs coupés).
 
 ```bash
@@ -32,6 +42,7 @@ helm upgrade --install argocd argo/argo-cd \
   --version 10.2.1 \                        # app v3.4.5 — épingle la dernière stable
   --values _k8s/argocd/values.yaml
 kubectl -n argocd rollout status deploy/argocd-server
+kubectl apply -f _k8s/argocd/httproute.yaml
 ```
 
 ## Exposition via la Gateway API
@@ -71,6 +82,7 @@ argocd login argo.talos.lab.ops.nc --grpc-web --username admin
 |---------|------|
 | `values.yaml` | Valeurs Helm : `server.insecure=true`, `url`, Dex/notifications coupés |
 | `httproute.yaml` | `HTTPRoute` HTTPS `argo.talos.lab.ops.nc` → `argocd-server:80` sur `main-gateway` |
+| `argocd-up.sh` | Installe Argo CD (helm) + applique la HTTPRoute (idempotent) |
 
 ## Vérifier
 
