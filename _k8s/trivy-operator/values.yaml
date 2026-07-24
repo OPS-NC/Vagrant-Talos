@@ -16,10 +16,13 @@
 # (CVE HIGH/CRITICAL corrigeables uniquement).
 
 operator:
-  # Au plus 2 jobs de scan en parallèle (défaut 10) : évite un pic RAM/CPU sur le lab.
-  scanJobsConcurrentLimit: 2
-  # Un rapport de vuln est ré-évalué toutes les 24 h.
-  scannerReportTTL: "24h"
+  # Un seul job de scan à la fois (défaut 10) : aucune parallélisation, les scans sont
+  # sérialisés → charge CPU/RAM étalée, jamais de pic sur le lab.
+  scanJobsConcurrentLimit: 1
+  # Cadence de re-scan : un rapport plus vieux que ce TTL est ré-évalué. À 30 min, chaque
+  # workload est re-scanné ~toutes les 30 min (par vagues, un scan à la fois), puis
+  # l'operator reste au repos entre deux — donc PAS de scan constant.
+  scannerReportTTL: "30m"
 
 trivy:
   # Mode Standalone : chaque job embarque son scan (simple). Pour un gros cluster, préférer
