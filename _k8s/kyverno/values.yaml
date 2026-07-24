@@ -1,0 +1,32 @@
+# values.yaml — Kyverno pour le lab Talos (chart kyverno/kyverno).
+#
+# Kyverno = « policy engine » Kubernetes : il valide / mute / génère des ressources
+# à l'admission (webhook) et en arrière-plan (background scan). Il écrit ses verdicts
+# dans des PolicyReport, que Policy Reporter agrège dans une UI (voir policy-reporter-values.yaml).
+#
+# Choix « lab » :
+#   - replicas=1 par contrôleur (allègement ; en prod on met 3 pour l'admission-controller
+#     afin de ne jamais perdre le webhook). Sur des CP à 3 Go (cf. lab.env), on économise.
+#   - resources laissées au défaut du chart (req 128Mi / lim 384Mi, cpu 100m) — déjà sobres.
+#   - securityContext défaut = conforme PodSecurity `restricted` : Kyverno tourne sans
+#     privilège dans un namespace `baseline` (le défaut Talos), rien à labelliser.
+#
+# Sécurité importante : le chart exclut déjà `kube-system`, `kube-public`, `kube-node-lease`
+# de ses webhooks (config.resourceFilters). Les composants système ne sont donc JAMAIS
+# soumis aux policies — on ne risque pas de bloquer l'apiserver ou le CNI.
+
+# Contrôleur d'admission : applique les policies validate/mutate sur les requêtes entrantes.
+admissionController:
+  replicas: 1
+
+# Contrôleur d'arrière-plan : applique mutate/generate sur l'existant + re-scan périodique.
+backgroundController:
+  replicas: 1
+
+# Contrôleur de nettoyage : exécute les CleanupPolicy (TTL sur ressources). Léger.
+cleanupController:
+  replicas: 1
+
+# Contrôleur de rapports : produit les PolicyReport consommés par Policy Reporter.
+reportsController:
+  replicas: 1
