@@ -1,0 +1,70 @@
+# cluster-demo.yaml — un cluster PostgreSQL HA de démonstration, géré par CloudNativePG.
+#
+# 3 instances (1 primaire + 2 réplicas en streaming), une par worker grâce à l'anti-
+# affinité par défaut. Stockage : PVC 1Gi RWO sur Longhorn (répliqué au niveau bloc PAR
+# Longhorn, en plus de la réplication logique PostgreSQL — deux couches distinctes).
+#
+# À la création, l'opérateur génère automatiquement :
+#   - une base `app` + un utilisateur `app`,
+#   - le Secret `pg-demo-app` (identifiants applicatifs : host, user, password, dbname, uri),
+#   - un Service `pg-demo-rw` (lecture/écriture → primaire) et `pg-demo-ro` (lecture → réplicas).
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cnpg-demo
+---
+# StorageClass Longhorn à 1 réplica bloc, dédiée aux bases répliquées au niveau applicatif.
+#
+# POURQUOI 1 et pas 3 : PostgreSQL réplique DÉJÀ ses données via les 3 instances CNPG
+# (réplication streaming). Empiler 3 réplicas Longhorn PAR instance ferait 9 copies du même
+# jeu de données pour 3 nœuds logiques — gâchis de disque (et, sur le disque OS ~20Go
+# partagé du lab, ça sature : le 3e réplica ne se planifie plus). 1 réplica Longhorn suffit :
+# si un node meurt, CNPG reconstruit l'instance perdue depuis le primaire.
+# => C'est le pattern recommandé pour un opérateur de BDD sur Longhorn.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: longhorn-r1
+provisioner: driver.longhorn.io
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+parameters:
+  numberOfReplicas: "1"
+  staleReplicaTimeout: "30"
+  fsType: "ext4"
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg-demo
+  namespace: cnpg-demo
+spec:
+  # 3 nœuds = 1 primaire + 2 réplicas synchronisés par réplication streaming.
+  instances: 3
+
+  # Stockage par instance : 1Gi RWO sur Longhorn, 1 réplica bloc (voir StorageClass ci-dessus).
+  storage:
+    size: 1Gi
+    storageClass: longhorn-r1
+
+  # Ressources par instance — calibrées pour des workers à 4 Go (cf. lab.env WK_MEM).
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 100m
+    limits:
+      memory: 512Mi
+
+  # Réglages PostgreSQL adaptés à un petit cluster de lab.
+  postgresql:
+    parameters:
+      max_connections: "100"
+      shared_buffers: "128MB"
+
+  # PodMonitor désactivé tant que kube-prometheus-stack n'est pas installé (voir README).
+  monitoring:
+    enablePodMonitor: false
+
+  # (bootstrap par défaut : crée la base `app` + l'utilisateur `app` + le Secret pg-demo-app)
