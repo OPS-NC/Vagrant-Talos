@@ -20,9 +20,16 @@ ui:
   # L'UI doit connaître ses back-ends (core + plugin kyverno) ; le chart câble ça
   # automatiquement quand ui.enabled + plugin.kyverno.enabled sont vrais.
 
-# --- Plugin Kyverno (détail des policies dans l'UI) ---------------------------
+# --- Plugins (détail des sources dans l'UI) -----------------------------------
 plugin:
+  # Détail des policies Kyverno (validate/mutate/generate).
   kyverno:
+    enabled: true
+    replicaCount: 1
+  # Remonte les rapports de Trivy Operator (CVE, config audit, secrets, RBAC) dans
+  # cette même UI. Sans effet tant que ../trivy-operator/ n'est pas installé, mais
+  # inoffensif à laisser actif. Voir _k8s/trivy-operator/.
+  trivy:
     enabled: true
     replicaCount: 1
 
