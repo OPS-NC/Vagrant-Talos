@@ -81,10 +81,10 @@ pas à répéter l'adresse. Le cache client est en **`persistenceModel: none`** 
 pas de leases à préserver, et **aucune dépendance au moteur Transit**). Le repasser en
 `direct-encrypted` (+ Transit + role `vso-transit`) le jour où on synchronise des creds dynamiques.
 
-## Mise en route réelle du lab : moteur `talos-lab/` + démo `nginx-test`
+## Mise en route réelle du lab : moteur `talos-lab/` + démo `nginx-test-vault`
 
 Le chemin **concret et testé** de ce lab (le serveur Vault est `../vault-cluster/`). Un moteur
-KV-v2 **`talos-lab/`** avec **un sous-dossier par appli** ; la démo `nginx-test` prouve la boucle
+KV-v2 **`talos-lab/`** avec **un sous-dossier par appli** ; la démo `nginx-test-vault` prouve la boucle
 complète : secret Vault → `Secret` K8s → **variables d'env** de nginx → **redémarrage auto** du
 Deployment quand le secret change.
 
@@ -101,21 +101,21 @@ export VAULT_ADDR=https://vault.talos.lab.ops.nc
 export VAULT_TOKEN=<root-token>                     # cf. vault-cluster/
 ./_k8s/vault-secret-operator/vault/talos-lab.sh
 
-# 3. Démo nginx-test (namespace + SA + VaultAuth + VaultStaticSecret + Deployment)
-kubectl apply -f _k8s/vault-secret-operator/k8s/nginx-test/nginx-test.yaml
+# 3. Démo nginx-test-vault (namespace + SA + VaultAuth + VaultStaticSecret + Deployment)
+kubectl apply -f _k8s/vault-secret-operator/k8s/nginx-test-vault/nginx-test-vault.yaml
 ```
 
 **Vérifier la boucle :**
 ```bash
-kubectl -n nginx-test get vaultstaticsecret nginx-test-config   # SecretSynced=True
-kubectl -n nginx-test get secret nginx-test-config              # créé par VSO
-POD=$(kubectl -n nginx-test get pod -l app=nginx-test -o jsonpath='{.items[0].metadata.name}')
-kubectl -n nginx-test exec "$POD" -- env | grep '^APP_'         # APP_GREETING / APP_COLOR / APP_SECRET_TOKEN
+kubectl -n nginx-test-vault get vaultstaticsecret nginx-test-vault-config   # SecretSynced=True
+kubectl -n nginx-test-vault get secret nginx-test-vault-config              # créé par VSO
+POD=$(kubectl -n nginx-test-vault get pod -l app=nginx-test-vault -o jsonpath='{.items[0].metadata.name}')
+kubectl -n nginx-test-vault exec "$POD" -- env | grep '^APP_'         # APP_GREETING / APP_COLOR / APP_SECRET_TOKEN
 
 # Rotation auto : on change le secret dans Vault -> VSO resync (refreshAfter 30s) -> Secret
 # mis à jour -> rolloutRestartTargets relance le Deployment -> nouveaux pods avec la nouvelle valeur
-vault kv put talos-lab/nginx-test/config APP_COLOR=green APP_GREETING="..." APP_SECRET_TOKEN=v2
-kubectl -n nginx-test rollout status deploy/nginx-test          # nouvelle révision
+vault kv put talos-lab/nginx-test-vault/config APP_COLOR=green APP_GREETING="..." APP_SECRET_TOKEN=v2
+kubectl -n nginx-test-vault rollout status deploy/nginx-test-vault          # nouvelle révision
 ```
 
 Ajouter une appli = un sous-dossier `talos-lab/<appli>/…`, une policy scopée à ce sous-dossier,
