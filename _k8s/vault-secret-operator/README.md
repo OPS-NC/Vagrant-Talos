@@ -77,8 +77,49 @@ kubectl -n vault-secrets-operator rollout status deploy/vault-secrets-operator-c
 ```
 
 `values.yaml` pose un `VaultConnection` **par défaut** (l'adresse Vault) pour que les CRD n'aient
-pas à répéter l'adresse. On y active aussi le **cache client chiffré par Transit** (les leases des
-creds dynamiques survivent à un redémarrage de l'opérateur — cf. `values.yaml`).
+pas à répéter l'adresse. Le cache client est en **`persistenceModel: none`** (secrets statiques →
+pas de leases à préserver, et **aucune dépendance au moteur Transit**). Le repasser en
+`direct-encrypted` (+ Transit + role `vso-transit`) le jour où on synchronise des creds dynamiques.
+
+## Mise en route réelle du lab : moteur `talos-lab/` + démo `nginx-test`
+
+Le chemin **concret et testé** de ce lab (le serveur Vault est `../vault-cluster/`). Un moteur
+KV-v2 **`talos-lab/`** avec **un sous-dossier par appli** ; la démo `nginx-test` prouve la boucle
+complète : secret Vault → `Secret` K8s → **variables d'env** de nginx → **redémarrage auto** du
+Deployment quand le secret change.
+
+```bash
+# 0. CLI vault (Ubuntu, dépôt HashiCorp) — dist "noble" (binaire générique, ok sur + récent)
+wget -qO- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com noble main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+sudo apt-get update && sudo apt-get install -y vault
+
+# 1. Opérateur VSO (cf. section précédente)
+
+# 2. Config côté Vault : auth k8s + moteur talos-lab/ + secret + policy + role
+export VAULT_ADDR=https://vault.talos.lab.ops.nc
+export VAULT_TOKEN=<root-token>                     # cf. vault-cluster/
+./_k8s/vault-secret-operator/vault/talos-lab.sh
+
+# 3. Démo nginx-test (namespace + SA + VaultAuth + VaultStaticSecret + Deployment)
+kubectl apply -f _k8s/vault-secret-operator/k8s/nginx-test/nginx-test.yaml
+```
+
+**Vérifier la boucle :**
+```bash
+kubectl -n nginx-test get vaultstaticsecret nginx-test-config   # SecretSynced=True
+kubectl -n nginx-test get secret nginx-test-config              # créé par VSO
+POD=$(kubectl -n nginx-test get pod -l app=nginx-test -o jsonpath='{.items[0].metadata.name}')
+kubectl -n nginx-test exec "$POD" -- env | grep '^APP_'         # APP_GREETING / APP_COLOR / APP_SECRET_TOKEN
+
+# Rotation auto : on change le secret dans Vault -> VSO resync (refreshAfter 30s) -> Secret
+# mis à jour -> rolloutRestartTargets relance le Deployment -> nouveaux pods avec la nouvelle valeur
+vault kv put talos-lab/nginx-test/config APP_COLOR=green APP_GREETING="..." APP_SECRET_TOKEN=v2
+kubectl -n nginx-test rollout status deploy/nginx-test          # nouvelle révision
+```
+
+Ajouter une appli = un sous-dossier `talos-lab/<appli>/…`, une policy scopée à ce sous-dossier,
+un role k8s dédié (SA/ns de l'appli) — voir `vault/talos-lab.sh` comme gabarit.
 
 ## Appliquer les CRD (dossier `k8s/`)
 
@@ -130,7 +171,8 @@ kubectl -n demo get secret static-kv -o jsonpath='{.data.password}' | base64 -d 
 - **`rolloutRestartTargets`** : redémarre automatiquement les workloads qui ne rechargent pas un
   `Secret` à chaud (la plupart). Sans ça, un secret tourné n'atteint jamais le process.
 - **Cache client persistant chiffré (Transit)** : les leases survivent au redémarrage de l'opérateur
-  → pas de creds dynamiques orphelins. Activé dans `values.yaml`.
+  → pas de creds dynamiques orphelins. **Optionnel** : désactivé ici (`persistenceModel: none`, car on
+  ne fait que du statique) ; à activer avec les creds dynamiques.
 - **GitOps** : versionner les CRD ici ; **jamais** les valeurs de secret. VSO écrit les `Secret`, git
   ne les voit pas.
 - **RBAC sur les `VaultAuth`** : restreindre qui peut créer/éditer un `VaultAuth` (c'est une porte
@@ -149,8 +191,9 @@ kubectl -n demo get secret static-kv -o jsonpath='{.data.password}' | base64 -d 
   avec des tokens projetés courts (l'`iss` varie), sinon logins cassés.
 - **Secret jamais mis à jour dans le pod** : il manque `rolloutRestartTargets` (l'app garde l'ancienne
   valeur en mémoire). Le `Secret` K8s, lui, est bien à jour — vérifier avec `kubectl get secret`.
-- **Creds dynamiques orphelins après crash de l'opérateur** : cache client en mémoire (`none`). Passer
-  en `persistenceModel: direct-encrypted` + Transit (fait dans `values.yaml`).
+- **Creds dynamiques orphelins après crash de l'opérateur** : cache client en mémoire (`none`, valeur
+  actuelle — ok pour du statique). Pour des creds dynamiques, passer en `persistenceModel: direct-encrypted`
+  + Transit + role `vso-transit`.
 - **CA TLS de Vault** : en HTTPS avec une CA privée, fournir `caCertSecretRef` au `VaultConnection`,
   sinon `x509: certificate signed by unknown authority`. `skipTLSVerify: true` = lab uniquement.
 
