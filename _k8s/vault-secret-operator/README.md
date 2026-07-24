@@ -60,7 +60,7 @@ puis les CRD.
 - Un **serveur Vault** joignable (déscellé/`unsealed`). In-cluster (chart `hashicorp/vault`) **ou**
   externe. L'adresse se met dans `values.yaml` (`defaultVaultConnection.address`) **ou** dans un
   `VaultConnection` (`k8s/01-vaultconnection.yaml`). Pour le lab : `https://vault.talos.lab.ops.nc` si
-  exposé via le Gateway (cf. `../Envoy-Proxy/`), ou `http://vault.vault.svc.cluster.local:8200`.
+  exposé via le Gateway (cf. `../envoy-gateway/`), ou `http://vault.vault.svc.cluster.local:8200`.
 - L'**API Kubernetes** joignable par Vault pour la revue de token. Endpoint du lab : la VIP
   `https://192.168.56.5:6443` (cf. `talos/patch-cp.yaml`).
 - `vault` CLI (ou un pod Vault où lancer les commandes) et `helm` + `kubectl`.

@@ -9,8 +9,8 @@ couche « réseau applicatif » du lab : IP LoadBalancer, point d'entrée HTTP(S
 ```
 cluster sans CNI (CNI=none)  ─►  Cilium installé en Helm (README §9)
         │
-        ├─ 1. Cilium/         Pool d'IP LoadBalancer + annonce L2 (ARP) → donne le VIP .200
-        ├─ 2. Envoy-Proxy/    Contrôleur envoy-gateway + Gateway (point d'entrée HTTP/HTTPS)
+        ├─ 1. cilium/         Pool d'IP LoadBalancer + annonce L2 (ARP) → donne le VIP .200
+        ├─ 2. envoy-gateway/    Contrôleur envoy-gateway + Gateway (point d'entrée HTTP/HTTPS)
         ├─ 3. cert-manager/   TLS wildcard *.talos.lab.ops.nc via Let's Encrypt DNS-01 Cloudflare
         └─ 4. metric-server   API metrics.k8s.io (kubectl top, HPA)
 ```
@@ -29,10 +29,11 @@ relançable. **N'installe PAS** `vault-secret-operator/` ni `longhorn/` (à pose
 
 | Chemin | Rôle | Détail |
 |--------|------|--------|
-| `Cilium/` | Attribue et **annonce en L2** les IP des Services `LoadBalancer` sur le réseau host-only | voir `Cilium/README.md` |
-| `Envoy-Proxy/` | Contrôleur **Envoy Gateway** + `GatewayClass`/`Gateway` + apps de démo | voir `Envoy-Proxy/README.md` |
+| `cilium/` | Attribue et **annonce en L2** les IP des Services `LoadBalancer` sur le réseau host-only | voir `cilium/README.md` |
+| `envoy-gateway/` | Contrôleur **Envoy Gateway** + `GatewayClass`/`Gateway` + apps de démo | voir `envoy-gateway/README.md` |
 | `cert-manager/` | Certificats TLS wildcard automatiques (ACME **DNS-01 Cloudflare**) branchés sur le Gateway | voir `cert-manager/README.md` |
 | `longhorn/` | Stockage bloc distribué **Longhorn** (StorageClass `longhorn`) + prérequis Talos (extensions, montages) | voir `longhorn/README.md` |
+| `vault-cluster/` | **HashiCorp Vault** en HA (Raft) sur Longhorn ; UI/API exposées en HTTPS sous `vault.talos.lab.ops.nc` via `main-gateway` | voir `vault-cluster/README.md` |
 | `vault-secret-operator/` | Secrets **HashiCorp Vault** synchronisés en `Secret` K8s natifs via le **Vault Secrets Operator** (static/dynamic/PKI) — côtés K8s **et** Vault | voir `vault-secret-operator/README.md` |
 | `argocd/` | **Argo CD** (GitOps), UI/API exposées en HTTPS sous `argo.talos.lab.ops.nc` via `main-gateway` (TLS wildcard cert-manager) | voir `argocd/README.md` |
 | `kyverno/` | **Kyverno** (policy engine : validate/mutate/generate) + **Policy Reporter** (UI) sous `kyverno.talos.lab.ops.nc` ; policies pédagogiques en mode Audit | voir `kyverno/README.md` |

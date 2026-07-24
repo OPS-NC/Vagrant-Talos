@@ -14,7 +14,7 @@ de redirection**. C'est le mode recommandé derrière un ingress/gateway qui gè
 
 ## Prérequis
 
-- `main-gateway` en place avec l'écouteur **HTTPS:443** (`../Envoy-Proxy/`), et le cert
+- `main-gateway` en place avec l'écouteur **HTTPS:443** (`../envoy-gateway/`), et le cert
   wildcard `wildcard-talos-lab-ops-nc-tls` **`READY=True`** (`../cert-manager/`).
 - DNS : `argo.talos.lab.ops.nc → 192.168.56.200` en **DNS-only** chez Cloudflare
   (comme le reste de `*.talos.lab.ops.nc`). Pour un test local sans DNS, voir plus bas.

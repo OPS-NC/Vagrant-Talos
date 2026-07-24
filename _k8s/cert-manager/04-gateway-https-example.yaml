@@ -1,6 +1,6 @@
 # Gateway `main-gateway` AVEC écouteur HTTPS wildcard + intégration cert-manager.
 #
-# À FUSIONNER dans _k8s/Envoy-Proxy/Envoy-Proxy.yml (bloc Gateway), ou à appliquer tel
+# À FUSIONNER dans _k8s/envoy-gateway/Envoy-Proxy.yml (bloc Gateway), ou à appliquer tel
 # quel (il REMPLACE le Gateway existant — mêmes name/namespace).
 #
 # Mécanique (nécessite cert-manager installé avec config.enableGatewayAPI=true) :

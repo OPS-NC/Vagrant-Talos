@@ -18,7 +18,7 @@ ici puisque le VIP `.200` est une IP privée joignable seulement via Tailscale.
 
 ## Prérequis
 
-- Gateway `main-gateway` en place (voir `../Envoy-Proxy/README.md`).
+- Gateway `main-gateway` en place (voir `../envoy-gateway/README.md`).
 - Zone `ops.nc` gérée par Cloudflare, avec `*.talos.lab.ops.nc → 192.168.56.200` en **DNS-only**.
 - Un **token API Cloudflare** : permissions `Zone/DNS/Edit` + `Zone/Zone/Read`, scopé `ops.nc`.
 

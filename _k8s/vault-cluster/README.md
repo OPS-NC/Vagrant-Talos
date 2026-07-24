@@ -18,7 +18,7 @@ UI + API exposées en **HTTPS** sous `vault.talos.lab.ops.nc`.
 ## Prérequis
 
 - Longhorn opérationnel (StorageClass `longhorn`), cf. `../longhorn/`.
-- `main-gateway` + écouteur HTTPS + cert wildcard, cf. `../Envoy-Proxy/` et `../cert-manager/`.
+- `main-gateway` + écouteur HTTPS + cert wildcard, cf. `../envoy-gateway/` et `../cert-manager/`.
 - DNS `vault.talos.lab.ops.nc → 192.168.56.200` (couvert par le wildcard).
 
 ## 1. Installer (Helm)

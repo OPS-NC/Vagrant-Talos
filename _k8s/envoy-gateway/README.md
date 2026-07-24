@@ -1,4 +1,4 @@
-# `Envoy-Proxy/` — point d'entrée HTTP(S) via Envoy Gateway
+# `envoy-gateway/` — point d'entrée HTTP(S) via Envoy Gateway
 
 Le **point d'entrée unique** du cluster (le VIP `192.168.56.200`). On utilise le projet
 [**Envoy Gateway**](https://gateway.envoyproxy.io/) (implémentation de la Gateway API) :
@@ -45,8 +45,8 @@ Test : `curl http://192.168.56.200/hello` et `.../echo`.
 ## Appliquer
 
 ```bash
-kubectl apply -f _k8s/Envoy-Proxy/Envoy-Proxy.yml
-kubectl apply -f _k8s/Envoy-Proxy/GW-Example.yml     # démo, optionnel
+kubectl apply -f _k8s/envoy-gateway/Envoy-Proxy.yml
+kubectl apply -f _k8s/envoy-gateway/GW-Example.yml     # démo, optionnel
 kubectl get gateway main-gateway                      # PROGRAMMED=True, ADDRESS=192.168.56.200
 ```
 
@@ -74,10 +74,10 @@ spec:
 ## Vérifier / dépanner
 
 ```bash
-kubectl -n envoy-gateway-system get svc               # EXTERNAL-IP = 192.168.56.200 (sinon → Cilium/)
+kubectl -n envoy-gateway-system get svc               # EXTERNAL-IP = 192.168.56.200 (sinon → cilium/)
 kubectl get gateway,httproute -A
 kubectl describe gateway main-gateway                 # écouteurs, conditions, routes attachées
 ```
-- `ADDRESS` vide / `<pending>` → problème côté **Cilium/** (pool ou L2), pas ici.
+- `ADDRESS` vide / `<pending>` → problème côté **cilium/** (pool ou L2), pas ici.
 - Route en 404 → chemin/hostname qui ne matche aucune `HTTPRoute`, ou route non rattachée
   au bon `sectionName`.
