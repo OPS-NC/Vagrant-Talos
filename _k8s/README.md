@@ -35,6 +35,7 @@ relançable. **N'installe PAS** `vault-secret-operator/` ni `longhorn/` (à pose
 | `longhorn/` | Stockage bloc distribué **Longhorn** (StorageClass `longhorn`) + prérequis Talos (extensions, montages) | voir `longhorn/README.md` |
 | `vault-secret-operator/` | Secrets **HashiCorp Vault** synchronisés en `Secret` K8s natifs via le **Vault Secrets Operator** (static/dynamic/PKI) — côtés K8s **et** Vault | voir `vault-secret-operator/README.md` |
 | `argocd/` | **Argo CD** (GitOps), UI/API exposées en HTTPS sous `argo.talos.lab.ops.nc` via `main-gateway` (TLS wildcard cert-manager) | voir `argocd/README.md` |
+| `kyverno/` | **Kyverno** (policy engine : validate/mutate/generate) + **Policy Reporter** (UI) sous `kyverno.talos.lab.ops.nc` ; policies pédagogiques en mode Audit | voir `kyverno/README.md` |
 | `metric-server.yaml` | `metrics-server` v0.9.0 **adapté Talos** (`--kubelet-insecure-tls`, port sécurisé 10250) | `kubectl apply -f _k8s/metric-server.yaml` |
 | `platform-up.sh` | Installe la plateforme complète (Cilium → L2 → Envoy → metrics → cert-manager → Argo), idempotent, **hors** vault/longhorn | `./_k8s/platform-up.sh` |
 
