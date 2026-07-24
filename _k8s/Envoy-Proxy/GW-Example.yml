@@ -70,6 +70,7 @@ metadata:
 spec:
   parentRefs:
     - name: main-gateway
+      namespace: envoy-gateway-system
   rules:
     - matches:
         - path:
@@ -92,6 +93,7 @@ metadata:
 spec:
   parentRefs:
     - name: main-gateway
+      namespace: envoy-gateway-system
   rules:
     - matches:
         - path:

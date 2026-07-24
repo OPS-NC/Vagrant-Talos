@@ -9,11 +9,12 @@
 #   3. Il le résout en DNS-01 Cloudflare et remplit le Secret `wildcard-talos-lab-ops-nc-tls`.
 #   4. Envoy sert ce cert sur :443.
 #
-# Le Secret et le Certificate sont créés dans le namespace du Gateway (ici `default`).
+# Le Secret et le Certificate sont créés dans le namespace du Gateway (ici `envoy-gateway-system`).
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
   name: main-gateway
+  namespace: envoy-gateway-system
   annotations:
     # letsencrypt-staging pour tester, puis letsencrypt-prod pour un cert trusté
     cert-manager.io/cluster-issuer: letsencrypt-prod

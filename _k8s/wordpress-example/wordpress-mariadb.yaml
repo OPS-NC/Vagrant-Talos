@@ -170,7 +170,7 @@ metadata:
 spec:
   parentRefs:
     - name: main-gateway
-      namespace: default
+      namespace: envoy-gateway-system
       sectionName: https           # écouteur TLS :443 (cert wildcard cert-manager)
   hostnames:
     - wordpress.talos.lab.ops.nc
