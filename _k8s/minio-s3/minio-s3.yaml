@@ -5,8 +5,8 @@
 # fév. 2026, console amputée depuis mi-2025). Pigsty rebuild le serveur MinIO ET restaure la
 # CONSOLE D'ADMIN complète → on a À LA FOIS le récent ET l'admin UI.
 # Stockage : 1 PVC local-path (node-local, sans Longhorn). Exposé en HTTPS via main-gateway :
-#   - API S3   : https://minio.talos.lab.ops.nc          (port 9000)
-#   - Console  : https://minio-console.talos.lab.ops.nc  (port 9001, admin complète)
+#   - API S3   : https://minio.talos.lab.example.io          (port 9000)
+#   - Console  : https://minio-console.talos.lab.example.io  (port 9001, admin complète)
 #
 # Alternatives (README) : upstream épinglé RELEASE.2025-04-22 (dernière console admin officielle),
 # autres forks console (huncrys, georgmangold), ou l'édition payante AIStor.
@@ -66,7 +66,7 @@ spec:
               valueFrom: { secretKeyRef: { name: minio-creds, key: root-password } }
             # Redirection de la console derrière le reverse-proxy (hostname distinct de l'API).
             - name: MINIO_BROWSER_REDIRECT_URL
-              value: https://minio-console.talos.lab.ops.nc
+              value: https://minio-console.talos.lab.example.io
           ports:
             - { name: api,     containerPort: 9000 }
             - { name: console, containerPort: 9001 }
@@ -111,7 +111,7 @@ spec:
       namespace: envoy-gateway-system
       sectionName: https
   hostnames:
-    - minio.talos.lab.ops.nc
+    - minio.talos.lab.example.io
   rules:
     - backendRefs:
         - name: minio
@@ -129,7 +129,7 @@ spec:
       namespace: envoy-gateway-system
       sectionName: https
   hostnames:
-    - minio-console.talos.lab.ops.nc
+    - minio-console.talos.lab.example.io
   rules:
     - backendRefs:
         - name: minio

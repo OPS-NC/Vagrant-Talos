@@ -13,6 +13,12 @@ cd "$REPO_DIR"
 export KUBECONFIG="${KUBECONFIG:-${REPO_DIR}/kubeconfig}"
 HERE="_k8s/minio-s3"
 
+# --- Domaine : défaut versionné neutre, surchargeable par LAB_DOMAIN (lab.env ou env) ---
+# `sed -n s///p` (jamais `grep` : sans match il renvoie 1 et tue le script sous `pipefail`).
+# `|| true` : sans lab.env du tout, `sed` sort en 2 — ce qui tuerait aussi le script.
+LAB_DOMAIN="${LAB_DOMAIN:-$(sed -n 's/^[[:space:]]*LAB_DOMAIN=//p' "${REPO_DIR}/lab.env" 2>/dev/null | head -n1 | tr -d " \"'" || true)}"
+LAB_DOMAIN="${LAB_DOMAIN:-talos.lab.example.io}"
+
 command -v kubectl >/dev/null 2>&1 || { echo "ERREUR : 'kubectl' introuvable." >&2; exit 1; }
 kubectl get --raw='/readyz' >/dev/null 2>&1 || { echo "ERREUR : apiserver injoignable." >&2; exit 1; }
 kubectl get storageclass local-path >/dev/null 2>&1 || { echo "ERREUR : StorageClass 'local-path' absente (cf. _k8s/local-path-storage/)." >&2; exit 1; }
@@ -34,13 +40,14 @@ else
 fi
 
 log "Déploiement MinIO (image officielle) + Service + HTTPRoutes"
-kubectl apply -f "${HERE}/minio-s3.yaml"
+# Le manifeste porte les hostnames des HTTPRoutes + MINIO_BROWSER_REDIRECT_URL.
+sed "s/talos\.lab\.example\.io/${LAB_DOMAIN}/g" "${HERE}/minio-s3.yaml" | kubectl apply -f -
 kubectl -n minio-s3 rollout status deploy/minio --timeout=180s
 
 # ============================================================================
 log "MinIO installé."
-echo "  API S3   : https://minio.talos.lab.ops.nc"
-echo "  Console  : https://minio-console.talos.lab.ops.nc  (admin complète — fork pgsty/minio)"
+echo "  API S3   : https://minio.${LAB_DOMAIN}"
+echo "  Console  : https://minio-console.${LAB_DOMAIN}  (admin complète — fork pgsty/minio)"
 echo "  User     : $(kubectl -n minio-s3 get secret minio-creds -o jsonpath='{.data.root-user}' | base64 -d)"
 echo "  Password : $(kubectl -n minio-s3 get secret minio-creds -o jsonpath='{.data.root-password}' | base64 -d)"
-echo "  Test S3  : mc alias set lab https://minio.talos.lab.ops.nc <user> <pass> --insecure   # cert staging"
+echo "  Test S3  : mc alias set lab https://minio.${LAB_DOMAIN} <user> <pass> --insecure   # cert staging"

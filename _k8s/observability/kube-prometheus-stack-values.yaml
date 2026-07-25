@@ -21,8 +21,8 @@ grafana:
   grafana.ini:
     server:
       # Grafana est exposé à la racine d'un hôte dédié (pas de sous-chemin).
-      domain: grafana.talos.lab.ops.nc
-      root_url: https://grafana.talos.lab.ops.nc
+      domain: grafana.talos.lab.example.io
+      root_url: https://grafana.talos.lab.example.io
   # Ajoute Loki comme source de logs (l'addon Loki tourne dans le même namespace).
   additionalDataSources:
     - name: Loki
@@ -35,7 +35,7 @@ grafana:
 prometheus:
   prometheusSpec:
     retention: 2d
-    externalUrl: https://prometheus.talos.lab.ops.nc
+    externalUrl: https://prometheus.talos.lab.example.io
     resources:
       requests:
         cpu: 100m
@@ -59,7 +59,7 @@ prometheus:
 
 alertmanager:
   alertmanagerSpec:
-    externalUrl: https://alertmanager.talos.lab.ops.nc
+    externalUrl: https://alertmanager.talos.lab.example.io
     # Pas de PVC : stockage emptyDir (défaut) — l'historique d'alertes n'a pas besoin de survivre dans un lab.
 
 # --- Control-plane Talos : non scrapable par défaut → on désactive ces moniteurs --------

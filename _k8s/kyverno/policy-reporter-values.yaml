@@ -7,7 +7,7 @@
 #   - un « plugin kyverno » qui enrichit l'UI avec le détail des policies Kyverno.
 #
 # Exposition : l'UI tourne en clair (port 8080), le HTTPS est assuré par Envoy Gateway
-# (cert wildcard *.talos.lab.ops.nc). Voir httproute.yaml → kyverno.talos.lab.ops.nc.
+# (cert wildcard *.talos.lab.example.io). Voir httproute.yaml → kyverno.talos.lab.example.io.
 
 # --- Cœur Policy Reporter -----------------------------------------------------
 # Rétention/scan par défaut : suffisant pour un lab mono-cluster.

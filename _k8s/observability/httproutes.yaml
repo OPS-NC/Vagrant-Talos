@@ -1,5 +1,5 @@
 # Expose Grafana, Prometheus et Alertmanager en HTTPS via `main-gateway` (Envoy Gateway).
-# TLS = wildcard `*.talos.lab.ops.nc` (cert-manager) déjà porté par l'écouteur `https` —
+# TLS = wildcard `*.talos.lab.example.io` (cert-manager) déjà porté par l'écouteur `https` —
 # aucun Certificate à créer. Routes dans le ns `monitoring`, backends dans le même ns.
 ---
 apiVersion: gateway.networking.k8s.io/v1
@@ -13,7 +13,7 @@ spec:
       namespace: envoy-gateway-system
       sectionName: https
   hostnames:
-    - grafana.talos.lab.ops.nc
+    - grafana.talos.lab.example.io
   rules:
     - backendRefs:
         - name: kube-prometheus-stack-grafana
@@ -30,7 +30,7 @@ spec:
       namespace: envoy-gateway-system
       sectionName: https
   hostnames:
-    - prometheus.talos.lab.ops.nc
+    - prometheus.talos.lab.example.io
   rules:
     - backendRefs:
         - name: kube-prometheus-stack-prometheus
@@ -47,7 +47,7 @@ spec:
       namespace: envoy-gateway-system
       sectionName: https
   hostnames:
-    - alertmanager.talos.lab.ops.nc
+    - alertmanager.talos.lab.example.io
   rules:
     - backendRefs:
         - name: kube-prometheus-stack-alertmanager

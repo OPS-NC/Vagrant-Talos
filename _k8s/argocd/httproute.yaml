@@ -1,7 +1,7 @@
 # Expose l'UI (et l'API/gRPC-web) d'Argo CD via la Gateway API, en HTTPS, sous
-# `argo.talos.lab.ops.nc`. Le cert est le wildcard `*.talos.lab.ops.nc` déjà porté
+# `argo.talos.lab.example.io`. Le cert est le wildcard `*.talos.lab.example.io` déjà porté
 # par l'écouteur `https` de `main-gateway` (cert-manager) — AUCUN nouveau Certificate
-# n'est nécessaire, le wildcard couvre `argo.talos.lab.ops.nc`.
+# n'est nécessaire, le wildcard couvre `argo.talos.lab.example.io`.
 #
 # La route vit dans le namespace `argocd` mais s'attache au Gateway du namespace
 # `envoy-gateway-system` : possible car `main-gateway` ouvre ses écouteurs à `from: All`.
@@ -18,7 +18,7 @@ spec:
       namespace: envoy-gateway-system
       sectionName: https          # cible l'écouteur TLS :443
   hostnames:
-    - argo.talos.lab.ops.nc        # matche le wildcard *.talos.lab.ops.nc
+    - argo.talos.lab.example.io        # matche le wildcard *.talos.lab.example.io
   rules:
     - backendRefs:
         # server.insecure=true => le port http (80) sert l'UI + gRPC-web en clair.

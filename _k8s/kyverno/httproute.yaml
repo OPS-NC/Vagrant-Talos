@@ -1,7 +1,7 @@
 # Expose l'UI Policy Reporter (dashboard des verdicts Kyverno) en HTTPS sous
-# `kyverno.talos.lab.ops.nc`, derrière `main-gateway` (Envoy Gateway). Le TLS est
-# le wildcard `*.talos.lab.ops.nc` déjà porté par l'écouteur `https` (cert-manager) —
-# aucun Certificate à créer, le wildcard couvre `kyverno.talos.lab.ops.nc`.
+# `kyverno.talos.lab.example.io`, derrière `main-gateway` (Envoy Gateway). Le TLS est
+# le wildcard `*.talos.lab.example.io` déjà porté par l'écouteur `https` (cert-manager) —
+# aucun Certificate à créer, le wildcard couvre `kyverno.talos.lab.example.io`.
 #
 # La route vit dans le namespace `kyverno` mais s'attache au Gateway du namespace
 # `envoy-gateway-system` : possible car `main-gateway` ouvre ses écouteurs à `from: All`.
@@ -17,7 +17,7 @@ spec:
       namespace: envoy-gateway-system
       sectionName: https          # cible l'écouteur TLS :443
   hostnames:
-    - kyverno.talos.lab.ops.nc     # matche le wildcard *.talos.lab.ops.nc
+    - kyverno.talos.lab.example.io     # matche le wildcard *.talos.lab.example.io
   rules:
     - backendRefs:
         # UI Policy Reporter — HTTP en clair (8080), Envoy fait le HTTPS devant.

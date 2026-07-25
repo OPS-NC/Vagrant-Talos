@@ -2,7 +2,9 @@
 #
 # - 2 volumes Longhorn de 2Gi (RWO) : /var/lib/mysql (MariaDB) et /var/www/html (WordPress).
 # - Stratégie Recreate (volumes RWO mono-attach : l'ancien pod libère avant le nouveau).
-# - Exposé en HTTPS sous wordpress.talos.lab.ops.nc (cert wildcard *.talos.lab.ops.nc).
+# - Exposé en HTTPS sous wordpress.talos.lab.example.io (cert wildcard *.talos.lab.example.io).
+#   Domaine NEUTRE (dépôt public), appliqué À LA MAIN : édite le hostname de l'HTTPRoute ET
+#   WP_HOME/WP_SITEURL, ou `sed 's/talos\.lab\.example\.io/<ton-domaine>/g' … | kubectl apply -f -`.
 #
 # ⚠️ Mots de passe d'exemple (lab). À NE PAS réutiliser tel quel hors démo.
 ---
@@ -128,8 +130,8 @@ spec:
             # et on fige l'URL du site (sinon boucles de redirection / URLs en http).
             - name: WORDPRESS_CONFIG_EXTRA
               value: |
-                define('WP_HOME', 'https://wordpress.talos.lab.ops.nc');
-                define('WP_SITEURL', 'https://wordpress.talos.lab.ops.nc');
+                define('WP_HOME', 'https://wordpress.talos.lab.example.io');
+                define('WP_SITEURL', 'https://wordpress.talos.lab.example.io');
                 if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {
                   $_SERVER['HTTPS'] = 'on';
                 }
@@ -173,7 +175,7 @@ spec:
       namespace: envoy-gateway-system
       sectionName: https           # écouteur TLS :443 (cert wildcard cert-manager)
   hostnames:
-    - wordpress.talos.lab.ops.nc
+    - wordpress.talos.lab.example.io
   rules:
     - backendRefs:
         - name: wordpress

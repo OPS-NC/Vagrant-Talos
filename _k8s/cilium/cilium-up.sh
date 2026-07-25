@@ -20,6 +20,19 @@ export KUBECONFIG="${KUBECONFIG:-${REPO_DIR}/kubeconfig}"
 
 CILIUM_VERSION="${CILIUM_VERSION:-1.19.6}"
 
+# --- Plage d'IP LoadBalancer (depuis lab.env) --------------------------------
+# `sed -n s///p` et JAMAIS `grep` : sans correspondance `grep` renvoie 1 et, sous
+# `set -e` + `pipefail`, tuerait le script. Le `|| true` couvre l'absence de lab.env
+# (où `sed` sort en 2).
+lire_lab_env() {
+  sed -n "s/^[[:space:]]*\(export[[:space:]]\{1,\}\)\{0,1\}$1=//p" \
+    "${REPO_DIR}/lab.env" 2>/dev/null | head -n1 | tr -d " \"'" || true
+}
+LB_POOL_START="${LB_POOL_START:-$(lire_lab_env LB_POOL_START)}"
+LB_POOL_START="${LB_POOL_START:-192.168.56.200}"
+LB_POOL_END="${LB_POOL_END:-$(lire_lab_env LB_POOL_END)}"
+LB_POOL_END="${LB_POOL_END:-192.168.56.230}"
+
 for bin in kubectl helm; do
   command -v "$bin" >/dev/null 2>&1 || { echo "ERREUR : '$bin' introuvable." >&2; exit 1; }
 done
@@ -51,7 +64,12 @@ helm upgrade --install cilium cilium/cilium -n kube-system --create-namespace \
 echo "    attente des nodes Ready..."
 kubectl wait --for=condition=Ready nodes --all --timeout=300s
 
-log "Pool L2 Cilium (IP LoadBalancer .200-.230 + annonce ARP)"
-kubectl apply -f _k8s/cilium/cilium-l2.yml
+log "Pool L2 Cilium (IP LoadBalancer ${LB_POOL_START}-${LB_POOL_END} + annonce ARP)"
+# Le manifeste porte la plage par défaut ; on la remplace par celle de lab.env.
+# La 1re IP de la plage est celle que prendra le Gateway Envoy : c'est la cible du
+# DNS wildcard `*.<LAB_DOMAIN>` (cf. README.md §5).
+sed -e "s/192\.168\.56\.200/${LB_POOL_START}/g" \
+    -e "s/192\.168\.56\.230/${LB_POOL_END}/g" \
+    _k8s/cilium/cilium-l2.yml | kubectl apply -f -
 
 log "Cilium installé (CNI + pool L2)."

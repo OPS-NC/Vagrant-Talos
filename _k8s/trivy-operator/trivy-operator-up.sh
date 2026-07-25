@@ -21,6 +21,12 @@ export KUBECONFIG="${KUBECONFIG:-${REPO_DIR}/kubeconfig}"
 TRIVY_OPERATOR_VERSION="${TRIVY_OPERATOR_VERSION:-0.34.0}"        # app v0.32.0
 POLICY_REPORTER_VERSION="${POLICY_REPORTER_VERSION:-3.8.1}"
 
+# --- Domaine : défaut versionné neutre, surchargeable par LAB_DOMAIN (lab.env ou env) ---
+# `sed -n s///p` (jamais `grep` : sans match il renvoie 1 et tue le script sous `pipefail`).
+# `|| true` : sans lab.env du tout, `sed` sort en 2 — ce qui tuerait aussi le script.
+LAB_DOMAIN="${LAB_DOMAIN:-$(sed -n 's/^[[:space:]]*LAB_DOMAIN=//p' "${REPO_DIR}/lab.env" 2>/dev/null | head -n1 | tr -d " \"'" || true)}"
+LAB_DOMAIN="${LAB_DOMAIN:-talos.lab.example.io}"
+
 for bin in kubectl helm; do
   command -v "$bin" >/dev/null 2>&1 || { echo "ERREUR : '$bin' introuvable." >&2; exit 1; }
 done
@@ -56,4 +62,4 @@ echo "  Scanne en continu → les rapports arrivent au fil des scans (quelques m
 echo "    kubectl get vulnerabilityreports -A"
 echo "    kubectl get configauditreports -A"
 echo "    kubectl get exposedsecretreports -A"
-echo "  UI unifiée (source Trivy) : https://kyverno.talos.lab.ops.nc"
+echo "  UI unifiée (source Trivy) : https://kyverno.${LAB_DOMAIN}"
