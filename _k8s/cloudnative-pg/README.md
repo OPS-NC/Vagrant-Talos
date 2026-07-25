@@ -137,7 +137,40 @@ Une fois **kube-prometheus-stack** installé, passe `monitoring.enablePodMonitor
 dans `cluster-demo.yaml` (et `monitoring.podMonitorEnabled: true` dans `values.yaml` pour
 l'opérateur) : CloudNativePG expose des métriques riches + un dashboard Grafana officiel.
 
+## Backup horaire vers MinIO (S3) via les identifiants Vault
+
+Sauvegarde **logique** (`pg_dump`) de la base `vault`, **toutes les heures**, poussée dans un
+bucket **MinIO** — en se connectant à PostgreSQL avec les identifiants **gérés/rotés par Vault**
+(secret `pg-rotate-creds`, cf. `../vault-secret-operator/` section rotation dynamique).
+
+```
+CronJob pg-backup-vault-s3 (ns pg-rotate-demo, schedule "0 * * * *")
+   │  pg_dump "$DATABASE_URL"  (creds Vault du secret pg-rotate-creds)
+   ▼  vault-<timestamp>.sql.gz
+   └─ mc cp ──► bucket MinIO pg-backups   (user MinIO dédié pg-backup, scopé au bucket)
+```
+
+> ⚠️ **Ce backup NE passe PAS par les CRD de CloudNativePG.** Il n'y a **ni** `Backup`/
+> `ScheduledBackup`, **ni** `barmanObjectStore` sur le `Cluster`. C'est un **pg_dump** porté par
+> un CronJob standard, choisi **exprès** pour utiliser les **creds Vault** (`vault-rotate`) —
+> ce que le backup natif CNPG ne fait pas (il passe par la réplication/superuser interne).
+
+**Mise en route** (crée bucket + user MinIO dédié + Secret + CronJob) :
+```bash
+./_k8s/cloudnative-pg/pg-backup-up.sh
+# Déclencher un backup immédiat pour vérifier :
+kubectl -n pg-rotate-demo create job pg-backup-now --from=cronjob/pg-backup-vault-s3
+kubectl -n pg-rotate-demo logs job/pg-backup-now
+```
+
+**Alternative — backup NATIF CNPG (Barman → S3), si tu veux passer par les CRD :** configurer
+`spec.backup.barmanObjectStore` (endpoint MinIO + credentials) sur le `Cluster`, puis créer un
+`ScheduledBackup`. C'est un backup **physique** (base backup + archivage WAL, PITR), mais il
+utilise les identifiants **internes de CNPG**, pas ceux de Vault. Les deux approches sont
+complémentaires. Voir la doc CNPG « Backup ».
+
 ## Sources
 
 - [CloudNativePG — Documentation](https://cloudnative-pg.io/documentation/current/)
 - [CloudNativePG — Cluster (API)](https://cloudnative-pg.io/documentation/current/cloudnative-pg.v1/)
+- [CloudNativePG — Backup sur objet S3](https://cloudnative-pg.io/documentation/current/backup/)
