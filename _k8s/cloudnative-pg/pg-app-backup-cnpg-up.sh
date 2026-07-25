@@ -32,7 +32,15 @@ log "MinIO : bucket cnpg-backups + utilisateur dédié cnpg-backup"
 ROOTPW="$(kubectl -n minio-cluster get secret minio-creds -o jsonpath='{.data.root-password}' | base64 -d)"
 kubectl -n minio-cluster port-forward svc/minio 19000:9000 >/dev/null 2>&1 &
 PF=$!; trap 'kill $PF 2>/dev/null || true' EXIT
-until curl -s -o /dev/null http://127.0.0.1:19000/minio/health/ready 2>/dev/null; do sleep 1; done
+# Attente BORNÉE : si le port-forward meurt (pod redémarré, svc absent), une boucle
+# `until` infinie laissait le script tourner dans le vide sans jamais rien dire.
+for _ in $(seq 1 60); do
+  curl -s -o /dev/null http://127.0.0.1:19000/minio/health/ready 2>/dev/null && break
+  kill -0 "$PF" 2>/dev/null || { echo "ERREUR : le port-forward vers svc/minio est mort." >&2; exit 1; }
+  sleep 1
+done
+curl -sf -o /dev/null http://127.0.0.1:19000/minio/health/ready \
+  || { echo "ERREUR : MinIO (minio-cluster) pas prêt après 60s — kubectl -n minio-cluster get pods" >&2; exit 1; }
 "$MC" alias set _lab http://127.0.0.1:19000 admin "$ROOTPW" >/dev/null
 "$MC" mb --ignore-existing _lab/cnpg-backups >/dev/null
 POLICY="$(mktemp)"; cat > "$POLICY" <<'JSON'

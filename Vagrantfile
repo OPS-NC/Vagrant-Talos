@@ -45,7 +45,7 @@ CONTROL_PLANES = (ENV["CONTROL_PLANES"] || 3).to_i   # 1 = single ; 3 = HA (avec
 WORKERS        = (ENV["WORKERS"] || 3).to_i          # nombre de workers
 
 # Ressources par rôle — pilotées depuis lab.env (une vraie var d'env l'emporte).
-CP_MEM  = (ENV["CP_MEM"] || 2048).to_i ; CP_CPU = (ENV["CP_CPU"] || 2).to_i  # control plane
+CP_MEM  = (ENV["CP_MEM"] || 4096).to_i ; CP_CPU = (ENV["CP_CPU"] || 2).to_i  # control plane
 WK_MEM  = (ENV["WK_MEM"] || 2048).to_i ; WK_CPU = (ENV["WK_CPU"] || 2).to_i  # worker
 
 NETWORK      = ENV["NETWORK"] || "192.168.56"    # réseau host-only

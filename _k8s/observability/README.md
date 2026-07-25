@@ -40,7 +40,7 @@
 
 > ⚠️ **Control-plane RAM.** On **3 GB** CPs, stacking this pile on top of the rest of the lab
 > **saturates etcd/apiserver** (lived through it: OOM loop, API unreachable). At **4 GB**, the
-> stack sits at ~50 % of CP memory. And `lab.env.example` ships **`CP_MEM=2048`** — below the
+> stack sits at ~50 % of CP memory. Anything under **`CP_MEM=3072`** is below the
 > minimum, and 2 GB already **starve etcd** on their own. Fix `lab.env` **before** installing,
 > then `vagrant reload` the CPs **one at a time**.
 

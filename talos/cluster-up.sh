@@ -64,11 +64,39 @@ first_cp="${cp_ips[0]}"
 echo "==> Topologie : ${CONTROL_PLANES} control plane(s) [${cp_ips[*]}] + ${WORKERS} worker(s) [${worker_ips[*]:-aucun}]"
 echo "==> VIP API   : https://${VIP}:6443"
 
+# Attente BORNÉE : libellé, timeout (s), puis la commande à retenter.
+# Une boucle infinie ici est le piège historique du lab : un node déjà installé
+# (mode sécurisé) ne répond JAMAIS à `--insecure`, et le script restait bloqué
+# sans rien dire. On échoue donc, avec un message qui dit quoi regarder.
+attendre() {
+  local libelle="$1" timeout="$2" ; shift 2
+  local fin=$((SECONDS + timeout))
+  printf '    - %s ' "$libelle"
+  until "$@" >/dev/null 2>&1; do
+    if [ "$SECONDS" -ge "$fin" ]; then printf ' ÉCHEC (%ss)\n' "$timeout" ; return 1 ; fi
+    printf '.' ; sleep 5
+  done
+  echo ' OK'
+}
+
+WAIT_MAINTENANCE="${WAIT_MAINTENANCE:-300}"   # boot de la VM + mode maintenance
+WAIT_SECURE="${WAIT_SECURE:-600}"             # install sur disque + reboot en mode sécurisé
+
 wait_maintenance() {
   local ip="$1"
-  printf '    - attente du mode maintenance sur %s ' "$ip"
-  until talosctl -n "$ip" get disks --insecure >/dev/null 2>&1; do printf '.'; sleep 5; done
-  echo ' OK'
+  attendre "attente du mode maintenance sur $ip" "$WAIT_MAINTENANCE" \
+    talosctl -n "$ip" get disks --insecure && return 0
+  cat >&2 <<EOF
+ERREUR : ${ip} ne répond pas en mode maintenance après ${WAIT_MAINTENANCE}s.
+  Les deux causes, par fréquence :
+    1. le node est DÉJÀ installé (mode sécurisé) : il ne répondra jamais à
+       --insecure. Ne relance pas cluster-up.sh sur un cluster en route — pour
+       l'agrandir, cf. README §6.1.
+    2. la VM n'est pas démarrée, ou n'a pas pris son IP host-only (cf. README §7) :
+       vagrant status ; talosctl -n ${ip} get disks --insecure
+  Node lent plutôt que bloqué ? WAIT_MAINTENANCE=600 ./talos/cluster-up.sh
+EOF
+  exit 1
 }
 
 # Applique une config en fixant un hostname DÉTERMINISTE passé en argument
@@ -137,9 +165,17 @@ talosctl config node "${first_cp}"
 
 # --- 4. Bootstrap etcd (UNE seule fois, sur le 1er control plane) -----------
 echo "==> [4/5] Bootstrap etcd sur ${first_cp} (peut prendre 1-2 min)"
-printf '    - attente du retour de %s en mode sécurisé ' "${first_cp}"
-until talosctl -n "${first_cp}" version >/dev/null 2>&1; do printf '.'; sleep 5; done
-echo ' OK'
+attendre "attente du retour de ${first_cp} en mode sécurisé" "$WAIT_SECURE" \
+  talosctl -n "${first_cp}" version || {
+  cat >&2 <<EOF
+ERREUR : ${first_cp} n'est pas revenu en mode sécurisé après ${WAIT_SECURE}s.
+  Le node installe Talos sur disque puis reboote : c'est l'étape la plus longue.
+  À regarder : la console de la VM (VirtualBox) pour une erreur d'installation,
+  et le disque attaché (cf. le piège de la sentinelle .vdi dans CLAUDE.md).
+  Node lent plutôt que bloqué ? WAIT_SECURE=1200 ./talos/cluster-up.sh
+EOF
+  exit 1
+}
 
 # `talosctl version` peut répondre (apid up) AVANT qu'etcd soit prêt à être
 # bootstrapé : Talos renvoie alors "bootstrap is not available yet"
