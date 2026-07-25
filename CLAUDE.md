@@ -4,138 +4,163 @@
 
 # 🤖 CLAUDE.md
 
-Lab **Talos Linux sur VirtualBox** piloté par Vagrant. Talos n'a ni SSH ni shell : tout se
-pilote avec `talosctl` depuis l'hôte. Doc utilisateur : [`README.md`](README.md) ·
-couche applicative : [`_k8s/README.md`](_k8s/README.md).
+**Talos Linux on VirtualBox** lab, driven by Vagrant. Talos has neither SSH nor a shell:
+everything is driven with `talosctl` from the host. User docs: [`README.md`](README.md) ·
+application layer: [`_k8s/README.md`](_k8s/README.md).
 
-## 🚀 Ordre de travail
+## 🚀 Order of work
 
-1. `vagrant up` crée/démarre les VMs (Talos boote sur l'ISO en mode maintenance).
-2. `./talos/cluster-up.sh` génère la config, l'applique, bootstrap etcd, récupère le
-   kubeconfig, attend la santé. C'est le chemin réel (le `<details>` du §4 du README est la
-   version manuelle « pour comprendre »).
-3. `./_k8s/platform-up.sh` pose la plateforme de base — **exige `CNI=none`**, alors que le
-   défaut du dépôt est `flannel`. Puis les addons à la carte (`_k8s/*/*-up.sh`).
+1. `vagrant up` creates/starts the VMs (Talos boots off the ISO in maintenance mode).
+2. `./talos/cluster-up.sh` generates the config, applies it, bootstraps etcd, fetches the
+   kubeconfig and waits for health. This is the real path (the `<details>` in §4 of the README
+   is the manual "to understand what happens" version).
+3. `./_k8s/platform-up.sh` lays down the base platform — it **requires `CNI=none`**, whereas
+   the repo default is `flannel`. Then the addons, opt-in (`_k8s/*/*-up.sh`).
 
-Le lab de référence tourne en `CNI=none` + Cilium : c'est ce que la couche `_k8s/` suppose
-partout (les Services `LoadBalancer` dépendent de l'annonce L2 de Cilium).
+The reference lab runs `CNI=none` + Cilium: that is what the `_k8s/` layer assumes everywhere
+(`LoadBalancer` Services depend on Cilium's L2 announcement).
 
-## 🚧 Règles de travail (non négociables)
+## 🚧 Working rules (non-negotiable)
 
-- **Ne JAMAIS rien installer ni modifier sur le cluster en route.** « Installe X » veut dire
-  *implémente et documente X côté dépôt git* : manifestes, `*-up.sh`, README. Jamais de
-  `kubectl apply/create/delete/patch/edit`, de `helm install/upgrade`, ni de `talosctl apply-config`
-  sur le lab existant. La lecture est autorisée (`kubectl get`, `talosctl read`, `helm show values`,
-  `helm template`) pour vérifier ses affirmations — c'est même recommandé.
-- **Une feature = une PR mergée.** Brancher depuis `main`, commit conventionnel, PR, merge en
-  squash (1 commit sur `main`). Pas de gros commit fourre-tout mélangeant plusieurs sujets :
-  découper par feature, même si ça fait plusieurs PR d'affilée.
+- **NEVER install or change anything on a running cluster.** "Install X" means *implement and
+  document X on the git repo side*: manifests, `*-up.sh`, README. Never `kubectl
+  apply/create/delete/patch/edit`, never `helm install/upgrade`, never `talosctl apply-config`
+  against the existing lab. Reading is allowed (`kubectl get`, `talosctl read`, `helm show
+  values`, `helm template`) to back up your claims — it is even recommended.
+- **One feature = one merged PR.** Branch from `main`, conventional commit, PR, squash merge
+  (1 commit on `main`). No big catch-all commit mixing several topics: split by feature, even
+  if that means several PRs back to back.
 
-## ✅ Valider un changement SANS toucher à un cluster (à faire systématiquement)
+## ✅ Validating a change WITHOUT touching a cluster (do this every time)
 
 ```bash
-make validate      # bash -n sur tous les scripts + vagrant validate + gen config jetable
-make docs          # régénère docs/index.html depuis tous les README (nécessite uv)
+make validate      # bash -n on every script + vagrant validate + throwaway config gen
+make docs          # regenerates docs/index.html from every README (needs uv)
 ```
 
-`make validate-talos` génère la config dans un `mktemp -d` puis la passe à
-`talosctl validate --mode metal` : ni `_out/` ni le cluster ne sont touchés. Pour tester un
-patch sur une config existante sans l'appliquer :
-`talosctl machineconfig patch <file> --patch <inline|@file> -o /tmp/x.yaml` puis `validate`.
+`make validate-talos` generates the config in an `mktemp -d`, then feeds it to `talosctl
+validate --mode metal`: neither `_out/` nor the cluster is touched. To test a patch against an
+existing config without applying it: `talosctl machineconfig patch <file> --patch
+<inline|@file> -o /tmp/x.yaml`, then `validate`.
 
-## ⚠️ Pièges (déjà rencontrés — ne pas refaire)
+`make docs` regenerates the bilingual page and **lists, at the end of the build, every `*.md`
+link and cross-file anchor that does not resolve**. `make validate-docs` (included in `make
+validate`) builds into a throwaway directory and **fails** on the first unresolved link —
+that is the guard to run after renaming a heading or adding a page.
 
-- **Ne PAS relancer `cluster-up.sh` sur un cluster déjà installé** : `wait_maintenance` fait
-  `get disks --insecure` en boucle **sans timeout** ; un node en mode sécurisé n'y répond
-  jamais → blocage infini. Pour agrandir un cluster en route : README §6.1.
-- **Ne PAS régénérer `_out/` (ni `FORCE=1`) sur un cluster en route** : nouveaux secrets/CA
-  ⇒ cluster cassé. Régénérer uniquement après `vagrant destroy`.
-- **Adressage** : topologie et adressage vivent dans **`lab.env`** (source unique lue par le
-  `Vagrantfile` ET `talos/cluster-up.sh`). Modèle versionné `lab.env.example` ; `lab.env` est
-  gitignoré. CP = `.10/.20/.30`, workers = `.101+`. Une vraie variable d'env reste prioritaire
+## ⚠️ Pitfalls (already hit — do not repeat)
+
+- **Do NOT re-run `cluster-up.sh` against an already-installed cluster**: `wait_maintenance`
+  loops on `get disks --insecure` **with no timeout**; a node in secure mode never answers
+  → infinite hang. To grow a running cluster: README §6.1.
+- **Do NOT regenerate `_out/` (nor `FORCE=1`) on a running cluster**: new secrets/CA ⇒ broken
+  cluster. Only regenerate after `vagrant destroy`.
+- **Addressing**: topology and addressing live in **`lab.env`** (single source read by both the
+  `Vagrantfile` AND `talos/cluster-up.sh`). Versioned template `lab.env.example`; `lab.env` is
+  gitignored. CP = `.10/.20/.30`, workers = `.101+`. A real environment variable still wins
   (`WORKERS=6 vagrant up`).
-- **`NETWORK` n'est configurable qu'à moitié** : `192.168.56.x` est codé en dur dans
+- **`NETWORK` is only half configurable**: `192.168.56.x` is hardcoded in
   `talos/patch-all.yaml` (`validSubnets`), `talos/patch-cp.yaml` (`vip.ip`,
-  `advertisedSubnets`) et `talos/cni-flannel.yaml` (`--iface-can-reach`). Changer `NETWORK`
-  sans éditer ces trois fichiers donne un cluster silencieusement cassé.
-- **Trois endroits portent la version Talos** : `Vagrantfile` (défaut de repli),
-  `talos/cluster-up.sh` (défaut de repli) et `lab.env`. Les deux défauts sont désormais
-  alignés sur `v1.13.7` — les garder ainsi à chaque bump, et se souvenir que
-  `INSTALLER_IMAGE` (image factory, tag inclus) masque `TALOS_VERSION` pour ce qui est
-  réellement installé sur disque.
-- **`CP_MEM=2048` (défaut du modèle) affame etcd** dès qu'on empile les addons `_k8s/` :
-  3 Go minimum, 4 Go en pratique (`observability/` l'exige).
-- **Renommer les VMs** : détruire (`vagrant destroy`) AVANT de changer `s[:name]` dans le
-  `Vagrantfile`, sinon les anciennes VMs deviennent orphelines dans VirtualBox.
-- **`vagrant up` KO après `destroy`** (`VERR_ALREADY_EXISTS` au rename `temp_clone_…`) :
-  VirtualBox 7.x laisse des dossiers `~/VirtualBox VMs/talos-*/` orphelins + des entrées
-  mortes dans le registre média. Purge : `./talos/virtualbox-cleanup.sh` (idempotent,
-  `DRY_RUN=1` pour voir). JAMAIS sur un cluster en route — et noter qu'il supprime aussi les
-  VMs `temp_clone_*`, y compris celles d'un autre projet Vagrant en cours de `up`.
-- **Sentinelle de disque** : le `Vagrantfile` considère une VM provisionnée si
-  `.vagrant/talos-disks/<vm>.vdi` existe. Un `destroy` qui échoue en laissant le `.vdi` fait
-  créer au `up` suivant une VM **sans disque attaché**, avec une erreur d'install obscure.
-- **CNI** : `CNI=cilium|calico|flannel|none` (défaut `cilium`) exprime une **intention**, lue
-  à deux endroits — `cluster-up.sh` applique `talos/cni-<CNI>.yaml`, puis `platform-up.sh`
-  installe le CNI si ce n'est pas Talos qui l'a fait. Seul `flannel` est posé par **Talos**
-  au bootstrap (`cluster.network.cni`) ; `cilium` et `calico` passent par `cni.name: none`
-  puis Helm. Toute commande `gen config` manuelle DOIT inclure
-  `--config-patch-control-plane @talos/cni-<CNI>.yaml` **et** `--install-image
-  "$INSTALLER_IMAGE"` — sans quoi l'installeur *classic* est posé, sans les extensions iscsi,
-  et Longhorn échoue plus tard sur `iscsiadm: not found`.
-- **Seul Cilium donne une IP aux Services `LoadBalancer`** dans ce lab (annonce L2/ARP).
-  Calico ne sait le faire qu'en BGP (pas de routeur pair en host-only) ⇒ MetalLB requis, et
-  `loadBalancerClass: io.cilium/l2-announcer` de `Envoy-Proxy.yml` doit sauter — c'est ce que
-  fait `platform-up.sh` hors Cilium. Changer de CNI = `vagrant destroy`, pas de bascule à chaud.
-- **Flannel/VXLAN** : sans `--iface-can-reach=192.168.56.1` — qui vit dans
-  `talos/cni-flannel.yaml`, **pas** dans `patch-cp.yaml` — flannel prend la carte NAT
-  (`10.0.2.15`, identique par VM) ⇒ trafic cross-node + DNS cassés. Idem Cilium : épingler
-  l'interface host-only `enp0s8`.
-- **Hostname** : par-node, hors patches partagés. Posé à l'`apply-config` via un document
-  `HostnameConfig` (`auto: "off"` + `hostname`). Nom de VM Vagrant == hostname Talos.
-- **Dashboard `KUBERNETES: n/a`** : normal en mode maintenance (la ressource `KubeletSpec`
-  n'existe qu'après `apply-config`). Rien à corriger.
-- **`_k8s/longhorn/patch-longhorn.yaml` n'est PAS appliqué par `cluster-up.sh`** (qui ne passe
-  que `patch-all`, `patch-cp` et `cni-*`) : le montage rshared de `/var/lib/longhorn` est une
-  manip à part, cf. `_k8s/longhorn/README.md`.
-- La passerelle par défaut via NAT `10.0.2.2` est **voulue** (accès Internet). Ce qui doit
-  être host-only, c'est l'identité du node (kubelet nodeIP / etcd / VIP), pas la route par
-  défaut.
+  `advertisedSubnets`) and `talos/cni-flannel.yaml` (`--iface-can-reach`). Changing `NETWORK`
+  without editing those three files gives you a silently broken cluster.
+- **Three places carry the Talos version**: `Vagrantfile` (fallback default),
+  `talos/cluster-up.sh` (fallback default) and `lab.env`. Both defaults are now aligned on
+  `v1.13.7` — keep them that way on every bump, and remember that `INSTALLER_IMAGE` (factory
+  image, tag included) overrides `TALOS_VERSION` for what actually lands on disk.
+- **`CP_MEM=2048` (the template default) starves etcd** as soon as you stack `_k8s/` addons:
+  3 GB minimum, 4 GB in practice (`observability/` requires it).
+- **Renaming VMs**: destroy (`vagrant destroy`) BEFORE changing `s[:name]` in the
+  `Vagrantfile`, otherwise the old VMs become orphans in VirtualBox.
+- **`vagrant up` fails after a `destroy`** (`VERR_ALREADY_EXISTS` on the `temp_clone_…`
+  rename): VirtualBox 7.x leaves orphaned `~/VirtualBox VMs/talos-*/` directories plus dead
+  entries in the media registry. Cleanup: `./talos/virtualbox-cleanup.sh` (idempotent,
+  `DRY_RUN=1` to preview). NEVER on a running cluster — and note that it also deletes
+  `temp_clone_*` VMs, including those of another Vagrant project mid-`up`.
+- **Disk sentinel**: the `Vagrantfile` considers a VM provisioned if
+  `.vagrant/talos-disks/<vm>.vdi` exists. A `destroy` that fails and leaves the `.vdi` behind
+  makes the next `up` create a VM **with no disk attached**, with an obscure install error.
+- **CNI**: `CNI=cilium|calico|flannel|none` (default `cilium`) expresses an **intent**, read in
+  two places — `cluster-up.sh` applies `talos/cni-<CNI>.yaml`, then `platform-up.sh` installs
+  the CNI unless Talos already did. Only `flannel` is laid down by **Talos** at bootstrap time
+  (`cluster.network.cni`); `cilium` and `calico` go through `cni.name: none` then Helm. Any
+  manual `gen config` MUST include `--config-patch-control-plane @talos/cni-<CNI>.yaml` **and**
+  `--install-image "$INSTALLER_IMAGE"` — without it the *classic* installer is laid down,
+  without the iscsi extensions, and Longhorn fails later on `iscsiadm: not found`.
+- **Only Cilium gives an IP to `LoadBalancer` Services** in this lab (L2/ARP announcement).
+  Calico can only do it over BGP (no peer router on a host-only network) ⇒ MetalLB required,
+  and `loadBalancerClass: io.cilium/l2-announcer` in `Envoy-Proxy.yml` has to go — which is
+  what `platform-up.sh` does when the CNI is not Cilium. Changing CNI = `vagrant destroy`, not
+  a live switch.
+- **Flannel/VXLAN**: without `--iface-can-reach=192.168.56.1` — which lives in
+  `talos/cni-flannel.yaml`, **not** in `patch-cp.yaml` — flannel picks the NAT interface
+  (`10.0.2.15`, identical on every VM) ⇒ broken cross-node traffic and DNS. Same for Cilium:
+  pin the `enp0s8` host-only interface.
+- **Hostname**: per-node, therefore outside the shared patches. Set at `apply-config` time
+  through a `HostnameConfig` document (`auto: "off"` + `hostname`). Vagrant VM name == Talos
+  hostname.
+- **Dashboard `KUBERNETES: n/a`**: normal in maintenance mode (the `KubeletSpec` resource only
+  exists after `apply-config`). Nothing to fix.
+- **`_k8s/longhorn/patch-longhorn.yaml` is NOT applied by `cluster-up.sh`** (which only passes
+  `patch-all`, `patch-cp` and `cni-*`): the rshared mount of `/var/lib/longhorn` is a separate
+  step, see `_k8s/longhorn/README.md`.
+- The default gateway through NAT `10.0.2.2` is **intentional** (Internet access). What must be
+  host-only is the node's identity (kubelet nodeIP / etcd / VIP), not the default route.
+- **Bilingual docs**: `docs/build.py` pairs pages per directory through `MIROIRS`
+  (`README.md` ↔ `LISEZ-MOI.md`, `CLAUDE.md` ↔ `CLAUDE.fr.md`, `UPGRADE.md` ↔
+  `MISE-A-JOUR.md`). A page with no mirror does not fail the build: it shows up **in English
+  inside the French menu**, with an `EN` badge. That badge is the symptom of a forgotten
+  mirror.
+- **FR anchors ≠ EN anchors**: slugs derive from headings, so translating a heading breaks
+  every link that targeted it. `*.md` links are rewritten into internal routes at build time;
+  `make docs` lists whatever no longer resolves. Two anchors are **contractual**, because many
+  addons point at them: `_k8s/README.md#-lab_domain--the-ui-domain` and
+  `#-remote-access-tailscale--cloudflare`.
+- The `<!-- i18n --> … <!-- /i18n -->` banner at the top of every page is there for GitHub
+  readers; `docs/build.py` strips it (it has its own switcher). Do not remove it from the
+  files, and do not put anything else between the markers.
 
 ## 🔐 Secrets
 
-- `lab.env` est gitignoré et contient de **vrais** secrets (token Cloudflare, token Vault,
-  clés de descellement). Ne jamais le commiter, ne jamais recopier ses valeurs dans un README,
-  un commit, un rapport ou une sortie de terminal.
-- `_out/*.yaml` contient les CA et les clés du cluster ; `kubeconfig` les credentials admin.
-- `_k8s/databasement/` est gitignoré : son `values.yaml` porte une clé applicative en clair.
-- Avant de commiter : `git status` — aucun fichier de secret ne doit apparaître.
+- `lab.env` is gitignored and holds **real** secrets (Cloudflare token, Vault token, unseal
+  keys). Never commit it, never copy its values into a README, a commit, a report or terminal
+  output.
+- `_out/*.yaml` holds the cluster CA and keys; `kubeconfig` holds the admin credentials.
+- `_k8s/databasement/` is gitignored: its `values.yaml` carries an application key in the
+  clear.
+- Before committing: `git status` — no secret file may show up.
 
 ## 📝 Conventions
 
-- Commentaires, doc et messages de commit en **français**. Commits conventionnels
-  (`fix(...)`, `feat(...)`, `docs: ...`). Brancher depuis `main`, PR ensuite (squash).
+- **Bilingual docs, English first**: `README.md`, `CLAUDE.md` and `talos/UPGRADE.md` are in
+  **English**; their French mirror lives in the same directory — `LISEZ-MOI.md`,
+  `CLAUDE.fr.md`, `talos/MISE-A-JOUR.md`. Both versions change in the **same commit**: an
+  English page whose mirror did not follow is a documentation bug.
+- **Commit messages in English**, conventional (`fix(...)`, `feat(...)`, `docs: ...`). Branch
+  from `main`, then PR (squash).
+- **Code comments in French** (scripts, `Vagrantfile`, YAML, `docs/build.py`): that is the
+  repo's working language, leave it alone.
 
-### ⚠️ Ajouter une brique = la répercuter PARTOUT
+### ⚠️ Adding a component = propagating it EVERYWHERE
 
-Un addon, une variable ou une option n'est « fini » que quand il est documenté à **tous** les
-niveaux. Une seule mention isolée est un bug de doc : le lecteur ne trouvera jamais la brique.
-Checklist à dérouler à chaque ajout :
+An addon, a variable or an option is only "done" once it is documented at **every** level. A
+single isolated mention is a documentation bug: the reader will never find the component. Run
+this checklist on every addition:
 
-| Où | Quoi mettre à jour |
+| Where | What to update |
 |---|---|
-| `_k8s/<addon>/README.md` | le README dédié (squelette : 🎯 rôle · 📋 prérequis · ⚡ install · 🔧 fonctionnement · ✅ vérifier · 🌐 accès · ⚠️ pièges · 📚 réf.) |
-| `_k8s/README.md` | l'index : tableau de la bonne famille (stockage / bases / secrets / observabilité / sécurité / réseau / démos) **et** la chaîne de dépendances si elle change |
-| `README.md` (racine) | seulement si ça touche le parcours d'installation, `lab.env` ou le choix du CNI |
-| `lab.env.example` | toute nouvelle variable, commentée, avec un défaut neutre (dépôt public) |
-| `CLAUDE.md` | tout nouveau piège durement acquis, et toute nouvelle commande de validation |
-| `talos/UPGRADE.md` | si la brique impose une extension système ou contraint une version |
-| README des addons **voisins** | les renvois croisés : celui dont on dépend, ceux qui dépendent de nous |
-| `docs/build.py` | l'emoji de la page dans `EMOJIS` et son rangement dans `GROUPES` |
+| `_k8s/<addon>/README.md` | the dedicated README (skeleton: 🎯 purpose · 📋 prerequisites · ⚡ install · 🔧 how it works · ✅ verify · 🌐 access · ⚠️ pitfalls · 📚 references) |
+| `_k8s/README.md` | the index: the table of the right family (storage / databases / secrets / observability / security / networking / demos) **and** the dependency chain if it changes |
+| `README.md` (root) | only if it touches the install path, `lab.env` or the CNI choice |
+| `lab.env.example` | every new variable, commented, with a neutral default (public repo) |
+| `CLAUDE.md` | every newly earned pitfall, and every new validation command |
+| `talos/UPGRADE.md` | if the component requires a system extension or constrains a version |
+| README of the **neighbouring** addons | the cross-references: the one we depend on, the ones depending on us |
+| `docs/build.py` | the page emoji in `EMOJIS` and its placement in `GROUPES` |
+| **the FR mirror of every page touched** | `LISEZ-MOI.md` (and `CLAUDE.fr.md`, `talos/MISE-A-JOUR.md`): same structure, same content, **same commit** as the English version |
 
-Puis `make docs` pour régénérer la page, et `make validate` avant de commiter.
-- Topologie « de test » : éditer **`lab.env`** (gitignoré, donc jamais commité). Le défaut du
-  dépôt reste dans `lab.env.example` (3 CP / 3 workers) — ne pas le modifier « pour tester ».
-- Les README suivent une structure commune (un emoji par titre `##`, encarts `⚠️`/`💡`/`ℹ️`)
-  et sont publiés en HTML par `docs/build.py`. Garder du markdown standard (CommonMark +
-  tables GitHub) pour que le générateur les rende correctement.
+Then `make docs` to regenerate the page, and `make validate` before committing.
+- "Test" topology: edit **`lab.env`** (gitignored, therefore never committed). The repo default
+  stays in `lab.env.example` (3 CP / 3 workers) — do not change it "just to test".
+- READMEs follow a shared structure (one emoji per `##` heading, `⚠️`/`💡`/`ℹ️` callouts) and
+  are published as HTML by `docs/build.py`. Stick to standard markdown (CommonMark + GitHub
+  tables) so the generator renders them correctly.

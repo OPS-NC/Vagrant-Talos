@@ -43,6 +43,11 @@ make docs          # régénère docs/index.html depuis tous les README (nécess
 patch sur une config existante sans l'appliquer :
 `talosctl machineconfig patch <file> --patch <inline|@file> -o /tmp/x.yaml` puis `validate`.
 
+`make docs` régénère la page bilingue et **liste en fin de build les liens `*.md` et les
+ancres inter-fichiers qui ne résolvent pas**. `make validate-docs` (inclus dans `make
+validate`) construit la page dans un dossier jetable et **échoue** au premier lien non résolu :
+c'est le garde-fou à lancer après avoir renommé un titre ou ajouté une page.
+
 ## ⚠️ Pièges (déjà rencontrés — ne pas refaire)
 
 - **Ne PAS relancer `cluster-up.sh` sur un cluster déjà installé** : `wait_maintenance` fait
@@ -101,6 +106,18 @@ patch sur une config existante sans l'appliquer :
 - La passerelle par défaut via NAT `10.0.2.2` est **voulue** (accès Internet). Ce qui doit
   être host-only, c'est l'identité du node (kubelet nodeIP / etcd / VIP), pas la route par
   défaut.
+- **Doc bilingue** : `docs/build.py` apparie les pages par dossier via `MIROIRS`
+  (`README.md` ↔ `LISEZ-MOI.md`, `CLAUDE.md` ↔ `CLAUDE.fr.md`, `UPGRADE.md` ↔
+  `MISE-A-JOUR.md`). Une page sans miroir n'échoue pas : elle s'affiche **en anglais dans le
+  menu français**, avec un badge `EN`. C'est le symptôme d'un miroir oublié.
+- **Ancres FR ≠ ancres EN** : les slugs sont dérivés des titres, donc traduire un titre casse
+  les liens qui le visaient. Les liens `*.md` sont réécrits en routes internes au build ;
+  `make docs` liste ce qui ne résout plus. Deux ancres sont **contractuelles** parce que
+  beaucoup d'addons les visent : `_k8s/README.md#-lab_domain--the-ui-domain` et
+  `#-remote-access-tailscale--cloudflare`.
+- La bannière `<!-- i18n --> … <!-- /i18n -->` en tête de chaque page sert aux lecteurs de
+  GitHub ; `docs/build.py` la retire (il a son propre sélecteur). Ne pas la supprimer des
+  fichiers, ne pas mettre autre chose entre les marqueurs.
 
 ## 🔐 Secrets
 
@@ -113,8 +130,14 @@ patch sur une config existante sans l'appliquer :
 
 ## 📝 Conventions
 
-- Commentaires, doc et messages de commit en **français**. Commits conventionnels
-  (`fix(...)`, `feat(...)`, `docs: ...`). Brancher depuis `main`, PR ensuite (squash).
+- **Doc bilingue, l'anglais d'abord** : `README.md`, `CLAUDE.md` et `talos/UPGRADE.md` sont
+  en **anglais** ; leur miroir français vit dans le même dossier — `LISEZ-MOI.md`,
+  `CLAUDE.fr.md`, `talos/MISE-A-JOUR.md`. Les deux versions changent dans le **même
+  commit** : une page anglaise dont le miroir n'a pas suivi est un bug de doc.
+- **Messages de commit en anglais**, conventionnels (`fix(...)`, `feat(...)`, `docs: ...`).
+  Brancher depuis `main`, PR ensuite (squash).
+- **Commentaires de code en français** (scripts, `Vagrantfile`, YAML, `docs/build.py`) :
+  c'est la langue de travail du dépôt, on n'y touche pas.
 
 ### ⚠️ Ajouter une brique = la répercuter PARTOUT
 
@@ -132,6 +155,7 @@ Checklist à dérouler à chaque ajout :
 | `talos/UPGRADE.md` | si la brique impose une extension système ou contraint une version |
 | README des addons **voisins** | les renvois croisés : celui dont on dépend, ceux qui dépendent de nous |
 | `docs/build.py` | l'emoji de la page dans `EMOJIS` et son rangement dans `GROUPES` |
+| **le miroir FR de chaque page touchée** | `LISEZ-MOI.md` (et `CLAUDE.fr.md`, `talos/MISE-A-JOUR.md`) : même structure, même contenu, **même commit** que la version anglaise |
 
 Puis `make docs` pour régénérer la page, et `make validate` avant de commiter.
 - Topologie « de test » : éditer **`lab.env`** (gitignoré, donc jamais commité). Le défaut du

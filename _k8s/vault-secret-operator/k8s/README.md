@@ -2,156 +2,157 @@
 **English** · [Français](LISEZ-MOI.md)
 <!-- /i18n -->
 
-# 🧾 `k8s/` — les CR **côté Kubernetes**
+# 🧾 `k8s/` — the CRs **on the Kubernetes side**
 
-> La moitié cluster du câblage VSO : les ressources déclaratives que l'opérateur surveille pour
-> produire des `Secret` Kubernetes. Tout se joue au `kubectl`. Le pendant côté serveur (auth,
-> moteurs, policies, roles) est dans `../vault/`.
+> The cluster half of the VSO wiring: the declarative resources the operator watches in order to
+> produce Kubernetes `Secret` objects. It is all `kubectl` from here. The server-side counterpart
+> (auth, engines, policies, roles) lives in `../vault/`.
 
-## 🎯 La chaîne de références
+## 🎯 The chain of references
 
 ```
-Vault*Secret ──spec.vaultAuthRef──► VaultAuth ──► VaultConnection (ou le « default » de values.yaml)
+Vault*Secret ──spec.vaultAuthRef──► VaultAuth ──► VaultConnection (or the "default" from values.yaml)
                                         │
-                                        └─► role Vault ──► policy Vault
+                                        └─► Vault role ──► Vault policy
 ```
 
-Le `VaultAuth` porte le **role** Vault ; le role porte la **policy**. Un maillon cassé (nom de
-role, SA, namespace, audience, mount) donne `SecretSynced: false` dans les events du CR.
+The `VaultAuth` carries the Vault **role**; the role carries the **policy**. One broken link (role
+name, SA, namespace, audience, mount) gives `SecretSynced: false` in the CR's events.
 
-## 📋 Prérequis
+## 📋 Prerequisites
 
-| Prérequis | Pourquoi | Vérifier |
+| Prerequisite | Why | Verify |
 |---|---|---|
-| Opérateur VSO installé | c'est lui qui réconcilie les CR | `kubectl -n vault-secrets-operator get deploy` |
-| Vault configuré (`../vault/`) | l'identité doit exister **avant** le premier login | `vault list auth/kubernetes/role` |
-| Un `VaultConnection` joignable | `default` posé par `../values.yaml`, ou `01-vaultconnection.yaml` | `kubectl get vaultconnection -A` |
+| VSO operator installed | it is what reconciles the CRs | `kubectl -n vault-secrets-operator get deploy` |
+| Vault configured (`../vault/`) | the identity must exist **before** the first login | `vault list auth/kubernetes/role` |
+| A reachable `VaultConnection` | `default` created by `../values.yaml`, or `01-vaultconnection.yaml` | `kubectl get vaultconnection -A` |
 
-Ordre global d'installation et vue d'ensemble : `../README.md`.
+Overall install order and the big picture: `../README.md`.
 
-## ⚡ Appliquer
+## ⚡ Apply
 
-### Parcours A — les démos du lab (testées)
+### Path A — the lab demos (tested)
 
-Deux manifestes autonomes, chacun dans son namespace. Ils dépendent de `../vault/talos-lab.sh` et
-`../vault/pg-dynamic-rotate.sh` respectivement.
+Two self-contained manifests, each in its own namespace. They depend on `../vault/talos-lab.sh`
+and `../vault/pg-dynamic-rotate.sh` respectively.
 
 ```bash
 kubectl apply -f _k8s/vault-secret-operator/k8s/nginx-test-vault/nginx-test-vault.yaml
 kubectl apply -f _k8s/vault-secret-operator/k8s/pg-dynamic-rotate/pg-dynamic-rotate.yaml
 ```
 
-### Parcours B — les CR pédagogiques numérotés (namespace `demo`)
+### Path B — the numbered teaching CRs (namespace `demo`)
 
 ```bash
 kubectl apply -f 00-namespace-rbac.yaml     # ns "demo" + ServiceAccount "vso-app"
-kubectl apply -f 01-vaultconnection.yaml    # optionnel si defaultVaultConnection est actif
-kubectl apply -f 02-vaultauth.yaml          # 3 VaultAuth : static / dynamic / pki
-# 03 = variante multi-tenant (VaultAuthGlobal), À LA PLACE de 02
+kubectl apply -f 01-vaultconnection.yaml    # optional if defaultVaultConnection is on
+kubectl apply -f 02-vaultauth.yaml          # 3 VaultAuth: static / dynamic / pki
+# 03 = multi-tenant variant (VaultAuthGlobal), INSTEAD OF 02
 
 kubectl apply -f 10-static-kv.yaml          # KV-v2  -> Secret "static-kv"
-kubectl apply -f 20-dynamic-db.yaml         # creds DB éphémères (voir ⚠️ Pièges : mount cassé)
-kubectl apply -f 30-pki-tls.yaml            # certificat TLS -> Secret "pki-tls"
+kubectl apply -f 20-dynamic-db.yaml         # ephemeral DB creds (see ⚠️ Pitfalls: broken mount)
+kubectl apply -f 30-pki-tls.yaml            # TLS certificate -> Secret "pki-tls"
 kubectl apply -f 40-secrettransformation.yaml  # templating -> Secret "app-env"
-kubectl apply -f 50-demo-deployment.yaml    # app qui consomme les 3 Secret + reçoit les rollouts
+kubectl apply -f 50-demo-deployment.yaml    # app consuming the 3 Secrets + taking the rollouts
 ```
 
-> 🌐 **Domaine** : `30-pki-tls.yaml` demande un CN `demo-app.talos.lab.example.io` (domaine
-> neutre du dépôt public). Il doit rester **dans** l'`allowed_domains` du role PKI, lui-même
-> posé depuis `LAB_DOMAIN` par `../vault/00-secrets-engines.sh`. Si tu as ton propre domaine :
-> `sed 's/talos\.lab\.example\.io/talos.lab.mon-domaine.tld/g' 30-pki-tls.yaml | kubectl apply -f -`
-> (cf. [`../../README.md`](../../README.md#-lab_domain--le-domaine-des-ui)).
+> 🌐 **Domain**: `30-pki-tls.yaml` requests the CN `demo-app.talos.lab.example.io` (the public
+> repo's neutral domain). It must stay **inside** the `allowed_domains` of the PKI role, itself
+> derived from `LAB_DOMAIN` by `../vault/00-secrets-engines.sh`. If you have your own domain:
+> `sed 's/talos\.lab\.example\.io/talos.lab.my-domain.tld/g' 30-pki-tls.yaml | kubectl apply -f -`
+> (see [`../../README.md`](../../README.md#-lab_domain--the-ui-domain)).
 
-## 🔧 Les fichiers
+## 🔧 The files
 
-| Fichier | CRD | Ce qu'il fait exactement |
+| File | CRD | What it does exactly |
 |---|---|---|
-| `00-namespace-rbac.yaml` | `Namespace`, `ServiceAccount` | ns `demo` + SA `vso-app` — doivent matcher `bound_service_account_*` des roles Vault |
-| `01-vaultconnection.yaml` | `VaultConnection` | `vault-conn` dans `demo` → `http://vault.vault.svc.cluster.local:8200`, `skipTLSVerify: false` |
-| `02-vaultauth.yaml` | `VaultAuth` ×3 | `vault-auth-static` / `-dynamic` / `-pki` : mount `kubernetes`, SA `vso-app`, `audiences: [vault]`, roles `vso-static` / `vso-dynamic` / `vso-pki` |
-| `03-vaultauthglobal.yaml` | `VaultAuthGlobal` + `VaultAuth` | config d'auth mutualisée dans `vault-secrets-operator`, `allowedNamespaces: [demo]` ; le `VaultAuth` n'apporte plus que son role |
-| `10-static-kv.yaml` | `VaultStaticSecret` | `mount: kvv2`, `path: demo/app` → Secret `static-kv`, avec `rolloutRestartTargets` sur `demo-app` |
+| `00-namespace-rbac.yaml` | `Namespace`, `ServiceAccount` | ns `demo` + SA `vso-app` — must match the `bound_service_account_*` of the Vault roles |
+| `01-vaultconnection.yaml` | `VaultConnection` | `vault-conn` in `demo` → `http://vault.vault.svc.cluster.local:8200`, `skipTLSVerify: false` |
+| `02-vaultauth.yaml` | `VaultAuth` ×3 | `vault-auth-static` / `-dynamic` / `-pki`: mount `kubernetes`, SA `vso-app`, `audiences: [vault]`, roles `vso-static` / `vso-dynamic` / `vso-pki` |
+| `03-vaultauthglobal.yaml` | `VaultAuthGlobal` + `VaultAuth` | shared auth config in `vault-secrets-operator`, `allowedNamespaces: [demo]`; the `VaultAuth` then contributes nothing but its role |
+| `10-static-kv.yaml` | `VaultStaticSecret` | `mount: kvv2`, `path: demo/app` → Secret `static-kv`, with `rolloutRestartTargets` on `demo-app` |
 | `20-dynamic-db.yaml` | `VaultDynamicSecret` | `mount: db`, `path: creds/demo-app`, `renewalPercent: 67`, `revoke: true` → Secret `dynamic-db` |
 | `30-pki-tls.yaml` | `VaultPKISecret` | `mount: pki`, `role: demo`, CN `demo-app.talos.lab.example.io` → Secret `pki-tls` (`tls.crt`/`tls.key`) |
-| `40-secrettransformation.yaml` | `SecretTransformation` + `VaultStaticSecret` | transformation `app-env` (`DATABASE_URL`, `APP_PASSWORD`, `excludeRaw: true`) + le CR `static-kv-templated` qui l'utilise |
-| `50-demo-deployment.yaml` | `Deployment` | `busybox:1.36` : `envFrom` sur `static-kv`, `env` clé par clé sur `dynamic-db`, volume monté depuis `pki-tls` |
+| `40-secrettransformation.yaml` | `SecretTransformation` + `VaultStaticSecret` | the `app-env` transformation (`DATABASE_URL`, `APP_PASSWORD`, `excludeRaw: true`) + the `static-kv-templated` CR that uses it |
+| `50-demo-deployment.yaml` | `Deployment` | `busybox:1.36`: `envFrom` on `static-kv`, `env` key by key on `dynamic-db`, volume mounted from `pki-tls` |
 
-### `nginx-test-vault/` — secret KV du lab → variables d'env → rollout
+### `nginx-test-vault/` — lab KV secret → env vars → rollout
 
-La boucle complète, la plus simple à observer. Objets créés (tous dans le ns
-`nginx-test-vault`) :
+The complete loop, and the easiest one to watch. Objects created (all in the
+`nginx-test-vault` ns):
 
-| Objet | Détail |
+| Object | Detail |
 |---|---|
-| `Namespace` + `ServiceAccount nginx-test-vault` | l'identité attendue par le role Vault du même nom |
+| `Namespace` + `ServiceAccount nginx-test-vault` | the identity the Vault role of the same name expects |
 | `VaultAuth nginx-test-vault` | mount `kubernetes`, role `nginx-test-vault`, `audiences: [vault]` |
-| `VaultStaticSecret nginx-test-vault-config` | `type: kv-v2`, `mount: talos-lab`, `path: nginx-test-vault/config`, `refreshAfter: 30s`, `hmacSecretData: true` (détecte la dérive sans logguer les valeurs), `rolloutRestartTargets` → le Deployment |
-| `Deployment nginx-test-vault` | `nginx:1.27-alpine`, 2 réplicas, `envFrom` sur le Secret → `APP_GREETING` / `APP_COLOR` / `APP_SECRET_TOKEN` |
+| `VaultStaticSecret nginx-test-vault-config` | `type: kv-v2`, `mount: talos-lab`, `path: nginx-test-vault/config`, `refreshAfter: 30s`, `hmacSecretData: true` (detects drift without logging the values), `rolloutRestartTargets` → the Deployment |
+| `Deployment nginx-test-vault` | `nginx:1.27-alpine`, 2 replicas, `envFrom` on the Secret → `APP_GREETING` / `APP_COLOR` / `APP_SECRET_TOKEN` |
 
-### `pg-dynamic-rotate/` — mot de passe PostgreSQL roté par Vault
+### `pg-dynamic-rotate/` — PostgreSQL password rotated by Vault
 
-Static role : le **username reste fixe**, seul le mot de passe change ; le consommateur est
-relancé à chaque rotation. La config Vault correspondante est détaillée dans `../vault/README.md`,
-le scénario complet (prérequis PostgreSQL inclus) dans `../README.md`.
+Static role: the **username stays fixed**, only the password changes; the consumer is restarted on
+every rotation. The matching Vault config is detailed in `../vault/README.md`, the full scenario
+(PostgreSQL prerequisites included) in `../README.md`.
 
-| Objet | Détail |
+| Object | Detail |
 |---|---|
-| `Namespace` + `ServiceAccount pg-rotate` | identité bindée au role Vault `pg-rotate-demo` |
+| `Namespace` + `ServiceAccount pg-rotate` | identity bound to the Vault role `pg-rotate-demo` |
 | `VaultAuth pg-rotate` | mount `kubernetes`, role `pg-rotate-demo`, `audiences: [vault]` |
-| `SecretTransformation pg-rotate-dsn` | assemble `DATABASE_URL` + `PGHOST`/`PGPORT`/`PGDATABASE`/`PGUSER`/`PGPASSWORD` |
-| `VaultDynamicSecret pg-rotate` | `mount: database`, `path: static-creds/vault-rotate`, `allowStaticCreds: true` ; `excludes: [".*"]` pour ne garder **que** les clés templatées → Secret `pg-rotate-creds` ; `rolloutRestartTargets` → le Deployment |
-| `Deployment pg-rotate-demo` | `alpine:3.20`, `envFrom` sur `pg-rotate-creds` : la DSN arrive dans ses variables d'env |
+| `SecretTransformation pg-rotate-dsn` | assembles `DATABASE_URL` + `PGHOST`/`PGPORT`/`PGDATABASE`/`PGUSER`/`PGPASSWORD` |
+| `VaultDynamicSecret pg-rotate` | `mount: database`, `path: static-creds/vault-rotate`, `allowStaticCreds: true`; `excludes: [".*"]` to keep **only** the templated keys → Secret `pg-rotate-creds`; `rolloutRestartTargets` → the Deployment |
+| `Deployment pg-rotate-demo` | `alpine:3.20`, `envFrom` on `pg-rotate-creds`: the DSN lands in its env vars |
 
-## ✅ Vérifier
+## ✅ Verify
 
 ```bash
-# Parcours B (ns demo)
+# Path B (ns demo)
 kubectl -n demo get vaultauth,vaultstaticsecret,vaultdynamicsecret,vaultpkisecret
-kubectl -n demo describe vaultstaticsecret static-kv     # events : "Secret synced"
+kubectl -n demo describe vaultstaticsecret static-kv     # events: "Secret synced"
 kubectl -n demo get secret                               # static-kv, dynamic-db, pki-tls, app-env
 kubectl -n demo get secret static-kv -o jsonpath='{.data.password}' | base64 -d ; echo
-kubectl -n demo logs deploy/demo-app                     # les variables DB_/APP_ injectées
+kubectl -n demo logs deploy/demo-app                     # the injected DB_/APP_ variables
 
-# Parcours A — nginx : la boucle secret -> env -> rollout
+# Path A — nginx: the secret -> env -> rollout loop
 kubectl -n nginx-test-vault get vaultstaticsecret nginx-test-vault-config   # SecretSynced=True
 POD=$(kubectl -n nginx-test-vault get pod -l app=nginx-test-vault -o jsonpath='{.items[0].metadata.name}')
 kubectl -n nginx-test-vault exec "$POD" -- env | grep '^APP_'
 
-# Parcours A — PostgreSQL : la DSN rendue + la preuve du redémarrage
+# Path A — PostgreSQL: the rendered DSN + the proof of the restart
 kubectl -n pg-rotate-demo get secret pg-rotate-creds -o jsonpath='{.data.DATABASE_URL}' | base64 -d; echo
 kubectl -n pg-rotate-demo get deploy pg-rotate-demo -o jsonpath='{.metadata.generation}'; echo
 
-# Sur un problème de synchro, la source de vérité reste les logs de l'opérateur :
+# On a sync problem, the source of truth remains the operator logs:
 kubectl -n vault-secrets-operator logs deploy/vault-secrets-operator-controller-manager -f
 ```
 
-## ⚠️ Pièges
+## ⚠️ Pitfalls
 
-- **`20-dynamic-db.yaml` ne peut pas se synchroniser en l'état.** Il demande `mount: db`, mais
-  `../vault/00-secrets-engines.sh:19` monte le moteur `database` sur **`database/`** (pas de
-  `-path=db`), et la policy `vso-dynamic-db.hcl` n'autorise que `db/creds/demo-app`. Résultat :
-  `403`/`404` systématique. Correction côté Vault (`vault secrets enable -path=db database`) et
-  explication complète dans `../vault/README.md`. Le moteur `database` a **aussi** besoin d'une
-  connexion et d'un role `creds/demo-app` pointant une vraie base — laissés en commentaire dans le
-  script.
-- **`50-demo-deployment.yaml` ne démarre pas si un des 3 Secret manque.** Aucune référence n'est
-  marquée `optional: true` : sans `dynamic-db` (cf. piège précédent) le pod reste en
-  `CreateContainerConfigError`, et sans `pki-tls` il reste bloqué en `ContainerCreating` (volume
-  introuvable). Le diagnostic est dans `kubectl -n demo describe pod`, pas dans les logs.
-- **`02` et `03` sont deux alternatives, pas deux étapes.** Appliquer les deux crée deux `VaultAuth`
-  pour le même role — inutile, et source de confusion sur lequel un CR utilise réellement.
-- **`SecretSynced: false`** : lire l'event du CR (`kubectl describe`). En pratique soit un login
-  refusé (role / SA / namespace / audience — cf. `../vault/README.md`), soit un `mount`/`path` faux.
-- **Le `Secret` change mais pas le pod** : il manque `rolloutRestartTargets`. Le `Secret` K8s est
-  bien à jour (`kubectl get secret` le prouve), mais le process garde l'ancienne valeur en mémoire.
-- **`VaultPKISecret` refusé** : `commonName` hors des `allowed_domains` du role PKI, ou `ttl`
-  demandé supérieur au `max_ttl` du role (72h ici).
-- **`excludes` + `transformationRefs`** : sans `excludes: [".*"]` (ou `excludeRaw: true`), le Secret
-  rendu contient **en plus** les clés brutes de Vault (`username`, `password`, `ttl`…). Pratique
-  pour déboguer, à éviter quand on veut un Secret propre.
+- **`20-dynamic-db.yaml` cannot sync as it stands.** It asks for `mount: db`, but
+  `../vault/00-secrets-engines.sh:19` mounts the `database` engine on **`database/`** (no
+  `-path=db`), and the `vso-dynamic-db.hcl` policy only allows `db/creds/demo-app`. Result: a
+  systematic `403`/`404`. Fix on the Vault side (`vault secrets enable -path=db database`) and full
+  explanation in `../vault/README.md`. The `database` engine **also** needs a connection and a
+  `creds/demo-app` role pointing at a real database — both left commented out in the script.
+- **`50-demo-deployment.yaml` will not start if one of the 3 Secrets is missing.** No reference is
+  marked `optional: true`: without `dynamic-db` (see the previous pitfall) the pod stays in
+  `CreateContainerConfigError`, and without `pki-tls` it stays stuck in `ContainerCreating` (volume
+  not found). The diagnosis is in `kubectl -n demo describe pod`, not in the logs.
+- **`02` and `03` are two alternatives, not two steps.** Applying both creates two `VaultAuth` for
+  the same role — pointless, and a source of confusion about which one a CR actually uses.
+- **`SecretSynced: false`**: read the CR's event (`kubectl describe`). In practice it is either a
+  refused login (role / SA / namespace / audience — see `../vault/README.md`), or a wrong
+  `mount`/`path`.
+- **The `Secret` changes but the pod does not**: `rolloutRestartTargets` is missing. The K8s
+  `Secret` is up to date (`kubectl get secret` proves it), but the process keeps the old value in
+  memory.
+- **`VaultPKISecret` refused**: `commonName` outside the `allowed_domains` of the PKI role, or a
+  requested `ttl` larger than the role's `max_ttl` (72h here).
+- **`excludes` + `transformationRefs`**: without `excludes: [".*"]` (or `excludeRaw: true`), the
+  rendered Secret **also** contains Vault's raw keys (`username`, `password`, `ttl`…). Handy for
+  debugging, best avoided when you want a clean Secret.
 
-## 📚 Références
+## 📚 References
 
-- [VSO — API reference (toutes les CRD)](https://developer.hashicorp.com/vault/docs/deploy/kubernetes/vso/api-reference)
+- [VSO — API reference (all the CRDs)](https://developer.hashicorp.com/vault/docs/deploy/kubernetes/vso/api-reference)
 - [VSO — `SecretTransformation` / templating](https://developer.hashicorp.com/vault/docs/deploy/kubernetes/vso/secret-transformation)
-- [VSO — exemples officiels (dépôt GitHub)](https://github.com/hashicorp/vault-secrets-operator/tree/main/config/samples)
+- [VSO — official examples (GitHub repo)](https://github.com/hashicorp/vault-secrets-operator/tree/main/config/samples)

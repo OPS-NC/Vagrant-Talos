@@ -2,59 +2,59 @@
 **English** · [Français](LISEZ-MOI.md)
 <!-- /i18n -->
 
-# 🐙 `argocd/` — Argo CD (GitOps) exposé via la Gateway API
+# 🐙 `argocd/` — Argo CD (GitOps) exposed through the Gateway API
 
-> **Le GitOps du lab, en HTTPS, en une commande.** Argo CD réconcilie l'état du cluster avec des
-> manifestes Git ; son UI/API sont publiées sous `argo.talos.lab.example.io` derrière le même
-> `main-gateway` que le reste du lab, avec le **wildcard `*.talos.lab.example.io`** déjà émis par
-> cert-manager — rien de neuf côté certificat.
+> **The lab's GitOps, over HTTPS, in one command.** Argo CD reconciles cluster state with Git
+> manifests; its UI/API are published at `argo.talos.lab.example.io` behind the same
+> `main-gateway` as the rest of the lab, with the **`*.talos.lab.example.io` wildcard** already
+> issued by cert-manager — nothing new on the certificate side.
 
-> 🌐 **`talos.lab.example.io` est le domaine NEUTRE du dépôt (public)** : `argocd-up.sh` le
-> remplace par `LAB_DOMAIN` (`lab.env`) dans les values Helm **et** l'`HTTPRoute`. Cf.
-> [`../README.md`](../README.md#-lab_domain--le-domaine-des-ui).
+> 🌐 **`talos.lab.example.io` is the repo's NEUTRAL domain (public)**: `argocd-up.sh` swaps it
+> for `LAB_DOMAIN` (`lab.env`) in the Helm values **and** in the `HTTPRoute`. See
+> [`../README.md`](../README.md#-lab_domain--the-ui-domain).
 
-## 🎯 À quoi ça sert
+## 🎯 Purpose
 
-- Dérouler un **cycle GitOps complet** : dépôt → `Application` → sync → drift détecté → resync.
-- Montrer un **rattachement Gateway API inter-namespace** de plus (route dans `argocd`, Gateway
-  dans `envoy-gateway-system`).
-- Servir de terrain de jeu pour déployer les autres addons **par Git** au lieu de `kubectl`.
+- Run a **full GitOps cycle**: repo → `Application` → sync → drift detected → resync.
+- Show one more **cross-namespace Gateway API attachment** (route in `argocd`, Gateway in
+  `envoy-gateway-system`).
+- Serve as a playground for deploying the other addons **through Git** instead of `kubectl`.
 
-> ℹ️ **Addon à part** : Argo CD n'est **pas** installé par `../platform-up.sh` (qui ne pose que
-> Cilium + Envoy Gateway + metrics-server + cert-manager). Il s'installe à la demande, comme
+> ℹ️ **Standalone addon**: Argo CD is **not** installed by `../platform-up.sh` (which only
+> lays down Cilium + Envoy Gateway + metrics-server + cert-manager). It installs on demand, like
 > `../longhorn/`, `../vault-cluster/`, `../kyverno/`…
 
-### Le montage en une phrase
+### The setup in one sentence
 
-**Envoy termine le TLS, `argocd-server` parle en clair.** On règle `server.insecure=true` : HTTPS
-devant (cert wildcard), HTTP derrière. Sans ça, `argocd-server` ferait sa propre redirection
-`307 http→https` alors que le proxy termine déjà le TLS → **boucle de redirection**. C'est le
-mode recommandé derrière un ingress/gateway qui gère le TLS.
+**Envoy terminates TLS, `argocd-server` speaks plaintext.** We set `server.insecure=true`: HTTPS
+in front (wildcard cert), HTTP behind. Without it, `argocd-server` would issue its own
+`307 http→https` redirect while the proxy already terminates TLS → **redirect loop**. This is
+the recommended mode behind an ingress/gateway that handles TLS.
 
-## 📋 Prérequis
+## 📋 Prerequisites
 
-| Prérequis | Pourquoi | Vérifier |
+| Prerequisite | Why | Verify |
 |---|---|---|
-| `main-gateway` avec l'écouteur **`https:443`** ([`../envoy-gateway/`](../envoy-gateway/README.md)) | porte l'UI en HTTPS | `kubectl get gateway -n envoy-gateway-system` |
-| Cert wildcard `wildcard-talos-lab-example-io-tls` **`READY=True`** ([`../cert-manager/`](../cert-manager/README.md)) | sinon TLS non trusté | `kubectl -n envoy-gateway-system get certificate` |
-| DNS `argo.talos.lab.example.io → 192.168.56.200` en **DNS-only** | hostname de l'`HTTPRoute` | `curl --resolve` sinon (cf. ✅) |
-| Rien côté Talos | Argo CD n'a besoin d'aucun privilège ni `hostPath` | `kubectl -n argocd get pods` |
+| `main-gateway` with the **`https:443`** listener ([`../envoy-gateway/`](../envoy-gateway/README.md)) | carries the UI over HTTPS | `kubectl get gateway -n envoy-gateway-system` |
+| Wildcard cert `wildcard-talos-lab-example-io-tls` **`READY=True`** ([`../cert-manager/`](../cert-manager/README.md)) | otherwise TLS is untrusted | `kubectl -n envoy-gateway-system get certificate` |
+| DNS `argo.talos.lab.example.io → 192.168.56.200` in **DNS-only** | hostname of the `HTTPRoute` | `curl --resolve` otherwise (see ✅) |
+| Nothing on the Talos side | Argo CD needs no privilege and no `hostPath` | `kubectl -n argocd get pods` |
 
-## ⚡ Installation
+## ⚡ Install
 
 ```bash
 ./_k8s/argocd/argocd-up.sh
 ```
 
-Chart `argo/argo-cd` **`10.2.1`** (app **v3.4.5**), épinglé dans le script via `ARGOCD_VERSION`
-(surchargeable). Idempotent (`helm upgrade --install` + `kubectl apply`).
+Chart `argo/argo-cd` **`10.2.1`** (app **v3.4.5**), pinned in the script via `ARGOCD_VERSION`
+(can be overridden). Idempotent (`helm upgrade --install` + `kubectl apply`).
 
 <details>
-<summary>Équivalent manuel</summary>
+<summary>Manual equivalent</summary>
 
 ```bash
 helm repo add argo https://argoproj.github.io/argo-helm && helm repo update
-# --version : garder celle du script (ARGOCD_VERSION)
+# --version: keep the one from the script (ARGOCD_VERSION)
 helm upgrade --install argocd argo/argo-cd \
   --namespace argocd --create-namespace \
   --version 10.2.1 \
@@ -64,55 +64,54 @@ kubectl apply -f _k8s/argocd/httproute.yaml
 ```
 </details>
 
-## 🔧 Ce que fait le script
+## 🔧 What the script does
 
-1. installe le chart dans le namespace `argocd` avec `values.yaml`, puis attend
-   `deploy/argocd-server` (300 s max) ;
-2. applique `httproute.yaml` ;
-3. rappelle l'URL, la commande du mot de passe initial et le `curl` de test.
+1. installs the chart in the `argocd` namespace with `values.yaml`, then waits for
+   `deploy/argocd-server` (300 s max);
+2. applies `httproute.yaml`;
+3. prints the URL, the initial-password command and the test `curl`.
 
-### Fichiers
+### Files
 
-| Fichier | Rôle |
+| File | Purpose |
 |---------|------|
-| `values.yaml` | `global.domain` + `server.insecure: true` + `url` publique ; **Dex** et **notifications** coupés (allègement) ; ApplicationSet laissé actif |
-| `httproute.yaml` | `HTTPRoute` HTTPS `argo.talos.lab.example.io` → `argocd-server:80`, `sectionName: https` |
-| `argocd-up.sh` | installe Argo CD + applique la route (idempotent) |
+| `values.yaml` | `global.domain` + `server.insecure: true` + public `url`; **Dex** and **notifications** turned off (slimming down); ApplicationSet left enabled |
+| `httproute.yaml` | HTTPS `HTTPRoute` `argo.talos.lab.example.io` → `argocd-server:80`, `sectionName: https` |
+| `argocd-up.sh` | installs Argo CD + applies the route (idempotent) |
 
-La route vit dans `argocd` et s'attache à `main-gateway` (ns `envoy-gateway-system`) grâce à
-`allowedRoutes.namespaces.from: All` côté Gateway ; le backend étant dans le même namespace que
-la route, aucun `ReferenceGrant` n'est nécessaire.
+The route lives in `argocd` and attaches to `main-gateway` (ns `envoy-gateway-system`) thanks to
+`allowedRoutes.namespaces.from: All` on the Gateway side; since the backend sits in the same
+namespace as the route, no `ReferenceGrant` is needed.
 
-## ✅ Vérifier
+## ✅ Verify
 
 ```bash
 kubectl -n argocd get pods                            # server/repo-server/redis/app-controller Running
 kubectl -n argocd get httproute argocd-server         # Accepted + ResolvedRefs = True
-# test end-to-end (cert wildcard trusté, servi par Envoy) :
+# end-to-end test (trusted wildcard cert, served by Envoy):
 curl -sS -o /dev/null -w '%{http_code} verify=%{ssl_verify_result}\n' \
   --resolve argo.talos.lab.example.io:443:192.168.56.200 \
-  https://argo.talos.lab.example.io/                      # attendu : 200 verify=0
+  https://argo.talos.lab.example.io/                      # expected: 200 verify=0
 ```
 
-`--resolve` court-circuite le DNS : pratique pour tester **avant** de créer l'enregistrement
-Cloudflare.
+`--resolve` bypasses DNS: handy for testing **before** you create the Cloudflare record.
 
-## 🌐 Accès
+## 🌐 Access
 
-| Quoi | Valeur |
+| What | Value |
 |---|---|
 | UI | `https://argo.talos.lab.example.io` |
-| Utilisateur | `admin` |
-| Mot de passe initial | `kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' \| base64 -d ; echo` |
+| User | `admin` |
+| Initial password | `kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' \| base64 -d ; echo` |
 | CLI | `argocd login argo.talos.lab.example.io --grpc-web --username admin` |
 
-> 💡 Change le mot de passe depuis l'UI, puis **supprime le Secret initial** :
+> 💡 Change the password from the UI, then **delete the initial Secret**:
 > `kubectl -n argocd delete secret argocd-initial-admin-secret`.
 
-`--grpc-web` est requis : le gRPC natif est souvent cassé par les proxies L7 ; ici l'API passe par
-le même hôte HTTPS que l'UI.
+`--grpc-web` is required: native gRPC is often broken by L7 proxies; here the API goes through the
+same HTTPS host as the UI.
 
-## 🧪 Scénario — première `Application`
+## 🧪 Scenario — your first `Application`
 
 ```bash
 kubectl apply -f - <<'EOF'
@@ -136,39 +135,39 @@ spec:
 EOF
 kubectl -n argocd get applications                    # SYNC STATUS / HEALTH STATUS
 kubectl -n guestbook get pods
-# Démo du self-heal : supprime un objet à la main, Argo CD le recrée
+# Self-heal demo: delete an object by hand, Argo CD recreates it
 kubectl -n guestbook delete deploy --all
-kubectl -n argocd delete application guestbook        # nettoyage (prune=true supprime les objets)
+kubectl -n argocd delete application guestbook        # cleanup (prune=true deletes the objects)
 ```
 
-## 🚑 Dépannage
+## 🚑 Troubleshooting
 
-- **Boucle de redirection / `too many redirects`** → `server.insecure` n'est pas actif :
-  `kubectl -n argocd get cm argocd-cmd-params-cm -o jsonpath='{.data.server\.insecure}'` doit
-  valoir `"true"`, puis `kubectl -n argocd rollout restart deploy/argocd-server`.
-- **404 / route non rattachée** → `kubectl -n argocd describe httproute argocd-server` :
-  `sectionName: https` doit exister sur `main-gateway`, et le hostname matcher le wildcard.
-- **Certificat non trusté** → l'écouteur `https` sert-il bien `wildcard-talos-lab-example-io-tls` ?
-  (cf. [`../cert-manager/README.md`](../cert-manager/README.md)).
-- **UI OK mais `argocd login` KO** → ajouter `--grpc-web`.
+- **Redirect loop / `too many redirects`** → `server.insecure` is not active:
+  `kubectl -n argocd get cm argocd-cmd-params-cm -o jsonpath='{.data.server\.insecure}'` must
+  return `"true"`, then `kubectl -n argocd rollout restart deploy/argocd-server`.
+- **404 / route not attached** → `kubectl -n argocd describe httproute argocd-server`:
+  `sectionName: https` must exist on `main-gateway`, and the hostname must match the wildcard.
+- **Untrusted certificate** → does the `https` listener really serve
+  `wildcard-talos-lab-example-io-tls`? (see [`../cert-manager/README.md`](../cert-manager/README.md)).
+- **UI fine but `argocd login` failing** → add `--grpc-web`.
 
-## ⚠️ Pièges
+## ⚠️ Pitfalls
 
-- **Le Secret `argocd-initial-admin-secret` reste en clair dans le cluster** tant que tu ne l'as
-  pas supprimé : c'est un identifiant admin complet, lisible par tout ce qui a le droit `get
-  secrets` dans `argocd`.
-- **UI publiée sur le VIP** : Argo CD a sa propre authentification (contrairement à l'UI
-  Longhorn), mais reste joignable par tout peer Tailscale autorisé. Mot de passe fort obligatoire.
-- **Dex désactivé** = pas de SSO : seul l'admin local existe. Réactiver `dex.enabled` si tu veux
-  brancher un IdP (coûte un pod).
-- **Argo CD peut se battre avec `kubectl`** : si tu confies un addon à une `Application` avec
-  `selfHeal: true`, tout `kubectl edit` manuel sera annulé. Choisis ton mode de déploiement.
-- **Empiler cet addon sur des control planes trop justes en RAM** finit par affamer etcd.
-  `lab.env` (`CP_MEM`) est la molette ; voir les pièges de [`../README.md`](../README.md).
+- **The `argocd-initial-admin-secret` Secret stays in the cluster in plaintext** as long as you
+  have not deleted it: it is a full admin credential, readable by anything holding `get secrets`
+  in `argocd`.
+- **UI published on the VIP**: Argo CD has its own authentication (unlike the Longhorn UI), but it
+  stays reachable by every authorized Tailscale peer. A strong password is mandatory.
+- **Dex disabled** = no SSO: only the local admin exists. Re-enable `dex.enabled` if you want to
+  wire up an IdP (costs a pod).
+- **Argo CD can fight with `kubectl`**: hand a component over to an `Application` with
+  `selfHeal: true` and every manual `kubectl edit` gets reverted. Pick your deployment mode.
+- **Stacking this component on control planes that are too tight on RAM** ends up starving etcd.
+  `lab.env` (`CP_MEM`) is the knob; see the pitfalls in [`../README.md`](../README.md).
 
-## 📚 Références
+## 📚 References
 
 - [Argo CD — Ingress / reverse proxy (`server.insecure`)](https://argo-cd.readthedocs.io/en/stable/operator-manual/ingress/)
-- [Argo CD — déclaration d'`Application`](https://argo-cd.readthedocs.io/en/stable/operator-manual/declarative-setup/)
-- [argo-helm — releases du chart](https://github.com/argoproj/argo-helm/releases)
-- [`../envoy-gateway/README.md`](../envoy-gateway/README.md) — le Gateway qui porte cette route
+- [Argo CD — declaring an `Application`](https://argo-cd.readthedocs.io/en/stable/operator-manual/declarative-setup/)
+- [argo-helm — chart releases](https://github.com/argoproj/argo-helm/releases)
+- [`../envoy-gateway/README.md`](../envoy-gateway/README.md) — the Gateway that carries this route

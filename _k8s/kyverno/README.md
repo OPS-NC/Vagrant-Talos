@@ -2,227 +2,227 @@
 **English** · [Français](LISEZ-MOI.md)
 <!-- /i18n -->
 
-# ⚖️ `kyverno/` — policy engine Kubernetes + UI Policy Reporter
+# ⚖️ `kyverno/` — Kubernetes policy engine + Policy Reporter UI
 
-> **Kyverno = un webhook d'admission + des contrôleurs de fond.** Trois verbes : `validate`
-> (accepter / refuser / auditer), `mutate` (réécrire la ressource entrante), `generate` (créer
-> une ressource dérivée). Les verdicts atterrissent dans des `PolicyReport`, agrégés par
-> **Policy Reporter** dans une UI web sous `kyverno.talos.lab.example.io`.
+> **Kyverno = an admission webhook + background controllers.** Three verbs: `validate`
+> (accept / reject / audit), `mutate` (rewrite the incoming resource), `generate` (create a
+> derived resource). Verdicts land in `PolicyReport` objects, aggregated by **Policy Reporter**
+> into a web UI at `kyverno.talos.lab.example.io`.
 
-> 🌐 **`talos.lab.example.io` est le domaine NEUTRE du dépôt (public)** : `kyverno-up.sh` le
-> remplace par `LAB_DOMAIN` (`lab.env`) au moment du `kubectl apply`. Cf.
-> [`../README.md`](../README.md#-lab_domain--le-domaine-des-ui).
+> 🌐 **`talos.lab.example.io` is the repo's NEUTRAL domain (public)**: `kyverno-up.sh` swaps it
+> for `LAB_DOMAIN` (`lab.env`) at `kubectl apply` time. See
+> [`../README.md`](../README.md#-lab_domain--the-ui-domain).
 
-## 🎯 À quoi ça sert
+## 🎯 Purpose
 
-Montrer, sur un cluster qui tourne déjà, ce qu'un policy engine attrape — **sans rien casser** :
+Show, on an already-running cluster, what a policy engine catches — **without breaking anything**:
 
-- les 4 policies de validation sont livrées en **`Audit`** (elles signalent, ne bloquent pas) ;
-- tous les webhooks d'évaluation sont **fail-open** (cf. 🔧) : même Kyverno KO, le cluster
-  continue d'accepter les créations de pods ;
-- une policy `mutate` et une policy `generate` complètent la démonstration des trois verbes.
+- the 4 validation policies ship in **`Audit`** (they report, they do not block);
+- every evaluation webhook is **fail-open** (see 🔧): even with Kyverno down, the cluster keeps
+  accepting pod creations;
+- one `mutate` policy and one `generate` policy round out the demo of the three verbs.
 
-On lit d'abord les violations de l'existant dans l'UI, puis on montre un passage en `Enforce`
-sur une seule policy, le temps de la démo.
+Read the existing violations in the UI first, then show a switch to `Enforce` on a single policy,
+just for the demo.
 
-## 📋 Prérequis
+## 📋 Prerequisites
 
-| Prérequis | Pourquoi | Vérifier |
+| Prerequisite | Why | Verify |
 |---|---|---|
-| Plateforme en place (`../platform-up.sh`) | l'UI est exposée via `main-gateway` + cert wildcard | `kubectl -n envoy-gateway-system get certificate` |
-| DNS `kyverno.talos.lab.example.io → 192.168.56.200` (**DNS-only**) | hostname de l'`HTTPRoute` | `curl --resolve` sinon (cf. ✅) |
-| Rien côté Talos | Kyverno tourne **sans privilège**, conforme PodSecurity `restricted` | `kubectl -n kyverno get pods` |
+| Platform in place (`../platform-up.sh`) | the UI is exposed through `main-gateway` + the wildcard cert | `kubectl -n envoy-gateway-system get certificate` |
+| DNS `kyverno.talos.lab.example.io → 192.168.56.200` (**DNS-only**) | hostname of the `HTTPRoute` | `curl --resolve` otherwise (see ✅) |
+| Nothing on the Talos side | Kyverno runs **unprivileged**, compliant with PodSecurity `restricted` | `kubectl -n kyverno get pods` |
 
-## ⚡ Installation
+## ⚡ Install
 
 ```bash
 ./_k8s/kyverno/kyverno-up.sh
 ```
 
-Versions épinglées dans le script : chart `kyverno/kyverno` **`3.8.2`** (app **v1.18.2**) et
+Versions pinned in the script: chart `kyverno/kyverno` **`3.8.2`** (app **v1.18.2**) and
 `policy-reporter/policy-reporter` **`3.8.1`** (`KYVERNO_VERSION` / `POLICY_REPORTER_VERSION`
-surchargeables). Idempotent (`helm upgrade --install` + `kubectl apply`).
+can be overridden). Idempotent (`helm upgrade --install` + `kubectl apply`).
 
-## 🔧 Ce que fait le script
+## 🔧 What the script does
 
-1. installe **Kyverno** dans le namespace `kyverno` avec `values.yaml`, puis attend
-   l'`admission-controller` ;
-2. applique **`policies/`** (4 `validate` en Audit + 1 `mutate` + 1 `generate`) et les liste ;
-3. installe **Policy Reporter** (+ UI + plugins **kyverno** et **trivy**) avec
-   `policy-reporter-values.yaml` ;
-4. applique **`httproute.yaml`** → `https://kyverno.talos.lab.example.io`.
+1. installs **Kyverno** in the `kyverno` namespace with `values.yaml`, then waits for the
+   `admission-controller`;
+2. applies **`policies/`** (4 `validate` in Audit + 1 `mutate` + 1 `generate`) and lists them;
+3. installs **Policy Reporter** (+ UI + the **kyverno** and **trivy** plugins) with
+   `policy-reporter-values.yaml`;
+4. applies **`httproute.yaml`** → `https://kyverno.talos.lab.example.io`.
 
-### Le choix décisif de ce lab : l'évaluation est fail-open
+### The decisive choice in this lab: evaluation is fail-open
 
-`values.yaml` pose `features.forceFailurePolicyIgnore.enabled: true`. Les webhooks qui
-**évaluent tes ressources** passent donc en `failurePolicy: Ignore` — on le voit dans leurs
-noms : `validate.kyverno.svc-ignore`, `mutate.kyverno.svc-ignore`.
+`values.yaml` sets `features.forceFailurePolicyIgnore.enabled: true`. The webhooks that
+**evaluate your resources** therefore move to `failurePolicy: Ignore` — you can read it in their
+names: `validate.kyverno.svc-ignore`, `mutate.kyverno.svc-ignore`.
 
-| Situation | Conséquence |
+| Situation | Consequence |
 |---|---|
-| Kyverno **injoignable** (pod down, timeout) | la requête **passe quand même** — pas de deadlock « Kyverno KO ⇒ plus aucun pod ne démarre » |
-| Kyverno **joignable**, policy en `Audit` | la requête passe, un `fail` est écrit dans le `PolicyReport` |
-| Kyverno **joignable**, policy en `Enforce` | la requête est **refusée** (le fail-open ne désarme pas le blocage) |
+| Kyverno **unreachable** (pod down, timeout) | the request **goes through anyway** — no "Kyverno down ⇒ no pod ever starts" deadlock |
+| Kyverno **reachable**, policy in `Audit` | the request goes through, a `fail` is written to the `PolicyReport` |
+| Kyverno **reachable**, policy in `Enforce` | the request is **rejected** (fail-open does not disarm blocking) |
 
-> ℹ️ Les webhooks **internes** de Kyverno (validation des `ClusterPolicy`, des
-> `PolicyException`, du cleanup) restent en `failurePolicy: Fail` : seule l'évaluation de tes
-> ressources est fail-open. À vérifier soi-même :
+> ℹ️ Kyverno's **internal** webhooks (validation of `ClusterPolicy` and `PolicyException`,
+> cleanup) stay on `failurePolicy: Fail`: only the evaluation of your own resources is fail-open.
+> Check it yourself:
 > ```bash
 > kubectl get validatingwebhookconfigurations \
 >   -o 'custom-columns=NAME:.metadata.name,POLICY:.webhooks[*].failurePolicy' | grep kyverno
 > ```
-> Les guillemets autour de `custom-columns=…` sont nécessaires : sinon le shell interprète `[*]`.
+> The quotes around `custom-columns=…` are required: without them the shell expands `[*]`.
 
-### Fichiers
+### Files
 
-| Fichier | Rôle |
+| File | Purpose |
 |---------|------|
-| `values.yaml` | 1 replica par contrôleur (4 contrôleurs), resources par défaut du chart, **`forceFailurePolicyIgnore` activé** |
-| `policy-reporter-values.yaml` | Policy Reporter + **UI** + plugin **kyverno** + plugin **trivy** + métriques |
-| `httproute.yaml` | `HTTPRoute` HTTPS `kyverno.talos.lab.example.io` → `policy-reporter-ui:8080` |
-| `kyverno-up.sh` | installe tout dans l'ordre, idempotent |
-| `policies/01-require-labels.yaml` | **validate/Audit** — exige `app.kubernetes.io/name` |
-| `policies/02-disallow-latest-tag.yaml` | **validate/Audit** — tag explicite obligatoire, `:latest` interdit |
-| `policies/03-require-requests-limits.yaml` | **validate/Audit** — `requests` + `limits` (cpu **et** memory) |
-| `policies/04-disallow-privileged.yaml` | **validate/Audit** — interdit les conteneurs privilégiés |
-| `policies/10-mutate-add-labels.yaml` | **mutate** — ajoute `lab.talos/managed-by: kyverno` |
-| `policies/20-generate-default-netpol.yaml` | **generate** — NetworkPolicy default-deny (opt-in par label) |
+| `values.yaml` | 1 replica per controller (4 controllers), chart default resources, **`forceFailurePolicyIgnore` enabled** |
+| `policy-reporter-values.yaml` | Policy Reporter + **UI** + **kyverno** plugin + **trivy** plugin + metrics |
+| `httproute.yaml` | HTTPS `HTTPRoute` `kyverno.talos.lab.example.io` → `policy-reporter-ui:8080` |
+| `kyverno-up.sh` | installs everything in order, idempotent |
+| `policies/01-require-labels.yaml` | **validate/Audit** — requires `app.kubernetes.io/name` |
+| `policies/02-disallow-latest-tag.yaml` | **validate/Audit** — explicit tag mandatory, `:latest` forbidden |
+| `policies/03-require-requests-limits.yaml` | **validate/Audit** — `requests` + `limits` (cpu **and** memory) |
+| `policies/04-disallow-privileged.yaml` | **validate/Audit** — forbids privileged containers |
+| `policies/10-mutate-add-labels.yaml` | **mutate** — adds `lab.talos/managed-by: kyverno` |
+| `policies/20-generate-default-netpol.yaml` | **generate** — default-deny NetworkPolicy (opt-in by label) |
 
-## ✅ Vérifier
+## ✅ Verify
 
 ```bash
-kubectl -n kyverno get pods                    # 4 contrôleurs + policy-reporter (+ui, +2 plugins)
+kubectl -n kyverno get pods                    # 4 controllers + policy-reporter (+ui, +2 plugins)
 kubectl get clusterpolicy                      # 6 policies, READY=True
-kubectl get policyreport -A                    # rapports par namespace (PASS/FAIL/WARN)
-kubectl get clusterpolicyreport                # rapports niveau cluster
+kubectl get policyreport -A                    # per-namespace reports (PASS/FAIL/WARN)
+kubectl get clusterpolicyreport                # cluster-scoped reports
 
-# test end-to-end (cert wildcard trusté, servi par Envoy) :
+# end-to-end test (trusted wildcard cert, served by Envoy):
 curl -sS -o /dev/null -w '%{http_code} verify=%{ssl_verify_result}\n' \
   --resolve kyverno.talos.lab.example.io:443:192.168.56.200 \
-  https://kyverno.talos.lab.example.io/            # attendu : 200 verify=0
+  https://kyverno.talos.lab.example.io/            # expected: 200 verify=0
 ```
 
-Compter les `fail` par policy (utile pour préparer une démo) :
+Count the `fail` results per policy (handy when preparing a demo):
 
 ```bash
 kubectl get policyreport -A -o json | jq -r \
   '.items[].results[] | select(.result=="fail") | .policy' | sort | uniq -c | sort -rn
 ```
 
-## 🌐 Accès
+## 🌐 Access
 
-| Quoi | Où | Authentification |
+| What | Where | Authentication |
 |---|---|---|
-| UI Policy Reporter | `https://kyverno.talos.lab.example.io` | **aucune** — cf. ⚠️ Pièges |
-| API Policy Reporter | `kubectl -n kyverno port-forward svc/policy-reporter 8080:8080` | aucune |
+| Policy Reporter UI | `https://kyverno.talos.lab.example.io` | **none** — see ⚠️ Pitfalls |
+| Policy Reporter API | `kubectl -n kyverno port-forward svc/policy-reporter 8080:8080` | none |
 
-## 🧪 Scénarios
+## 🧪 Scenarios
 
-### 1. Lire les violations (validate en Audit)
+### 1. Read the violations (validate in Audit)
 
-Le **background scan** évalue l'existant dès l'installation. Dans l'UI : violations par
-namespace, par policy, par sévérité. Rien n'a été bloqué — c'est de l'audit. Commence par
-`require-requests-limits` et `require-labels` : ce sont les plus bruyantes, et c'est
-**instructif** (cf. ⚠️ Pièges, « le dépôt viole ses propres policies »).
+The **background scan** evaluates what already runs as soon as it is installed. In the UI:
+violations per namespace, per policy, per severity. Nothing was blocked — this is audit. Start
+with `require-requests-limits` and `require-labels`: they are the noisiest, and that is
+**instructive** (see ⚠️ Pitfalls, "the repo violates its own policies").
 
-### 2. Passer une policy en Enforce (blocage réel)
+### 2. Switch a policy to Enforce (real blocking)
 
 ```bash
 kubectl patch clusterpolicy disallow-latest-tag --type merge \
   -p '{"spec":{"validationFailureAction":"Enforce"}}'
-kubectl run bad --image=nginx:latest            # REFUSÉ par le webhook Kyverno
+kubectl run bad --image=nginx:latest            # REJECTED by the Kyverno webhook
 kubectl patch clusterpolicy disallow-latest-tag --type merge \
   -p '{"spec":{"validationFailureAction":"Audit"}}'
 ```
 
-> ⚠️ **`spec.validationFailureAction` est déprécié** sur ce Kyverno (v1.18.2) :
-> `kubectl explain clusterpolicy.spec.validationFailureAction` répond « Deprecated, use
-> validationFailureAction under the validate rule instead ». Le champ fonctionne encore (les 4
-> policies du dépôt l'utilisent au niveau `spec`), mais la forme moderne est
-> `spec.rules[].validate.failureAction`. Rien à corriger pour la démo ; à savoir avant de
-> monter Kyverno de version majeure.
+> ⚠️ **`spec.validationFailureAction` is deprecated** on this Kyverno (v1.18.2):
+> `kubectl explain clusterpolicy.spec.validationFailureAction` answers "Deprecated, use
+> validationFailureAction under the validate rule instead". The field still works (the repo's 4
+> policies use it at the `spec` level), but the modern form is
+> `spec.rules[].validate.failureAction`. Nothing to fix for the demo; worth knowing before a
+> major Kyverno version bump.
 
-### 3. Voir la mutation en action
+### 3. See the mutation in action
 
 ```bash
 kubectl run demo --image=nginx:1.27
-kubectl get pod demo --show-labels              # lab.talos/managed-by=kyverno ajouté
+kubectl get pod demo --show-labels              # lab.talos/managed-by=kyverno added
 kubectl delete pod demo
 ```
 
-### 4. Voir la génération en action (opt-in par label)
+### 4. See generation in action (opt-in by label)
 
 ```bash
 kubectl create ns demo-netpol
 kubectl label ns demo-netpol kyverno-demo=true
-kubectl -n demo-netpol get netpol               # default-deny générée par Kyverno
+kubectl -n demo-netpol get netpol               # default-deny generated by Kyverno
 kubectl delete ns demo-netpol
 ```
 
-### 5. Créer une exception ciblée (PolicyException)
+### 5. Create a targeted exception (PolicyException)
 
-`longhorn-system` DOIT tourner en privilégié → il apparaît en `fail` sur
-`disallow-privileged-containers`. En vrai, on l'exempte proprement. Les `PolicyException` sont
-**désactivées par défaut** dans le chart ; pour la démo, réinstalle avec
+`longhorn-system` MUST run privileged → it shows up as `fail` on
+`disallow-privileged-containers`. In the real world you exempt it cleanly. `PolicyException`
+objects are **disabled by default** in the chart; for the demo, reinstall with
 `--set features.policyExceptions.enabled=true --set features.policyExceptions.namespace=kyverno`,
-puis crée une `PolicyException` ciblant `longhorn-system`. Sinon, montre simplement le `fail`
-dans l'UI comme illustration du besoin.
+then create a `PolicyException` targeting `longhorn-system`. Otherwise, just show the `fail` in
+the UI as an illustration of the need.
 
-## 🚑 Dépannage
+## 🚑 Troubleshooting
 
-- **Rien dans l'UI** → l'agrégation prend ~30 s. `kubectl get policyreport -A` doit déjà lister
-  des lignes ; sinon vérifie que `policy-reporter-ui` et `policy-reporter-kyverno-plugin` sont
+- **Nothing in the UI** → aggregation takes ~30 s. `kubectl get policyreport -A` should already
+  list rows; if not, check that `policy-reporter-ui` and `policy-reporter-kyverno-plugin` are
   `Running` (`kubectl -n kyverno get pods`).
-- **404 / route non rattachée** → `kubectl -n kyverno describe httproute policy-reporter-ui`
-  (`sectionName: https` sur `main-gateway`, hostname couvert par le wildcard).
-- **`clusterpolicy` en `READY=False`** → `kubectl describe clusterpolicy <nom>` : souvent une
-  erreur de `pattern` ou une CRD manquante côté générateur.
+- **404 / route not attached** → `kubectl -n kyverno describe httproute policy-reporter-ui`
+  (`sectionName: https` on `main-gateway`, hostname covered by the wildcard).
+- **`clusterpolicy` stuck at `READY=False`** → `kubectl describe clusterpolicy <name>`: usually a
+  `pattern` error, or a CRD missing on the generator side.
 
-## ⚠️ Pièges
+## ⚠️ Pitfalls
 
-- **« Les composants système ne sont jamais soumis aux policies » est FAUX.** Le chart exclut
-  bien `kube-system`, `kube-public`, `kube-node-lease` et `kyverno` via `config.resourceFilters`
-  — mais ce filtre porte sur l'**admission**. Le **scan de fond** évalue quand même ces
-  ressources et produit des rapports : sur ce lab, des dizaines de `fail` en `kube-system`
-  (cilium, kube-proxy…) et dans `kyverno` lui-même. Vérifie-le :
-  `kubectl -n kube-system get policyreport`. Conclusion pratique : aucun risque de **bloquer**
-  un composant système, mais les rapports, eux, les incluent. *(Le commentaire de `values.yaml`
-  est trop catégorique sur ce point.)*
-- **Le dépôt viole ses propres policies — c'est assumé, mais ça fait du bruit :**
-  - `03-require-requests-limits` exige `limits.cpu`, qu'**aucun** manifeste du dépôt ne pose
-    (choix délibéré : on borne la mémoire, on ne *throttle* pas le CPU). Résultat : c'est de
-    très loin la policy la plus en échec, et elle noie les autres dans l'UI.
-  - `01-require-labels` exige `app.kubernetes.io/name` alors que tous les manifestes maison
-    utilisent `app:` → `fail` systématique sur les démos du lab.
-  - `02-disallow-latest-tag` ne contrôle que `spec.containers` : un `:latest` dans un
-    **`initContainers`** passe inaperçu. Bon exercice d'extension de policy.
-- **UI sans authentification.** Policy Reporter est publié en HTTPS sans auth : quiconque
-  atteint le VIP `.200` (tout peer Tailscale autorisé) lit l'inventaire des faiblesses du
-  cluster. Pour la protéger : `SecurityPolicy` Envoy Gateway (Basic Auth / OIDC) sur la route.
-- **Un Pod légitime refusé après un passage en `Enforce`** → repasse la policy en `Audit`
-  (scénario 2) ou crée une `PolicyException`. Ne laisse jamais une policy `Enforce` mal calibrée
-  sur un cluster partagé.
-- **1 replica pour l'admission-controller** = SPOF assumé (lab). Le fail-open évite le blocage,
-  mais pendant un redémarrage les policies ne s'appliquent simplement plus. Pour de la
-  robustesse : `admissionController.replicas: 3` dans `values.yaml` (coûte de la RAM).
+- **"System components are never subject to policies" is FALSE.** The chart does exclude
+  `kube-system`, `kube-public`, `kube-node-lease` and `kyverno` via `config.resourceFilters`
+  — but that filter applies to **admission**. The **background scan** evaluates those resources
+  anyway and produces reports: on this lab, dozens of `fail` results in `kube-system`
+  (cilium, kube-proxy…) and inside `kyverno` itself. Check it:
+  `kubectl -n kube-system get policyreport`. Practical conclusion: no risk of **blocking** a
+  system component, but the reports do include them. *(The comment in `values.yaml` is too
+  categorical on this point.)*
+- **The repo violates its own policies — deliberately, but it is noisy:**
+  - `03-require-requests-limits` requires `limits.cpu`, which **no** manifest in the repo sets
+    (deliberate choice: cap memory, do not *throttle* CPU). Result: by far the most-failing
+    policy, and it drowns the others in the UI.
+  - `01-require-labels` requires `app.kubernetes.io/name` while every in-house manifest uses
+    `app:` → a systematic `fail` on the lab demos.
+  - `02-disallow-latest-tag` only inspects `spec.containers`: a `:latest` inside
+    **`initContainers`** slips through unnoticed. A good policy-extension exercise.
+- **UI with no authentication.** Policy Reporter is published over HTTPS with no auth: anyone who
+  reaches VIP `.200` (any authorized Tailscale peer) reads the cluster's inventory of weaknesses.
+  To protect it: an Envoy Gateway `SecurityPolicy` (Basic Auth / OIDC) on the route.
+- **A legitimate Pod rejected after a switch to `Enforce`** → put the policy back to `Audit`
+  (scenario 2) or create a `PolicyException`. Never leave a badly calibrated `Enforce` policy on
+  a shared cluster.
+- **1 replica for the admission-controller** = an accepted SPOF (lab). Fail-open avoids the
+  deadlock, but during a restart the policies simply stop applying. For robustness:
+  `admissionController.replicas: 3` in `values.yaml` (costs RAM).
 
-## 🧹 Désinstallation
+## 🧹 Uninstall
 
 ```bash
 kubectl delete -f _k8s/kyverno/httproute.yaml
 kubectl delete -f _k8s/kyverno/policies/
 helm -n kyverno uninstall policy-reporter
-helm -n kyverno uninstall kyverno            # retire aussi les CRD → supprime les PolicyReport
+helm -n kyverno uninstall kyverno            # also removes the CRDs → deletes the PolicyReports
 kubectl delete ns kyverno
 ```
 
-> ⚠️ Si [`../trivy-operator/`](../trivy-operator/README.md) est installé, il **perd son UI** :
-> c'est Policy Reporter (namespace `kyverno`) qui l'héberge.
+> ⚠️ If [`../trivy-operator/`](../trivy-operator/README.md) is installed, it **loses its UI**:
+> Policy Reporter (namespace `kyverno`) is what hosts it.
 
-## 📚 Références
+## 📚 References
 
 - [Kyverno — documentation](https://kyverno.io/docs/)
-- [Kyverno — bibliothèque de policies](https://kyverno.io/policies/)
+- [Kyverno — policy library](https://kyverno.io/policies/)
 - [Kyverno — PolicyException](https://kyverno.io/docs/exceptions/)
 - [Policy Reporter](https://kyverno.github.io/policy-reporter/)
-- [`../trivy-operator/README.md`](../trivy-operator/README.md) — le volet **détectif**, même UI
+- [`../trivy-operator/README.md`](../trivy-operator/README.md) — the **detective** side, same UI

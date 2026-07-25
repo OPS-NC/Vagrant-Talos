@@ -22,7 +22,7 @@ vagrant up                      # crée les VMs, elles bootent en mode maintenan
 
 | | |
 |---|---|
-| 📖 **Documentation navigable** | `make docs` puis ouvrir `docs/index.html` |
+| 📖 **Documentation navigable** | [ops-nc.github.io/Vagrant-Talos](https://ops-nc.github.io/Vagrant-Talos/) — bascule EN/FR, copie hors ligne avec `make docs` |
 | 📦 **Couche applicative** | [`_k8s/LISEZ-MOI.md`](_k8s/LISEZ-MOI.md) |
 | ⬆️ **Mises à jour Talos / K8s** | [`talos/MISE-A-JOUR.md`](talos/MISE-A-JOUR.md) |
 
@@ -699,13 +699,15 @@ source de vérité, `platform-up.sh` l'appelle pour toi.
 Tout se valide **sans toucher à un cluster** :
 
 ```bash
-make validate       # syntaxe des scripts + Vagrantfile + config Talos (dossier jetable)
-make docs           # régénère docs/index.html depuis tous les README
+make validate       # syntaxe des scripts + Vagrantfile + config Talos + liens de la doc
+make docs           # régénère docs/index.html depuis tous les README (EN + FR)
 make help           # liste les cibles
 ```
 
 `make validate-talos` génère la config dans un dossier temporaire puis la passe à
 `talosctl validate --mode metal` : aucun risque pour `_out/` ni pour le cluster.
+`make validate-docs` construit la doc dans un dossier jetable et échoue si un lien `*.md` ou
+une ancre inter-pages ne résout plus.
 
 > ⚠️ Ne lance **jamais** `FORCE=1 ./talos/cluster-up.sh` « pour tester » : cela régénère les
 > secrets et casse un cluster en route.

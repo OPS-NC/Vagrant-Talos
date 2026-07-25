@@ -2,56 +2,56 @@
 **English** · [Français](LISEZ-MOI.md)
 <!-- /i18n -->
 
-# 📈 `observability/` — métriques (Prometheus/Grafana) + logs (Loki/Alloy)
+# 📈 `observability/` — metrics (Prometheus/Grafana) + logs (Loki/Alloy)
 
-> La pile d'observabilité du lab, en une commande : **kube-prometheus-stack** (Prometheus,
+> The lab's observability stack, in one command: **kube-prometheus-stack** (Prometheus,
 > Grafana, Alertmanager, node-exporter, kube-state-metrics) + **Loki** (logs) + **Grafana
-> Alloy** (collecte). Trois UI en HTTPS derrière `main-gateway`.
+> Alloy** (collection). Three UIs over HTTPS behind `main-gateway`.
 
-> 🌐 **`talos.lab.example.io` est le domaine NEUTRE du dépôt (public)** : `observability-up.sh`
-> le remplace par `LAB_DOMAIN` (`lab.env`) dans les values Helm **et** les `HTTPRoute`. Cf.
-> [`../README.md`](../README.md#-lab_domain--le-domaine-des-ui).
+> 🌐 **`talos.lab.example.io` is the repo's NEUTRAL (public) domain**: `observability-up.sh`
+> replaces it with `LAB_DOMAIN` (`lab.env`) in the Helm values **and** in the `HTTPRoute`s. See
+> [`../README.md`](../README.md#-lab_domain--the-ui-domain).
 
-## 🎯 À quoi ça sert
+## 🎯 Purpose
 
-- Support des modules **PromQL / dashboards / alerting** (Prometheus + Grafana + Alertmanager).
-- **Logs centralisés** : Alloy lit `/var/log/pods` sur chaque node → Loki → onglet *Explore*
-  de Grafana (Grafana est pré-câblé avec les **deux** datasources).
-- Base sur laquelle brancher les métriques des autres addons (⚠️ rien n'est branché par
-  défaut, cf. Pièges).
+- Backing for the **PromQL / dashboards / alerting** modules (Prometheus + Grafana + Alertmanager).
+- **Centralized logs**: Alloy reads `/var/log/pods` on every node → Loki → Grafana's *Explore*
+  tab (Grafana is pre-wired with **both** datasources).
+- The base you hook the other components' metrics onto (⚠️ nothing is hooked up by
+  default, see Pitfalls).
 
-### Deux partis-pris importants
+### Two important design choices
 
-- **Alloy en mode fichier (pas API).** Lire les logs via `loki.source.kubernetes` (API k8s)
-  fait transiter **tous les logs à travers le kube-apiserver** → charge énorme (a contribué à
-  l'incident CP de ce lab). Ici Alloy lit directement `/var/log/pods` sur chaque node (un
-  DaemonSet, une part par node) ; `discovery.kubernetes` ne sert qu'à **étiqueter** (watch
-  léger de métadonnées).
-- **Stockage `longhorn-r1` (1 réplica bloc).** Métriques et logs sont reconstructibles : pas
-  besoin de répliquer les blocs 3×, ça saturerait le disque OS partagé.
+- **Alloy in file mode (not API).** Reading logs through `loki.source.kubernetes` (k8s API)
+  pushes **every log line through the kube-apiserver** → huge load (it contributed to this lab's
+  CP incident). Here Alloy reads `/var/log/pods` directly on each node (one DaemonSet, each node
+  handling its own share); `discovery.kubernetes` is only used for **labelling** (a lightweight
+  metadata watch).
+- **`longhorn-r1` storage (1 block replica).** Metrics and logs are rebuildable: no need to
+  replicate the blocks 3×, that would fill up the shared OS disk.
 
-## 📋 Prérequis
+## 📋 Prerequisites
 
-| Prérequis | Pourquoi | Vérifier |
+| Prerequisite | Why | Verify |
 |---|---|---|
-| `../platform-up.sh` (Cilium + Envoy Gateway + cert-manager) | expose les 3 UI en HTTPS:443 avec le cert wildcard | `kubectl get gateway -n envoy-gateway-system` |
-| **Longhorn** + SC **`longhorn-r1`** (`../longhorn/longhorn-r1-storageclass.yaml`) | PVC de Prometheus (3Gi), Loki (3Gi), Grafana (1Gi) ; le script **s'arrête** sans elle | `kubectl get sc longhorn-r1` |
-| **CP à 4 Go** (`CP_MEM=4096` dans `lab.env`) | cette pile charge l'apiserver (scrapes + watches) | `talosctl -n <cp> dashboard` |
+| `../platform-up.sh` (Cilium + Envoy Gateway + cert-manager) | exposes the 3 UIs over HTTPS:443 with the wildcard cert | `kubectl get gateway -n envoy-gateway-system` |
+| **Longhorn** + **`longhorn-r1`** SC (`../longhorn/longhorn-r1-storageclass.yaml`) | PVCs for Prometheus (3Gi), Loki (3Gi), Grafana (1Gi); the script **aborts** without it | `kubectl get sc longhorn-r1` |
+| **4 GB control planes** (`CP_MEM=4096` in `lab.env`) | this stack loads the apiserver (scrapes + watches) | `talosctl -n <cp> dashboard` |
 
-> ⚠️ **RAM des control-plane.** Sur des CP à **3 Go**, empiler cette pile sur le reste du lab
-> **sature etcd/apiserver** (incident vécu : OOM en boucle, API injoignable). À **4 Go**, la
-> pile tient à ~50 % de la mémoire CP. Or `lab.env.example` livre **`CP_MEM=2048`** — sous le
-> minimum, et 2 Go **affament déjà etcd** tout seuls. Corriger `lab.env` **avant** d'installer,
-> puis `vagrant reload` des CP **un par un**.
+> ⚠️ **Control-plane RAM.** On **3 GB** CPs, stacking this pile on top of the rest of the lab
+> **saturates etcd/apiserver** (lived through it: OOM loop, API unreachable). At **4 GB**, the
+> stack sits at ~50 % of CP memory. And `lab.env.example` ships **`CP_MEM=2048`** — below the
+> minimum, and 2 GB already **starve etcd** on their own. Fix `lab.env` **before** installing,
+> then `vagrant reload` the CPs **one at a time**.
 
-## ⚡ Installation
+## ⚡ Install
 
 ```bash
-kubectl apply -f _k8s/longhorn/longhorn-r1-storageclass.yaml   # si pas déjà fait
+kubectl apply -f _k8s/longhorn/longhorn-r1-storageclass.yaml   # if not already done
 ./_k8s/observability/observability-up.sh
 ```
 
-Versions épinglées dans le script (surchargeables par variable d'env) :
+Versions pinned in the script (overridable by env var):
 
 | Chart | Version | App |
 |---|---|---|
@@ -59,117 +59,118 @@ Versions épinglées dans le script (surchargeables par variable d'env) :
 | `grafana/loki` | `7.1.0` (`LOKI_VERSION`) | Loki v3.6.8 |
 | `grafana/alloy` | `1.11.0` (`ALLOY_VERSION`) | Alloy v1.18.0 |
 
-## 🔧 Ce que fait le script
+## 🔧 What the script does
 
-1. **namespace `monitoring`** en PodSecurity `privileged` (node-exporter en hostNetwork/hostPath
-   + Alloy en hostPath sur `/var/log/pods`) ;
-2. **kube-prometheus-stack** → attend le rollout de Grafana ;
-3. **Loki** (SingleBinary, filesystem) → attend le StatefulSet ;
-4. **Alloy** (DaemonSet) → attend le DaemonSet ;
+1. **`monitoring` namespace** in PodSecurity `privileged` (node-exporter in hostNetwork/hostPath
+   + Alloy with a hostPath on `/var/log/pods`);
+2. **kube-prometheus-stack** → waits for the Grafana rollout;
+3. **Loki** (SingleBinary, filesystem) → waits for the StatefulSet;
+4. **Alloy** (DaemonSet) → waits for the DaemonSet;
 5. **HTTPRoutes** grafana / prometheus / alertmanager.
 
-### Fichiers
+### Files
 
-| Fichier | Rôle |
+| File | Purpose |
 |---------|------|
-| `namespace.yaml` | ns `monitoring` en PodSecurity `privileged` |
-| `kube-prometheus-stack-values.yaml` | Prometheus (`retention: 2d`, PVC 3Gi `longhorn-r1`) + Grafana (PVC 1Gi + datasource Loki) + Alertmanager (emptyDir) ; moniteurs control-plane Talos désactivés ; scrape **tous** les ServiceMonitor/PodMonitor |
-| `loki-values.yaml` | Loki **SingleBinary** + filesystem sur PVC 3Gi `longhorn-r1` ; caches memcached **coupés** (sinon ~9 Go de RAM demandés) |
-| `alloy-values.yaml` | Alloy **DaemonSet, mode fichier** (`/var/log/pods`) → Loki ; **ne charge PAS l'apiserver** |
-| `httproutes.yaml` | 3 `HTTPRoute` HTTPS sur `main-gateway` (TLS wildcard déjà porté par l'écouteur) |
-| `observability-up.sh` | Installe tout dans l'ordre (idempotent) |
+| `namespace.yaml` | ns `monitoring` in PodSecurity `privileged` |
+| `kube-prometheus-stack-values.yaml` | Prometheus (`retention: 2d`, 3Gi PVC on `longhorn-r1`) + Grafana (1Gi PVC + Loki datasource) + Alertmanager (emptyDir); Talos control-plane monitors disabled; scrapes **every** ServiceMonitor/PodMonitor |
+| `loki-values.yaml` | Loki **SingleBinary** + filesystem on a 3Gi `longhorn-r1` PVC; memcached caches **turned off** (otherwise ~9 GB of RAM requested) |
+| `alloy-values.yaml` | Alloy **DaemonSet, file mode** (`/var/log/pods`) → Loki; **does NOT load the apiserver** |
+| `httproutes.yaml` | 3 HTTPS `HTTPRoute`s on `main-gateway` (wildcard TLS already carried by the listener) |
+| `observability-up.sh` | Installs everything in order (idempotent) |
 
-> ℹ️ **Moniteurs control-plane désactivés** (`kubeControllerManager`, `kubeScheduler`,
-> `kubeEtcd`, `kubeProxy` à `false`) : sur Talos ils ne sont pas scrapables sans config TLS
-> dédiée → ça n'évite que des cibles « down » bruyantes en formation.
+> ℹ️ **Control-plane monitors disabled** (`kubeControllerManager`, `kubeScheduler`,
+> `kubeEtcd`, `kubeProxy` set to `false`): on Talos they are not scrapable without dedicated TLS
+> config → this only avoids noisy "down" targets during training.
 
-## ✅ Vérifier
+## ✅ Verify
 
 ```bash
-kubectl -n monitoring get pods                         # tout Running (dont 1 alloy par node)
+kubectl -n monitoring get pods                         # all Running (including 1 alloy per node)
 kubectl -n monitoring get httproute                    # grafana/prometheus/alertmanager
 
-# Endpoints (cert wildcard ; --resolve court-circuite le DNS). -k si cert staging.
+# Endpoints (wildcard cert; --resolve bypasses DNS). -k if the cert is staging.
 for h in grafana prometheus alertmanager; do
   curl -sk -o /dev/null -w "$h -> %{http_code}\n" \
     --resolve $h.talos.lab.example.io:443:192.168.56.200 https://$h.talos.lab.example.io/
-done   # attendu : grafana 302, prometheus 302, alertmanager 200
+done   # expected: grafana 302, prometheus 302, alertmanager 200
 
-# Logs qui arrivent dans Loki (labels posés par Alloy) :
+# Logs actually landing in Loki (labels set by Alloy):
 kubectl -n monitoring exec deploy/loki-gateway -- \
   wget -qO- http://localhost:8080/loki/api/v1/labels     # app, container, namespace, pod…
 ```
 
-## 🌐 Accès
+## 🌐 Access
 
-| Service | URL | Identifiant | Mot de passe |
+| Service | URL | Username | Password |
 |---|---|---|---|
 | Grafana | `https://grafana.talos.lab.example.io` | `admin` | `kubectl -n monitoring get secret kube-prometheus-stack-grafana -o jsonpath='{.data.admin-password}' \| base64 -d; echo` |
-| Prometheus | `https://prometheus.talos.lab.example.io` | — | aucune authentification |
-| Alertmanager | `https://alertmanager.talos.lab.example.io` | — | aucune authentification |
+| Prometheus | `https://prometheus.talos.lab.example.io` | — | no authentication |
+| Alertmanager | `https://alertmanager.talos.lab.example.io` | — | no authentication |
 
-## 🚑 Dépannage
+## 🚑 Troubleshooting
 
-- **404 sur les UI juste après l'install** → propagation Envoy des HTTPRoute ; réessayer après ~30 s.
-- **CP qui saturent / apiserver qui flappe** → CP sous-dimensionnés : passer à **4 Go**
-  (`CP_MEM`, puis `vagrant reload` des CP un par un).
-- **PVC `Pending` / `ReplicaSchedulingFailure`** → `longhorn-r1` absente, ou disque plein
-  (baisser la rétention ou les tailles de PVC).
-- **Pas de logs dans Loki** → un Alloy par node en `2/2` ? `kubectl -n monitoring get ds alloy`.
-  Puis vérifier `loki.write` dans les logs d'Alloy.
-- **Un pod « sans logs »** → souvent juste une **plage temporelle** trop courte : les pods sains
-  (prometheus, node-exporter…) loguent au démarrage puis se taisent. Élargir la fenêtre (12-24 h).
-- **Logs du control-plane (apiserver/scheduler/controller-manager)** → ce sont des **static
-  pods** : leur dossier `/var/log/pods` est nommé `<ns>_<pod>_<HASH>` (hash de config), pas
-  `<uid>` API. Le `__path__` d'Alloy matche par `<ns>_<pod>_*` pour couvrir les deux cas.
-  **etcd** échappe à Loki : sur Talos ce n'est **pas** un pod k8s mais un **service Talos** →
-  `talosctl logs etcd` (il faudrait un shipper dédié pour l'envoyer à Loki).
+- **404 on the UIs right after the install** → Envoy still propagating the HTTPRoutes; retry
+  after ~30 s.
+- **CPs saturating / apiserver flapping** → undersized CPs: move to **4 GB**
+  (`CP_MEM`, then `vagrant reload` the CPs one at a time).
+- **PVC `Pending` / `ReplicaSchedulingFailure`** → `longhorn-r1` missing, or disk full
+  (lower the retention or the PVC sizes).
+- **No logs in Loki** → is there one Alloy per node in `2/2`? `kubectl -n monitoring get ds alloy`.
+  Then check `loki.write` in Alloy's logs.
+- **A pod "with no logs"** → usually just too narrow a **time range**: healthy pods
+  (prometheus, node-exporter…) log at startup then go quiet. Widen the window (12-24 h).
+- **Control-plane logs (apiserver/scheduler/controller-manager)** → these are **static
+  pods**: their `/var/log/pods` directory is named `<ns>_<pod>_<HASH>` (config hash), not the
+  API `<uid>`. Alloy's `__path__` matches on `<ns>_<pod>_*` to cover both cases.
+  **etcd** escapes Loki: on Talos it is **not** a k8s pod but a **Talos service** →
+  `talosctl logs etcd` (shipping it to Loki would need a dedicated shipper).
 
-## ⚠️ Pièges
+## ⚠️ Pitfalls
 
-- **La rétention Loki repose sur le compactor, pas sur `retention_period`.** Dans Loki,
-  `limits_config.retention_period` ne fait qu'**exprimer** la limite : la suppression est le
-  travail du **compactor**, dont `retention_enabled` vaut `false` par défaut. Une configuration
-  qui ne pose que `retention_period` laisse donc les logs s'accumuler jusqu'au disque plein.
-  `loki-values.yaml` active les deux (rétention **24 h**, `retention_enabled: true`,
-  `delete_request_store: filesystem`, purge effective après `retention_delete_delay: 2h`).
-  Vérifier que le bloc est bien rendu :
+- **Loki retention relies on the compactor, not on `retention_period`.** In Loki,
+  `limits_config.retention_period` only **states** the limit: the deletion itself is the
+  **compactor**'s job, and its `retention_enabled` defaults to `false`. A configuration that
+  only sets `retention_period` therefore lets logs pile up until the disk is full.
+  `loki-values.yaml` enables both (**24 h** retention, `retention_enabled: true`,
+  `delete_request_store: filesystem`, effective purge after `retention_delete_delay: 2h`).
+  Check that the block really is rendered:
   ```bash
   kubectl -n monitoring get cm loki -o jsonpath='{.data.config\.yaml}' \
     | grep -A4 '^compactor:'
   ```
-- **Prometheus n'a pas de `retentionSize`.** Il n'y a que `retention: 2d`, qui borne l'**âge**
-  des séries, pas le **volume** occupé : un pic de cardinalité (ajout de ServiceMonitors, pods
-  qui churnent) peut remplir les 3 Gi avant les 2 jours, et Prometheus se met alors en erreur
-  d'écriture. Un `retentionSize: 2GiB` dans `prometheusSpec` bornerait les deux.
-- **Grafana garde le mot de passe admin par défaut du chart** (documenté en commentaire dans
-  `kube-prometheus-stack-values.yaml`, et **affiché en clair** par `observability-up.sh` en fin
-  d'exécution) — alors que l'UI est exposée **en HTTPS public** avec un certificat Let's
-  Encrypt **prod** (donc un nom résolvable et un cert trusté). Un lab, oui, mais joignable :
-  changer le mot de passe dès la première connexion, ou passer par
+- **Prometheus has no `retentionSize`.** There is only `retention: 2d`, which bounds the **age**
+  of the series, not the **volume** they take: a cardinality spike (new ServiceMonitors, churning
+  pods) can fill the 3 Gi before the 2 days are up, and Prometheus then goes into a write error.
+  A `retentionSize: 2GiB` in `prometheusSpec` would bound both.
+- **Grafana keeps the chart's default admin password** (documented in a comment in
+  `kube-prometheus-stack-values.yaml`, and **printed in clear text** by `observability-up.sh` at
+  the end of its run) — while the UI is exposed **over public HTTPS** with a **prod** Let's
+  Encrypt certificate (so a resolvable name and a trusted cert). A lab, yes, but a reachable
+  one: change the password on the first login, or go through
   `grafana.admin.existingSecret`.
-- **Prometheus et Alertmanager sont exposés SANS aucune authentification** (aucun filtre sur
-  les HTTPRoute) : quiconque atteint la Gateway peut lire toutes les métriques et **silencer
-  des alertes**.
-- **Rien n'émet de métriques applicatives par défaut.**
-  `serviceMonitorSelectorNilUsesHelmValues: false` fait bien que Prometheus scrape **tous** les
-  ServiceMonitor/PodMonitor du cluster… mais **tous les émetteurs du lab sont coupés**. À
-  basculer à `true` **après** cette install (les CRD `ServiceMonitor`/`PodMonitor` n'existent
-  qu'ensuite), puis relancer le `*-up.sh` de l'addon concerné :
+- **Prometheus and Alertmanager are exposed with NO authentication at all** (no filter on
+  the HTTPRoutes): anyone who reaches the Gateway can read every metric and **silence
+  alerts**.
+- **Nothing emits application metrics by default.**
+  `serviceMonitorSelectorNilUsesHelmValues: false` does make Prometheus scrape **every**
+  ServiceMonitor/PodMonitor in the cluster… but **every emitter in the lab is switched off**.
+  Flip them to `true` **after** this install (the `ServiceMonitor`/`PodMonitor` CRDs only exist
+  afterwards), then re-run the `*-up.sh` of the component concerned:
 
-  | Fichier | Clé à passer à `true` |
+  | File | Key to set to `true` |
   |---|---|
   | `../trivy-operator/values.yaml` | `serviceMonitor.enabled` |
-  | `../cloudnative-pg/values.yaml` | `monitoring.podMonitorEnabled` (opérateur) |
-  | `../cloudnative-pg/cluster-demo.yaml` | `monitoring.enablePodMonitor` (instances PG) |
+  | `../cloudnative-pg/values.yaml` | `monitoring.podMonitorEnabled` (operator) |
+  | `../cloudnative-pg/cluster-demo.yaml` | `monitoring.enablePodMonitor` (PG instances) |
   | `../node-problem-detector/values.yaml` | `metrics.serviceMonitor.enabled` |
   | `../vault-secret-operator/values.yaml` | `telemetry.serviceMonitor.enabled` |
 
-## 📚 Références
+## 📚 References
 
 - [kube-prometheus-stack](https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack)
 - [Grafana Loki (Helm)](https://grafana.com/docs/loki/latest/setup/install/helm/) ·
-  [Rétention Loki (compactor)](https://grafana.com/docs/loki/latest/operations/storage/retention/)
+  [Loki retention (compactor)](https://grafana.com/docs/loki/latest/operations/storage/retention/)
 - [Grafana Alloy](https://grafana.com/docs/alloy/latest/)
-- Addons liés : `../longhorn/` (SC `longhorn-r1`) · `../node-problem-detector/` (santé des
-  nodes) · `../envoy-gateway/` + `../cert-manager/` (exposition HTTPS)
+- Related addons: `../longhorn/` (`longhorn-r1` SC) · `../node-problem-detector/` (node
+  health) · `../envoy-gateway/` + `../cert-manager/` (HTTPS exposure)
