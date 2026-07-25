@@ -1,27 +1,29 @@
-# `vault-secret-operator/` — secrets Vault synchronisés en natif K8s (VSO)
+# 🔑 `vault-secret-operator/` — secrets Vault synchronisés en `Secret` K8s natifs
 
-Fait remonter des secrets **HashiCorp Vault** dans des `Secret` Kubernetes standards, en
-**déclaratif** (des CRD, pas des scripts). C'est le **Vault Secrets Operator (VSO)**, l'opérateur
-officiel HashiCorp. Une app consomme un `Secret` normal (`envFrom`, `volume`, `valueFrom`) et
-**n'a jamais besoin de parler à Vault** : VSO fait la synchro, la rotation et le redémarrage.
+> Le **Vault Secrets Operator** (VSO), opérateur officiel HashiCorp : il fait remonter des secrets
+> Vault dans des `Secret` Kubernetes standards, en **déclaratif** (des CRD, pas des scripts). Une
+> app consomme un `Secret` normal (`envFrom`, `valueFrom`, volume) et **n'a jamais besoin de parler
+> à Vault**. Le serveur Vault, lui, est dans `../vault-cluster/`.
 
-> **État de l'art 2026.** Trois intégrations Vault↔K8s existent ; VSO est celle recommandée :
->
-> | Intégration | Modèle | Verdict 2026 |
-> |-------------|--------|--------------|
-> | **Vault Secrets Operator (VSO)** | CRD → `Secret` K8s natif, rotation + rollout | ✅ **recommandé** (ce dossier) |
-> | Vault CSI Provider | volume monté, pas de `Secret` K8s | ok si on refuse tout `Secret` en etcd |
-> | Agent Injector (sidecar) | annotations + sidecar par pod | ⚠️ legacy / maintenance |
->
-> VSO gagne parce qu'il est **GitOps-friendly** (les CRD sont versionnables, les secrets non),
-> qu'il gère **static / dynamic / PKI** avec un seul opérateur, la **dérive** (drift → resync),
-> la **rotation** des creds dynamiques (leases) et le **rollout** des workloads qui ne rechargent
-> pas à chaud. Sources en bas de page.
+## 🎯 À quoi ça sert
 
-## Les deux côtés à câbler
+Trois intégrations Vault ↔ Kubernetes existent. Ce dossier monte celle qui est recommandée :
 
-L'intégration est un **contrat en miroir** : une identité prouvée côté K8s doit correspondre à
-une identité autorisée côté Vault. Les deux sous-dossiers décrivent chaque moitié.
+| Intégration | Modèle | Verdict 2026 |
+|---|---|---|
+| **Vault Secrets Operator (VSO)** | CRD → `Secret` K8s natif, rotation + rollout | ✅ **recommandé** (ce dossier) |
+| Vault CSI Provider | volume monté, aucun `Secret` K8s créé | ok si on refuse tout secret dans etcd |
+| Agent Injector (sidecar) | annotations + un sidecar par pod | ⚠️ legacy / maintenance |
+
+VSO gagne parce qu'il est **GitOps-friendly** (les CRD sont versionnables, les valeurs non), qu'il
+couvre **static / dynamic / PKI** avec un seul opérateur, qu'il détecte la **dérive** (drift →
+resync), qu'il **renouvelle** les leases des creds dynamiques et qu'il **redémarre** les workloads
+incapables de recharger un `Secret` à chaud.
+
+### Un contrat en miroir
+
+L'intégration se câble **des deux côtés** : une identité prouvée côté K8s doit correspondre à une
+identité autorisée côté Vault. Chaque sous-dossier documente sa moitié.
 
 ```
 ┌─────────────────────── Kubernetes (dossier k8s/) ───────────────────────┐
@@ -39,287 +41,246 @@ une identité autorisée côté Vault. Les deux sous-dossiers décrivent chaque 
 └───────────────────────────────────────────────────────────────────────┘
 ```
 
-Le maillon de confiance : le **`ServiceAccount`** K8s. VSO présente son token JWT à Vault ;
-Vault le valide via l'API **TokenReview** du cluster ; si le SA + namespace correspondent au
-**`role`** configuré, Vault renvoie un token porteur de la **`policy`** — donc des droits de
-lecture précis (tel chemin kv, tel role db, tel role pki).
+Le maillon de confiance est le **`ServiceAccount`** K8s : VSO présente son token JWT, Vault le
+valide via l'API **TokenReview** du cluster, et si le SA + le namespace + l'audience correspondent
+au **role** configuré, Vault renvoie un token porteur de la **policy** — donc des droits de lecture
+précis, et rien de plus.
 
-## Ordre d'application (à respecter)
+## 📋 Prérequis
 
-D'abord **Vault** (l'identité doit exister avant qu'un client tente de se logger), puis VSO,
-puis les CRD.
+| Prérequis | Pourquoi | Vérifier |
+|---|---|---|
+| Serveur Vault **descellé** | tout part de là | `vault status` → `Sealed false` |
+| Adresse Vault atteignable du cluster | le `VaultConnection` par défaut vise `http://vault.vault.svc.cluster.local:8200` | `kubectl -n vault get svc vault` |
+| API K8s joignable **par Vault** | validation TokenReview. In-cluster : `https://kubernetes.default.svc`. Vault externe : la VIP `https://192.168.56.5:6443` (cf. `talos/patch-cp.yaml`) | `vault read auth/kubernetes/config` |
+| `helm` + `kubectl` | install de l'opérateur, application des CR | `helm version` |
+| CLI `vault` sur l'hôte | lancer les scripts de `vault/` | `vault version` |
 
-```
-1. vault/     enable auth kubernetes + secrets engines + policies + roles   (voir vault/README.md)
-2. helm       install vault-secrets-operator (values.yaml)                  (voir ci-dessous)
-3. k8s/       VaultConnection → VaultAuth → Vault*Secret → app démo          (voir k8s/README ci-dessous)
-```
-
-## Prérequis
-
-- Un **serveur Vault** joignable (déscellé/`unsealed`). In-cluster (chart `hashicorp/vault`) **ou**
-  externe. L'adresse se met dans `values.yaml` (`defaultVaultConnection.address`) **ou** dans un
-  `VaultConnection` (`k8s/01-vaultconnection.yaml`). Pour le lab : `https://vault.talos.lab.ops.nc` si
-  exposé via le Gateway (cf. `../envoy-gateway/`), ou `http://vault.vault.svc.cluster.local:8200`.
-- L'**API Kubernetes** joignable par Vault pour la revue de token. Endpoint du lab : la VIP
-  `https://192.168.56.5:6443` (cf. `talos/patch-cp.yaml`).
-- `vault` CLI (ou un pod Vault où lancer les commandes) et `helm` + `kubectl`.
-
-## Installer l'opérateur (Helm)
+<details>
+<summary>Installer le CLI <code>vault</code> (Ubuntu, dépôt HashiCorp)</summary>
 
 ```bash
+wget -qO- https://apt.releases.hashicorp.com/gpg \
+  | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com noble main" \
+  | sudo tee /etc/apt/sources.list.d/hashicorp.list
+sudo apt-get update && sudo apt-get install -y vault
+```
+
+La dist `noble` fournit un binaire générique, valable sur une Ubuntu plus récente.
+</details>
+
+## ⚡ Installation
+
+L'ordre compte : **Vault d'abord** (l'identité doit exister avant qu'un client tente de se logger),
+puis l'opérateur, puis les CR.
+
+```bash
+# 1. Côté Vault : auth kubernetes + moteurs + policies + roles      -> voir vault/README.md
+export VAULT_ADDR=https://vault.talos.lab.example.io
+export VAULT_TOKEN=<root-token>                                  # cf. ../vault-cluster/README.md
+./_k8s/vault-secret-operator/vault/talos-lab.sh
+
+# 2. L'opérateur (chart épinglé en 1.5.0)
 helm repo add hashicorp https://helm.releases.hashicorp.com && helm repo update
 helm upgrade --install vault-secrets-operator hashicorp/vault-secrets-operator \
   --namespace vault-secrets-operator --create-namespace \
-  --version 1.5.0 \                        # épingle ; vérifie la dernière release GitHub VSO
+  --version 1.5.0 \
   -f _k8s/vault-secret-operator/values.yaml
 kubectl -n vault-secrets-operator rollout status deploy/vault-secrets-operator-controller-manager
-```
 
-`values.yaml` pose un `VaultConnection` **par défaut** (l'adresse Vault) pour que les CRD n'aient
-pas à répéter l'adresse. Le cache client est en **`persistenceModel: none`** (secrets statiques →
-pas de leases à préserver, et **aucune dépendance au moteur Transit**). Le repasser en
-`direct-encrypted` (+ Transit + role `vso-transit`) le jour où on synchronise des creds dynamiques.
-
-## Mise en route réelle du lab : moteur `talos-lab/` + démo `nginx-test-vault`
-
-Le chemin **concret et testé** de ce lab (le serveur Vault est `../vault-cluster/`). Un moteur
-KV-v2 **`talos-lab/`** avec **un sous-dossier par appli** ; la démo `nginx-test-vault` prouve la boucle
-complète : secret Vault → `Secret` K8s → **variables d'env** de nginx → **redémarrage auto** du
-Deployment quand le secret change.
-
-```bash
-# 0. CLI vault (Ubuntu, dépôt HashiCorp) — dist "noble" (binaire générique, ok sur + récent)
-wget -qO- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
-echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com noble main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
-sudo apt-get update && sudo apt-get install -y vault
-
-# 1. Opérateur VSO (cf. section précédente)
-
-# 2. Config côté Vault : auth k8s + moteur talos-lab/ + secret + policy + role
-export VAULT_ADDR=https://vault.talos.lab.ops.nc
-export VAULT_TOKEN=<root-token>                     # cf. vault-cluster/
-./_k8s/vault-secret-operator/vault/talos-lab.sh
-
-# 3. Démo nginx-test-vault (namespace + SA + VaultAuth + VaultStaticSecret + Deployment)
+# 3. Les CR côté cluster                                            -> voir k8s/README.md
 kubectl apply -f _k8s/vault-secret-operator/k8s/nginx-test-vault/nginx-test-vault.yaml
 ```
 
-**Vérifier la boucle :**
-```bash
-kubectl -n nginx-test-vault get vaultstaticsecret nginx-test-vault-config   # SecretSynced=True
-kubectl -n nginx-test-vault get secret nginx-test-vault-config              # créé par VSO
-POD=$(kubectl -n nginx-test-vault get pod -l app=nginx-test-vault -o jsonpath='{.items[0].metadata.name}')
-kubectl -n nginx-test-vault exec "$POD" -- env | grep '^APP_'         # APP_GREETING / APP_COLOR / APP_SECRET_TOKEN
+Chart **1.5.0** = app version **1.5.0**. Pas de `*-up.sh` ici : les deux moitiés s'installent
+séparément et dans cet ordre.
 
-# Rotation auto : on change le secret dans Vault -> VSO resync (refreshAfter 30s) -> Secret
-# mis à jour -> rolloutRestartTargets relance le Deployment -> nouveaux pods avec la nouvelle valeur
-vault kv put talos-lab/nginx-test-vault/config APP_COLOR=green APP_GREETING="..." APP_SECRET_TOKEN=v2
-kubectl -n nginx-test-vault rollout status deploy/nginx-test-vault          # nouvelle révision
+## 🔧 Ce que règle `values.yaml`
+
+| Réglage | Valeur | Effet |
+|---|---|---|
+| `defaultVaultConnection.enabled` | `true` | pose **un** `VaultConnection` nommé `default` sur `http://vault.vault.svc.cluster.local:8200` : les CR n'ont plus à répéter l'adresse |
+| `defaultVaultConnection.skipTLSVerify` | `false` | pas de contournement TLS (on parle en HTTP en interne, cf. `../vault-cluster/`) |
+| `defaultAuthMethod.enabled` | `false` | on préfère un `VaultAuth` explicite par namespace (`k8s/02-vaultauth.yaml`) : plus lisible, multi-tenant |
+| `clientCache.persistenceModel` | `none` | cache en **RAM**, aucune dépendance au moteur Transit. Suffisant pour du statique |
+| `clientCache.storageEncryption.enabled` | `false` | pas de cache chiffré (découle du point précédent) |
+| `telemetry.serviceMonitor.enabled` | `false` | à passer à `true` si l'opérateur Prometheus et ses CRD sont installés (cf. `../observability/`) |
+
+Le jour où on synchronise de vrais creds **dynamiques**, repasser en
+`persistenceModel: direct-encrypted` + `storageEncryption.enabled: true` (+ moteur Transit et role
+`vso-transit`, déjà préparés dans `vault/`) — voir le piège sur `storageEncryption` plus bas.
+
+## ✅ Vérifier
+
+```bash
+kubectl -n vault-secrets-operator get pods
+kubectl -n vault-secrets-operator logs deploy/vault-secrets-operator-controller-manager -f
+kubectl get vaultconnection -A                  # le "default" posé par values.yaml
+kubectl get vaultauth,vaultstaticsecret,vaultdynamicsecret,vaultpkisecret -A
 ```
 
-Ajouter une appli = un sous-dossier `talos-lab/<appli>/…`, une policy scopée à ce sous-dossier,
-un role k8s dédié (SA/ns de l'appli) — voir `vault/talos-lab.sh` comme gabarit.
+Les vérifications par scénario sont dans `k8s/README.md`, celles côté serveur dans
+`vault/README.md`.
 
-## Rotation de mot de passe PostgreSQL par Vault (database static role)
+## 🧪 Scénarios
 
-Deuxième boucle **concrète et testée** : Vault gère et **fait tourner** le mot de passe d'un
-utilisateur PostgreSQL, et le workload consommateur est **redémarré automatiquement** à chaque
-rotation. Le serveur PG est le cluster CloudNativePG `pg-demo` (cf. `../cloudnative-pg/`).
+### 1. Secret KV du lab → variables d'env → redémarrage auto (`nginx-test-vault`)
 
-> **Static role ≠ dynamic role.** Le moteur `database` de Vault sait faire deux choses :
-> - **dynamic role** (`db/creds/<role>`) : Vault **crée** un user éphémère (nom aléatoire) par
->   lease, révoqué à l'expiration (exemple `k8s/20-dynamic-db.yaml`). Le username change à
->   chaque fois.
-> - **static role** (`database/static-roles/<role>`) : Vault gère un user **existant et fixe**
->   (`vault-rotate`) et n'en **rotate que le mot de passe** sur un `rotation_period`. La chaîne
->   de connexion reste stable, seul le password change. **C'est ce qui est monté ici.**
+Le chemin concret et testé : un moteur KV-v2 **`talos-lab/`** avec **un sous-dossier par appli**, et
+une démo nginx qui prouve la boucle complète.
 
-### Chaîne complète
+```bash
+./_k8s/vault-secret-operator/vault/talos-lab.sh                     # config Vault
+kubectl apply -f _k8s/vault-secret-operator/k8s/nginx-test-vault/nginx-test-vault.yaml
+
+# La rotation, en direct : on change la valeur dans Vault…
+vault kv put talos-lab/nginx-test-vault/config \
+  APP_GREETING="Bonjour depuis Vault" APP_COLOR=green APP_SECRET_TOKEN=v2
+# …VSO resync (refreshAfter 30s) -> Secret mis à jour -> rolloutRestartTargets relance le Deployment
+kubectl -n nginx-test-vault rollout status deploy/nginx-test-vault
+```
+
+Détail des objets créés : `k8s/README.md`. Détail de la config Vault : `vault/README.md`.
+
+### 2. Rotation du mot de passe PostgreSQL par Vault (static role)
+
+Vault gère et **fait tourner** le mot de passe d'un utilisateur PostgreSQL existant, et le workload
+consommateur est **redémarré automatiquement** à chaque rotation. Le serveur PG est le cluster
+CloudNativePG `pg-demo` (cf. `../cloudnative-pg/`).
+
+> ℹ️ **Static role ≠ dynamic role.** Un **dynamic role** (`<mount>/creds/<role>`) fait *créer* par
+> Vault un user éphémère au nom aléatoire, révoqué à l'expiration du lease — le username change à
+> chaque fois. Un **static role** (`<mount>/static-roles/<role>`) prend en gestion un user
+> **existant et fixe** et n'en rotate que le **mot de passe** : la chaîne de connexion reste stable.
+> C'est ce second mode qui est monté ici.
 
 ```
 Vault (admin postgres) ──rotate password──► user PG « vault-rotate »
         │  database/static-creds/vault-rotate  (username + password courant + ttl)
         ▼
 VSO (VaultDynamicSecret allowStaticCreds) ──SecretTransformation──► Secret K8s pg-rotate-creds
-        │   DATABASE_URL=postgresql://vault-rotate:<pass>@pg-demo-rw.cnpg-demo…:5432/vault?sslmode=require
-        │   + PGHOST/PGPORT/PGDATABASE/PGUSER/PGPASSWORD
+        │   DATABASE_URL + PGHOST/PGPORT/PGDATABASE/PGUSER/PGPASSWORD
         ▼
 Deployment alpine (envFrom) ── rolloutRestartTargets ──► RELANCÉ à chaque rotation
 ```
 
-### Prérequis
+**Prérequis spécifiques** (dans l'ordre) :
 
-> ⚠️ **Le cluster PostgreSQL doit être UP.** Toute la boucle en dépend : Vault s'y connecte (en
-> admin) pour rotater le mot de passe, et l'app s'y connecte avec les creds. Si `pg-demo` est
-> absent/arrêté, la config Vault (`database/config/…`) échoue, les rotations tombent en erreur
-> et le Secret n'est pas (re)généré. **Vérifier d'abord** :
+> ⚠️ **Le cluster PostgreSQL doit être UP.** Toute la boucle en dépend : Vault s'y connecte en admin
+> pour rotater le mot de passe, et l'app s'y connecte avec les creds. Si `pg-demo` est absent ou
+> arrêté, l'écriture de `database/config/…` échoue, les rotations tombent en erreur et le Secret
+> n'est pas (re)généré.
 > ```bash
-> kubectl -n cnpg-demo get cluster pg-demo    # STATUS = "Cluster in healthy state", 3/3 instances
+> kubectl -n cnpg-demo get cluster pg-demo    # "Cluster in healthy state", 3/3 instances
 > ```
-> Installer / relancer le cluster : voir `../cloudnative-pg/`.
-
-- Cluster **CloudNativePG `pg-demo`** (ns `cnpg-demo`) **en marche** (3/3 healthy).
-- **Accès superuser** activé (Vault s'y connecte en admin `postgres` pour rotater le password) :
-  ```bash
-  kubectl -n cnpg-demo patch cluster pg-demo --type=merge \
-    -p '{"spec":{"enableSuperuserAccess":true}}'
-  ```
-- Base `vault` + user `vault-rotate` (LOGIN) créés dans PG (une fois) :
-  ```bash
-  PRIMARY=$(kubectl -n cnpg-demo get pods -l cnpg.io/cluster=pg-demo,cnpg.io/instanceRole=primary -o jsonpath='{.items[0].metadata.name}')
-  kubectl -n cnpg-demo exec "$PRIMARY" -c postgres -- psql -c \
-    "CREATE ROLE \"vault-rotate\" WITH LOGIN PASSWORD 'bootstrap-temp-pw';"      # pass bootstrap, repris par Vault
-  kubectl -n cnpg-demo exec "$PRIMARY" -c postgres -- psql -c \
-    "CREATE DATABASE vault OWNER \"vault-rotate\";"
-  ```
-
-### Mise en route
 
 ```bash
-# 1. Config Vault : moteur database + connexion admin + static role + policy + role k8s
-export VAULT_ADDR=http://127.0.0.1:8200      # kubectl -n vault port-forward svc/vault-active 8200:8200
-export VAULT_TOKEN=<root-token>
-# ROTATION_PERIOD réglable (défaut 3h ; baisser à 2m pour observer la boucle en direct)
-./_k8s/vault-secret-operator/vault/pg-dynamic-rotate.sh
+# a. Accès superuser (Vault se connecte en admin "postgres" pour rotater le password)
+kubectl -n cnpg-demo patch cluster pg-demo --type=merge \
+  -p '{"spec":{"enableSuperuserAccess":true}}'
 
-# 2. App : ns + SA + VaultAuth + VaultDynamicSecret(static) + SecretTransformation + alpine
+# b. Base "vault" + user "vault-rotate" créés une fois dans PG
+PRIMARY=$(kubectl -n cnpg-demo get pods \
+  -l cnpg.io/cluster=pg-demo,cnpg.io/instanceRole=primary -o jsonpath='{.items[0].metadata.name}')
+# mot de passe bootstrap : il sera immédiatement remplacé par Vault
+kubectl -n cnpg-demo exec "$PRIMARY" -c postgres -- psql -c \
+  "CREATE ROLE \"vault-rotate\" WITH LOGIN PASSWORD 'bootstrap-temp-pw';"
+kubectl -n cnpg-demo exec "$PRIMARY" -c postgres -- psql -c \
+  "CREATE DATABASE vault OWNER \"vault-rotate\";"
+```
+
+**Mise en route :**
+
+```bash
+export VAULT_ADDR=http://127.0.0.1:8200   # kubectl -n vault port-forward svc/vault-active 8200:8200
+export VAULT_TOKEN=<root-token>
+# ROTATION_PERIOD réglable (défaut 3h ; 2m pour observer la boucle en direct)
+./_k8s/vault-secret-operator/vault/pg-dynamic-rotate.sh
 kubectl apply -f _k8s/vault-secret-operator/k8s/pg-dynamic-rotate/pg-dynamic-rotate.yaml
 ```
 
-### Détail — la config côté Vault (`vault/pg-dynamic-rotate.sh`)
-
-Ce que le script écrit dans Vault (chaque objet et son rôle) :
-
-| Objet Vault | Commande (résumé) | Rôle |
-|-------------|-------------------|------|
-| Moteur `database/` | `vault secrets enable database` | Active le moteur de secrets « base de données ». |
-| Connexion `database/config/pg-demo` | `… plugin_name=postgresql-database-plugin allowed_roles=vault-rotate connection_url="…@pg-demo-rw.cnpg-demo…/postgres?sslmode=require" username=postgres password=<super> password_authentication=scram-sha-256` | **Où** Vault se connecte (le cluster PG) et **comment** (admin `postgres`, TLS). `allowed_roles` = les roles autorisés à utiliser cette connexion. |
-| Static role `database/static-roles/vault-rotate` | `… db_name=pg-demo username=vault-rotate rotation_period=3h` | Prend en gestion le **user PG fixe** `vault-rotate` et **rotate son mot de passe** toutes les `rotation_period`. `db_name` = nom de la *connexion* (pas de la base). |
-| Policy `pg-rotate-demo` | `path "database/static-creds/vault-rotate" { capabilities = ["read"] }` | Droit **minimal** : lire uniquement le static-creds de ce role. |
-| Role k8s `auth/kubernetes/role/pg-rotate-demo` | `… bound_service_account_names=pg-rotate bound_service_account_namespaces=pg-rotate-demo audience=vault token_policies=pg-rotate-demo` | **Qui** peut se logger (SA `pg-rotate` du ns `pg-rotate-demo`, audience `vault`) et **quels droits** il obtient (la policy ci-dessus). |
-
-Lecture des creds courants : `vault read database/static-creds/vault-rotate` → `username` (fixe) +
-`password` (courant) + `ttl` (temps restant avant la prochaine rotation).
-
-### Détail — les objets Kubernetes (`k8s/pg-dynamic-rotate/pg-dynamic-rotate.yaml`)
-
-| Objet K8s | Rôle |
-|-----------|------|
-| `Namespace pg-rotate-demo` | Isole la démo. |
-| `ServiceAccount pg-rotate` | Identité du pod présentée à Vault — **doit** matcher `bound_service_account_*` du role Vault. |
-| `VaultAuth pg-rotate` | **Comment** s'authentifier : méthode `kubernetes`, mount `kubernetes`, role `pg-rotate-demo`, `audiences: [vault]`. Utilise la `VaultConnection` « default » de l'opérateur (`http://vault.vault.svc…:8200`). |
-| `SecretTransformation pg-rotate-dsn` | **Reformate** `username`/`password` en variables prêtes à l'emploi : `DATABASE_URL` (DSN complète) + `PGHOST`/`PGPORT`/`PGDATABASE`/`PGUSER`/`PGPASSWORD`. |
-| `VaultDynamicSecret pg-rotate` | **Quoi** synchroniser : `mount: database`, `path: static-creds/vault-rotate`, `allowStaticCreds: true`. Écrit le Secret `pg-rotate-creds` (via la transformation ; `excludes: [".*"]` pour ne garder que les clés templatées) et **relance** le Deployment via `rolloutRestartTargets`. |
-| `Deployment pg-rotate-demo` (alpine) | Consomme le Secret en `envFrom` → la chaîne de connexion est dans ses variables d'env. **Redémarré** à chaque rotation. |
-
-### Vérifier la rotation → redémarrage
+**Observer la rotation → le redémarrage :**
 
 ```bash
-# Creds courants côté Vault (username fixe, password + ttl qui bougent) :
-vault read database/static-creds/vault-rotate
-
-# Le Secret K8s rendu (DSN complète) :
-kubectl -n pg-rotate-demo get secret pg-rotate-creds -o jsonpath='{.data.DATABASE_URL}' | base64 -d; echo
-
-# Preuve du redémarrage : la generation du Deployment s'incrémente à chaque rotation
+vault read database/static-creds/vault-rotate       # username fixe, password + ttl qui bougent
+vault write -f database/rotate-role/vault-rotate    # forcer une rotation immédiate
 kubectl -n pg-rotate-demo get deploy pg-rotate-demo -o jsonpath='{.metadata.generation}'; echo
-kubectl -n pg-rotate-demo get pods -l app=pg-rotate-demo -w    # un nouveau pod ~toutes les 3h
-
-# Forcer une rotation immédiate (sans attendre la période) :
-vault write -f database/rotate-role/vault-rotate
+kubectl -n pg-rotate-demo get pods -l app=pg-rotate-demo -w
 ```
 
-> ⚠️ **Chaque rotation = un rollout du consommateur** (le pod alpine redémarre). Défaut `3h`.
-> Pour *voir* la boucle en direct, relancer `pg-dynamic-rotate.sh` avec `ROTATION_PERIOD=2m`
-> (ou éditer le static role) ; remonter ensuite pour ne pas faire tourner le pod en continu.
+Ce que le script écrit dans Vault : `vault/README.md`. Les objets K8s : `k8s/README.md`.
 
-> **Sécurité / lab** : Vault se connecte en **superuser `postgres`** (le plus simple). En prod,
-> préférer un role d'admin dédié à privilèges réduits (juste de quoi `ALTER ROLE … PASSWORD`),
-> et envisager `database/rotate-root` pour que Vault rotate aussi son propre mot de passe admin.
+> ⚠️ **Chaque rotation = un rollout du consommateur.** Avec `ROTATION_PERIOD=2m`, le pod alpine
+> redémarre toutes les 2 minutes ; remonter la période après la démo.
 
-## Appliquer les CRD (dossier `k8s/`)
+> ℹ️ **Sécurité / lab** : Vault se connecte en **superuser `postgres`**, le plus simple. En prod,
+> préférer un role d'admin dédié à privilèges réduits (juste de quoi `ALTER ROLE … PASSWORD`), et
+> envisager `database/rotate-root` pour que Vault rotate aussi son propre mot de passe admin.
 
-```bash
-kubectl apply -f _k8s/vault-secret-operator/k8s/00-namespace-rbac.yaml   # ns "demo" + ServiceAccount
-kubectl apply -f _k8s/vault-secret-operator/k8s/01-vaultconnection.yaml  # (optionnel si values.yaml suffit)
-kubectl apply -f _k8s/vault-secret-operator/k8s/02-vaultauth.yaml        # comment prouver l'identité
-# secrets, au choix :
-kubectl apply -f _k8s/vault-secret-operator/k8s/10-static-kv.yaml        # kv-v2 (mots de passe, API keys)
-kubectl apply -f _k8s/vault-secret-operator/k8s/20-dynamic-db.yaml       # creds DB éphémères (rotation)
-kubectl apply -f _k8s/vault-secret-operator/k8s/30-pki-tls.yaml          # certificat TLS auto-renouvelé
-kubectl apply -f _k8s/vault-secret-operator/k8s/40-secrettransformation.yaml  # templating du Secret rendu
-kubectl apply -f _k8s/vault-secret-operator/k8s/50-demo-deployment.yaml  # app qui consomme + rollout
-```
+## 🛡️ Les CRD et les bonnes pratiques appliquées
 
-## Les CRD de VSO (2026)
-
-| CRD | Rôle | Fichier d'exemple |
-|-----|------|-------------------|
-| `VaultConnection` | **Où** est Vault (adresse, CA, TLS) | `k8s/01-vaultconnection.yaml` / `values.yaml` |
-| `VaultAuth` | **Comment** s'authentifier (méthode `kubernetes`, mount, role, SA) | `k8s/02-vaultauth.yaml` |
+| CRD | Rôle | Exemple |
+|---|---|---|
+| `VaultConnection` | **Où** est Vault (adresse, CA, TLS) | `values.yaml` / `k8s/01-vaultconnection.yaml` |
+| `VaultAuth` | **Comment** s'authentifier (méthode, mount, role, SA, audience) | `k8s/02-vaultauth.yaml` |
 | `VaultAuthGlobal` | `VaultAuth` **mutualisé** entre namespaces (DRY, multi-tenant) | `k8s/03-vaultauthglobal.yaml` |
 | `VaultStaticSecret` | Synchronise un secret **KV** (v1/v2) → `Secret` | `k8s/10-static-kv.yaml` |
-| `VaultDynamicSecret` | Génère des creds **éphémères** (DB, cloud…) + rotation par lease | `k8s/20-dynamic-db.yaml` |
-| `VaultPKISecret` | Émet + **renouvelle** un certificat TLS (moteur `pki`) | `k8s/30-pki-tls.yaml` |
+| `VaultDynamicSecret` | Creds **éphémères** (DB, cloud…) + renouvellement de lease ; aussi les **static roles** | `k8s/20-dynamic-db.yaml` |
+| `VaultPKISecret` | Émet et **renouvelle** un certificat TLS (moteur `pki`) | `k8s/30-pki-tls.yaml` |
 | `SecretTransformation` | **Templating** : reformate les données avant écriture du `Secret` | `k8s/40-secrettransformation.yaml` |
 | `HCPAuth` / `HCPVaultSecretsApp` | Variante **HCP Vault Secrets** (SaaS) — hors lab | — |
 
-## Vérifier
-
-```bash
-kubectl -n vault-secrets-operator logs deploy/vault-secrets-operator-controller-manager -f
-# côté ressources : la colonne "SecretSynced"/events doit passer à true
-kubectl -n demo get vaultstaticsecret,vaultdynamicsecret,vaultpkisecret
-kubectl -n demo get secret                    # les Secret créés par VSO (static-kv, dynamic-db, pki-tls)
-kubectl -n demo get secret static-kv -o jsonpath='{.data.password}' | base64 -d ; echo
-```
-
-## Bonnes pratiques 2026 (appliquées ici)
-
 - **Moindre privilège par policy** : une policy = un usage (kv / db / pki), scopée au chemin exact.
-  Voir `vault/policies/`. Pas de wildcard `secret/*`.
-- **Un `role` k8s par app**, bindé à `bound_service_account_names` + `bound_service_account_namespaces`
-  précis (jamais `*`). Voir `vault/02-roles.sh`.
-- **Tokens de courte durée** (`token_ttl` court) + **audience dédiée** (`vault`) sur les JWT projetés :
-  un token volé expire vite et n'est valable que pour Vault.
-- **`refreshAfter` proportionnel à la sensibilité** (static) et **`renewalPercent`** (dynamic) pour
+  Aucun wildcard de mount. Cf. `vault/policies/`.
+- **Un role Vault par app**, bindé à des `bound_service_account_names`/`_namespaces` précis (jamais
+  `*`), avec une **audience dédiée** (`vault`) et un **`token_ttl` court** (15m ici) : un token volé
+  expire vite et ne vaut que pour Vault.
+- **`refreshAfter` proportionnel à la sensibilité** (static) et **`renewalPercent`** (dynamic), pour
   renouveler avant expiration du lease.
-- **`rolloutRestartTargets`** : redémarre automatiquement les workloads qui ne rechargent pas un
-  `Secret` à chaud (la plupart). Sans ça, un secret tourné n'atteint jamais le process.
-- **Cache client persistant chiffré (Transit)** : les leases survivent au redémarrage de l'opérateur
-  → pas de creds dynamiques orphelins. **Optionnel** : désactivé ici (`persistenceModel: none`, car on
-  ne fait que du statique) ; à activer avec les creds dynamiques.
-- **GitOps** : versionner les CRD ici ; **jamais** les valeurs de secret. VSO écrit les `Secret`, git
-  ne les voit pas.
-- **RBAC sur les `VaultAuth`** : restreindre qui peut créer/éditer un `VaultAuth` (c'est une porte
-  d'entrée vers Vault). En multi-tenant, `VaultAuthGlobal` + `allowedNamespaces` cadrent l'usage.
+- **`rolloutRestartTargets` systématique** : sans lui, un secret roté n'atteint jamais le process.
+- **GitOps** : versionner les CR, **jamais** les valeurs. VSO écrit les `Secret`, git ne les voit
+  pas.
+- **RBAC sur les `VaultAuth`** : c'est une porte d'entrée vers Vault. En multi-tenant,
+  `VaultAuthGlobal` + `allowedNamespaces` cadrent qui peut s'en servir.
 
-## Pièges
+## ⚠️ Pièges
 
-- **Login qui échoue (`permission denied` / `403`)** : le SA/namespace du pod ne correspond pas au
-  `role` Vault (`bound_service_account_*`), ou l'**audience** du token ne matche pas
-  (`VaultAuth.spec.kubernetes.audiences` doit être dans les `audience` du role Vault). C'est 90 % des cas.
-- **Vault ne peut pas valider le JWT** : `auth/kubernetes/config` mal renseigné. Vault **in-cluster** :
-  son SA doit avoir `system:auth-delegator` (le chart le fait via `server.authDelegator.enabled=true`).
-  Vault **externe** : il faut fournir `kubernetes_host`, `kubernetes_ca_cert` **et** un `token_reviewer_jwt`
-  (JWT d'un SA délégateur). Voir `vault/README.md`.
-- **`disable_iss_validation`** : par défaut `true` depuis Vault 1.9 — ne pas le remettre à `false`
-  avec des tokens projetés courts (l'`iss` varie), sinon logins cassés.
-- **Secret jamais mis à jour dans le pod** : il manque `rolloutRestartTargets` (l'app garde l'ancienne
-  valeur en mémoire). Le `Secret` K8s, lui, est bien à jour — vérifier avec `kubectl get secret`.
-- **Creds dynamiques orphelins après crash de l'opérateur** : cache client en mémoire (`none`, valeur
-  actuelle — ok pour du statique). Pour des creds dynamiques, passer en `persistenceModel: direct-encrypted`
-  + Transit + role `vso-transit`.
+- **`storageEncryption.role` est au mauvais niveau dans `values.yaml` (ligne 55).** Il y est frère
+  de `method`/`mount`/`transitMount`/`keyName`, alors que le chart `vault-secrets-operator` 1.5.0
+  l'attend sous `controller.manager.clientCache.storageEncryption.**kubernetes**.role`. Tel quel, la
+  valeur est **ignorée** en silence et le role vaut `""`. Sans conséquence aujourd'hui
+  (`storageEncryption.enabled: false`), mais bloquant dès qu'on active le cache chiffré : à corriger
+  **avant** de passer en `direct-encrypted`.
+  ```bash
+  helm show values hashicorp/vault-secrets-operator --version 1.5.0   # la structure de référence
+  ```
+- **Login refusé (`permission denied` / `403`)** : le SA ou le namespace du pod ne correspond pas au
+  role Vault (`bound_service_account_*`), ou l'audience ne matche pas
+  (`VaultAuth.spec.kubernetes.audiences` doit être dans les `audience` du role). C'est 90 % des
+  cas — le test de login « à blanc » de `vault/README.md` l'isole en une commande.
+- **Vault ne peut pas valider le JWT** : `auth/kubernetes/config` mal renseigné. Vault
+  **in-cluster** : son SA doit avoir `system:auth-delegator` (le chart le fait via
+  `server.authDelegator.enabled=true`). Vault **externe** : `kubernetes_host` +
+  `kubernetes_ca_cert` + `token_reviewer_jwt` sont tous les trois obligatoires. Et attention au bug
+  de `vault/01-kubernetes-auth.sh` documenté dans `vault/README.md`.
+- **`disable_iss_validation`** : `true` par défaut depuis Vault 1.9 — ne pas le repasser à `false`
+  avec des tokens projetés courts (l'`iss` varie), sinon tous les logins cassent.
+- **Secret jamais mis à jour dans le pod** : il manque `rolloutRestartTargets`. Le `Secret` K8s est
+  bien à jour (`kubectl get secret` le prouve) ; c'est le process qui garde l'ancienne valeur.
+- **Creds dynamiques orphelins après un crash de l'opérateur** : le cache client est en mémoire
+  (`persistenceModel: none`), donc les leases sont perdus au redémarrage et Vault garde des creds
+  actifs que plus personne ne réclame. Acceptable pour du statique, pas pour du dynamique.
 - **CA TLS de Vault** : en HTTPS avec une CA privée, fournir `caCertSecretRef` au `VaultConnection`,
   sinon `x509: certificate signed by unknown authority`. `skipTLSVerify: true` = lab uniquement.
+- **La démo `k8s/20-dynamic-db.yaml` est cassée par un décalage de mount** (`db` vs `database`) :
+  détail et correctif dans `vault/README.md`.
 
-## Sources
+## 📚 Références
 
 - [Vault Secrets Operator — vue d'ensemble](https://developer.hashicorp.com/vault/docs/deploy/kubernetes/vso)
 - [VSO — installation Helm](https://developer.hashicorp.com/vault/docs/deploy/kubernetes/vso/installation)
 - [VSO — API reference (CRD)](https://developer.hashicorp.com/vault/docs/deploy/kubernetes/vso/api-reference)
 - [VSO — dépôt GitHub (releases, samples)](https://github.com/hashicorp/vault-secrets-operator)
 - [Kubernetes auth method](https://developer.hashicorp.com/vault/docs/auth/kubernetes)
-- [Kubernetes auth — HTTP API](https://developer.hashicorp.com/vault/api-docs/auth/kubernetes)
 - [VSO déclaratif — guide 2026 (oneuptime)](https://oneuptime.com/blog/post/2026-02-09-vault-secrets-operator-declarative/view)
