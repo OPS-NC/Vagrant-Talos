@@ -46,7 +46,7 @@ validate-vagrant: ## Valide le Vagrantfile
 validate-talos: ## Génère la config Talos dans un dossier jetable puis la valide
 	@set -eu; \
 	. ./lab.env 2>/dev/null || true; \
-	cni="$${CNI:-flannel}"; net="$${NETWORK:-192.168.56}"; vip="$${VIP:-$$net.5}"; \
+	cni="$${CNI:-cilium}"; net="$${NETWORK:-192.168.56}"; vip="$${VIP:-$$net.5}"; \
 	out="$$(mktemp -d)"; \
 	trap 'rm -rf "$$out"' EXIT; \
 	talosctl gen config validate-only "https://$$vip:6443" \

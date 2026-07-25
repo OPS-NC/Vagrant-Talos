@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # cilium-up.sh — installe Cilium (CNI + IP LoadBalancer + annonce L2) sur un cluster Talos
-# bootstrapé SANS CNI (cluster-up.sh avec CNI=none).
+# bootstrapé SANS CNI (cluster-up.sh avec CNI=cilium, ou CNI=none si tu pilotes tout
+# à la main : les deux patches donnent le même `cni.name: none` côté Talos).
 #
 # Fait deux choses (le 2e suppose le 1er) :
 #   1. Cilium en Helm : CNI (=> nodes Ready) + kubeProxyReplacement off + annonce L2 activée,
@@ -37,6 +38,25 @@ for bin in kubectl helm; do
   command -v "$bin" >/dev/null 2>&1 || { echo "ERREUR : '$bin' introuvable." >&2; exit 1; }
 done
 kubectl get --raw='/readyz' >/dev/null 2>&1 || { echo "ERREUR : apiserver injoignable (KUBECONFIG=${KUBECONFIG})." >&2; exit 1; }
+
+# --- Garde-fou : un CNI déjà en place -----------------------------------------
+# Poser Cilium par-dessus flannel donne deux CNI concurrents et un réseau pod cassé.
+# Le cas arrive tout seul quand `lab.env` est absent et que les défauts divergent
+# (cluster-up.sh bootstrapait flannel, ce script installe Cilium) : on refuse.
+# On cherche par motif et non par nom exact (`kube-flannel` chez Talos) : le nom du
+# DaemonSet a déjà changé en amont, un grep survit au prochain renommage.
+flannel_ds="$(kubectl -n kube-system get daemonsets -o name 2>/dev/null | grep -i flannel || true)"
+if [ -n "$flannel_ds" ]; then
+  cat >&2 <<EOF
+ERREUR : flannel est déjà installé (${flannel_ds} dans kube-system).
+  Talos l'a posé au bootstrap : ajouter Cilium par-dessus casse le réseau pod.
+  Ce cluster a été bootstrapé avec CNI=flannel. Pour passer à Cilium :
+    1. vérifier CNI=cilium dans lab.env (défaut du dépôt) ;
+    2. vagrant destroy && vagrant up && ./talos/cluster-up.sh
+  Changer de CNI à chaud n'est pas supporté (cf. _k8s/cilium/README.md).
+EOF
+  exit 1
+fi
 
 log() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 

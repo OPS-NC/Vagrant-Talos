@@ -7,7 +7,7 @@
 > Procedure **validated for real** on this lab (v1.13.5 → v1.13.7): 8 nodes, ~10 min,
 > **zero Kubernetes API downtime**. Measurements in §7.
 
-Reference at test time: Talos **v1.13.7**, Kubernetes **v1.36.2**, `CNI=none` + Cilium,
+Reference at test time: Talos **v1.13.7**, Kubernetes **v1.36.2**, `CNI=cilium`,
 3 CP + 5 workers. Adapt the IPs to your topology (`lab.env`); the repo ships 3 CP + 3 workers.
 
 > ⚠️ `talosctl` must be **≥** the target version. Check before you start:

@@ -15,8 +15,8 @@ son `*-up.sh`.
 ## ⚡ Démarrage rapide
 
 ```bash
-# 1. Le cluster doit tourner SANS CNI (Talos n'installe rien)
-CNI=none ./talos/cluster-up.sh
+# 1. Bootstrap en CNI=cilium (défaut du dépôt) : Talos ne pose aucun CNI, cette couche si
+CNI=cilium ./talos/cluster-up.sh
 
 # 2. La plateforme de base : Cilium → Envoy Gateway → metrics-server → cert-manager
 ./_k8s/platform-up.sh

@@ -14,8 +14,8 @@ Read this directory in two passes: a **base platform** (4 components, a single s
 ## ⚡ Quick start
 
 ```bash
-# 1. The cluster must run WITHOUT a CNI (Talos installs nothing)
-CNI=none ./talos/cluster-up.sh
+# 1. Bootstrap with CNI=cilium (the repo default): Talos installs no CNI, this layer does
+CNI=cilium ./talos/cluster-up.sh
 
 # 2. The base platform: Cilium → Envoy Gateway → metrics-server → cert-manager
 ./_k8s/platform-up.sh

@@ -14,11 +14,15 @@ application layer: [`_k8s/README.md`](_k8s/README.md).
 2. `./talos/cluster-up.sh` generates the config, applies it, bootstraps etcd, fetches the
    kubeconfig and waits for health. This is the real path (the `<details>` in §4 of the README
    is the manual "to understand what happens" version).
-3. `./_k8s/platform-up.sh` lays down the base platform — it **requires `CNI=none`**, whereas
-   the repo default is `flannel`. Then the addons, opt-in (`_k8s/*/*-up.sh`).
+3. `./_k8s/platform-up.sh` lays down the base platform, then the addons, opt-in
+   (`_k8s/*/*-up.sh`).
 
-The reference lab runs `CNI=none` + Cilium: that is what the `_k8s/` layer assumes everywhere
-(`LoadBalancer` Services depend on Cilium's L2 announcement).
+The reference lab runs **`CNI=cilium`** — the repo default, in `lab.env.example`, in
+`talos/cluster-up.sh` and in `platform-up.sh`. Talos installs no CNI at bootstrap and
+`platform-up.sh` installs Cilium right after; that is what the `_k8s/` layer assumes
+everywhere (`LoadBalancer` Services depend on Cilium's L2 announcement). `CNI=none` produces
+the exact same machine config but installs nothing at all — it means "I lay down my own CNI",
+and `platform-up.sh` then stops on `no node Ready`.
 
 ## 🚧 Working rules (non-negotiable)
 
