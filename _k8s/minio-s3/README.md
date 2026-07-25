@@ -10,27 +10,29 @@ exposé en HTTPS via `main-gateway` sur le domaine wildcard :
 
 ## Pourquoi l'image officielle (et pas Bitnami)
 
-Le chart **Bitnami** `bitnami/minio` s'appuie depuis **août 2025** sur des images **gelées**
-(`bitnamilegacy/*`, plus mises à jour). On utilise donc directement l'**image officielle**
-`quay.io/minio/minio` en manifeste simple.
+On utilise le **fork Pigsty `pgsty/minio`**, pour deux raisons :
+- Le chart **Bitnami** `bitnami/minio` s'appuie depuis **août 2025** sur des images **gelées**
+  (`bitnamilegacy/*`, plus mises à jour).
+- L'**upstream `minio/minio`** a **amputé la console communautaire** (mi-2025) puis a été
+  **archivé « no longer maintained »** (fév. 2026).
 
-## ⚠️ Le compromis « image récente » vs « interface d'admin »
+## Pourquoi le fork Pigsty (`pgsty/minio`)
 
 MinIO a **retiré les fonctions d'administration de la console communautaire** vers
-`RELEASE.2025-05-24` (voir sources). Les images **récentes** (ex. `RELEASE.2025-09-07`) n'ont
-plus qu'un **navigateur d'objets** dans l'UI — plus de gestion users / buckets / policies /
-lifecycle / réplication via le web.
+`RELEASE.2025-05-24` : les images upstream **récentes** n'ont plus qu'un **navigateur
+d'objets** (plus de gestion users / buckets / policies / lifecycle via le web).
 
-Comme on veut **l'interface d'admin**, ce manifeste **épingle volontairement**
-`RELEASE.2025-04-22T22-12-26Z` — la **dernière release avec console admin complète**.
+Le fork **Pigsty** rebuild le serveur MinIO **et restaure la console d'admin complète** →
+on a **à la fois** une image **récente et maintenue** ET **l'interface d'admin**. Ce manifeste
+épingle `pgsty/minio:RELEASE.2026-06-18T00-00-00Z`.
 
-> C'est un arbitrage assumé : **admin UI > image la plus récente**. Le rythme des releases
-> communautaires a de toute façon fortement ralenti après cette polémique.
+> Contexte : billet Pigsty « MinIO is Dead, Long Live MinIO ». C'est le fork le plus actif.
 
-**Alternatives** si tu veux du récent + de l'admin :
-- **`openmaxio/openmaxio-object-browser`** — un fork communautaire qui **réintègre** les
-  fonctions d'admin retirées, à brancher sur un serveur MinIO récent (2 conteneurs).
-- **MinIO AIStor** — l'édition **payante** (console d'admin complète, support).
+**Alternatives** :
+- **upstream épinglé `RELEASE.2025-04-22T22-12-26Z`** — dernière release avec la console admin
+  officielle (mais upstream figé/archivé).
+- **autres forks console** : `huncrys/minio-console`, `georgmangold/console`.
+- **MinIO AIStor** — édition **payante** (support).
 - **`mc` CLI** (ci-dessous) — administration en ligne de commande, indépendante de l'UI.
 
 ## Prérequis
