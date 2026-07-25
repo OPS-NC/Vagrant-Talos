@@ -1,5 +1,5 @@
 <!-- i18n -->
-**English** · [Français](LISEZ-MOI.md)
+[English](README.md) · **Français**
 <!-- /i18n -->
 
 # 🚪 `envoy-gateway/` — le point d'entrée HTTP(S) du cluster
@@ -11,7 +11,7 @@
 
 > 🌐 **`talos.lab.example.io` est le domaine NEUTRE du dépôt (public)** : `platform-up.sh` le
 > remplace par `LAB_DOMAIN` (`lab.env`) — hostname de l'écouteur `https` et nom du Secret TLS.
-> Cf. [`../README.md`](../README.md#-lab_domain--le-domaine-des-ui).
+> Cf. [`../LISEZ-MOI.md`](../LISEZ-MOI.md#-lab_domain--le-domaine-des-ui).
 
 ## 🎯 À quoi ça sert
 
@@ -22,15 +22,15 @@
 - **Terminer le TLS** au bord du cluster : les backends parlent HTTP en clair.
 
 > ⚠️ **Ne pas confondre avec l'Envoy embarqué dans Cilium** (désactivé ici :
-> `envoy.enabled=false`, cf. [`../cilium/README.md`](../cilium/README.md)). Ici Envoy est
+> `envoy.enabled=false`, cf. [`../cilium/LISEZ-MOI.md`](../cilium/LISEZ-MOI.md)). Ici Envoy est
 > piloté par le contrôleur **Envoy Gateway**, un composant à part entière.
 
 ## 📋 Prérequis
 
 | Prérequis | Pourquoi | Vérifier |
 |---|---|---|
-| [`../cilium/`](../cilium/README.md) installé (pool L2) | c'est lui qui donne l'IP `.200` au Service du Gateway | `kubectl get ciliumloadbalancerippool` |
-| [`../cert-manager/`](../cert-manager/README.md) + token Cloudflare | remplit le Secret `wildcard-talos-lab-example-io-tls` de l'écouteur `:443` | `kubectl -n envoy-gateway-system get certificate` |
+| [`../cilium/`](../cilium/LISEZ-MOI.md) installé (pool L2) | c'est lui qui donne l'IP `.200` au Service du Gateway | `kubectl get ciliumloadbalancerippool` |
+| [`../cert-manager/`](../cert-manager/LISEZ-MOI.md) + token Cloudflare | remplit le Secret `wildcard-talos-lab-example-io-tls` de l'écouteur `:443` | `kubectl -n envoy-gateway-system get certificate` |
 | DNS `*.talos.lab.example.io → 192.168.56.200` en **DNS-only** | les routes matchent par hostname | `dig +short argo.talos.lab.example.io` |
 
 Le HTTP (`:80`) fonctionne sans cert-manager ni DNS : `curl http://192.168.56.200/...`.
@@ -78,7 +78,7 @@ C'est le Service de l'`EnvoyProxy` qui déclenche l'annonce L2 Cilium → d'où 
 
 L'annotation `cert-manager.io/cluster-issuer: letsencrypt-prod` sur le Gateway suffit à ce que
 cert-manager crée le `Certificate`, résolve le challenge DNS-01 et remplisse le Secret. Le
-mécanisme est détaillé dans [`../cert-manager/README.md`](../cert-manager/README.md).
+mécanisme est détaillé dans [`../cert-manager/LISEZ-MOI.md`](../cert-manager/LISEZ-MOI.md).
 
 ### Brancher une application
 
@@ -139,7 +139,7 @@ kubectl delete -f _k8s/envoy-gateway/GW-Example.yml      # à retirer après la 
 
 ## ⚠️ Pièges
 
-- **`ADDRESS` vide / `<pending>`** → le problème est côté [`../cilium/`](../cilium/README.md)
+- **`ADDRESS` vide / `<pending>`** → le problème est côté [`../cilium/`](../cilium/LISEZ-MOI.md)
   (pool absent ou annonce L2 inactive), pas ici.
 - **404 sur une route** → chemin/hostname qui ne matche rien, `sectionName` absent ou faux, ou
   hostname hors du wildcard (`app.talos.lab.example.io` ✔, `app.lab.example.io` ✘ — le wildcard ne
@@ -151,7 +151,7 @@ kubectl delete -f _k8s/envoy-gateway/GW-Example.yml      # à retirer après la 
   protéger : `SecurityPolicy` Envoy Gateway (Basic Auth / OIDC) ciblant la route. Vault et
   Argo CD, eux, ont leur propre authentification.
 - **`GW-Example.yml` viole les policies du dépôt lui-même** : `ealen/echo-server:latest` est
-  refusé par `disallow-latest-tag` ([`../kyverno/`](../kyverno/README.md)), et
+  refusé par `disallow-latest-tag` ([`../kyverno/`](../kyverno/LISEZ-MOI.md)), et
   `nginxdemos/nginx-hello:plain-text` est un **tag flottant** (il passe la policy mais ne fixe
   aucune version). Les deux apps déclenchent aussi les avertissements PodSecurity `restricted`
   de Talos (`allowPrivilegeEscalation`, `capabilities`, `runAsNonRoot`, `seccompProfile`) : ce
@@ -167,5 +167,5 @@ kubectl delete -f _k8s/envoy-gateway/GW-Example.yml      # à retirer après la 
 - [Gateway API — documentation](https://gateway-api.sigs.k8s.io/)
 - [Envoy Gateway — documentation](https://gateway.envoyproxy.io/docs/)
 - [Envoy Gateway — SecurityPolicy (Basic Auth, OIDC, JWT)](https://gateway.envoyproxy.io/docs/tasks/security/)
-- [`../cilium/README.md`](../cilium/README.md) — d'où vient le VIP ·
-  [`../cert-manager/README.md`](../cert-manager/README.md) — d'où vient le certificat
+- [`../cilium/LISEZ-MOI.md`](../cilium/LISEZ-MOI.md) — d'où vient le VIP ·
+  [`../cert-manager/LISEZ-MOI.md`](../cert-manager/LISEZ-MOI.md) — d'où vient le certificat

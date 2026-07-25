@@ -1,5 +1,5 @@
 <!-- i18n -->
-**English** · [Français](LISEZ-MOI.md)
+[English](README.md) · **Français**
 <!-- /i18n -->
 
 # ⚙️ `vault/` — la configuration **côté Vault**
@@ -36,7 +36,7 @@ Casser un seul maillon (nom du SA, namespace, audience, chemin de policy, nom de
 
 ```bash
 export VAULT_ADDR="https://vault.talos.lab.example.io"   # ou http://127.0.0.1:8200 en port-forward
-export VAULT_TOKEN="<root-token>"                    # cf. ../../vault-cluster/README.md
+export VAULT_TOKEN="<root-token>"                    # cf. ../../vault-cluster/LISEZ-MOI.md
 vault status                                         # doit répondre Sealed=false
 ```
 
@@ -45,7 +45,7 @@ Port-forward si Vault n'est pas exposé :
 
 > ⚠️ **`VAULT_ADDR`/`VAULT_TOKEN` posés dans `lab.env` n'ont AUCUN effet** : aucun script ne lit ce
 > fichier. Il faut les **exporter** (ou `set -a; . ./lab.env; set +a`). Détail et précautions dans
-> `../../vault-cluster/README.md` (section Pièges).
+> `../../vault-cluster/LISEZ-MOI.md` (section Pièges).
 
 ## ⚡ Deux parcours
 
@@ -144,7 +144,7 @@ role dédié au SA/ns de l'appli. Ce script est le gabarit à copier.
 
 Vault prend en gestion un user PG **fixe** (`vault-rotate`) et n'en **rotate que le mot de passe**
 (static role) — la chaîne de connexion de l'app reste stable. Vue d'ensemble du scénario et
-prérequis PostgreSQL : `../README.md`.
+prérequis PostgreSQL : `../LISEZ-MOI.md`.
 
 | Objet Vault | Commande (résumé) | Rôle |
 |---|---|---|

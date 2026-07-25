@@ -1,5 +1,5 @@
 <!-- i18n -->
-**English** · [Français](LISEZ-MOI.md)
+[English](README.md) · **Français**
 <!-- /i18n -->
 
 # 🪣 `minio-s3/` — MinIO standalone (S3 + console d'admin) sur local-path
@@ -134,7 +134,7 @@ mc ls lab --insecure
   `https://minio-console.talos.lab.example.io` dans `minio-s3.yaml` — domaine **neutre** du dépôt
   public. `minio-up.sh` la substitue avec les hostnames des `HTTPRoute` depuis `LAB_DOMAIN`
   (`lab.env`). Un `kubectl apply -f minio-s3.yaml` **direct** garde le domaine d'exemple et casse
-  les redirections de login. Cf. [`../README.md`](../README.md#-lab_domain--le-domaine-des-ui).
+  les redirections de login. Cf. [`../LISEZ-MOI.md`](../LISEZ-MOI.md#-lab_domain--le-domaine-des-ui).
 
 ## 📚 Références
 

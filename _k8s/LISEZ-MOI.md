@@ -1,5 +1,5 @@
 <!-- i18n -->
-**English** · [Français](LISEZ-MOI.md)
+[English](README.md) · **Français**
 <!-- /i18n -->
 
 # ☸️ `_k8s/` — la couche applicative du lab
@@ -22,7 +22,7 @@ CNI=none ./talos/cluster-up.sh
 ./_k8s/platform-up.sh
 
 # 3. Les addons, à la carte
-./_k8s/longhorn/…            # cf. longhorn/README.md (install Helm manuelle)
+./_k8s/longhorn/…            # cf. longhorn/LISEZ-MOI.md (install Helm manuelle)
 ./_k8s/argocd/argocd-up.sh
 ```
 
@@ -39,8 +39,8 @@ pas Talos qui l'a fait.
 
 | `CNI=` | Qui pose le CNI | IP LoadBalancer (L2) | Utilisable pour cette couche |
 |---|---|---|---|
-| **`cilium`** *(défaut)* | `platform-up.sh` → [`cilium/`](cilium/README.md) | ✅ pool + annonce ARP | ✅ oui |
-| `calico` | `platform-up.sh` → [`calico/`](calico/README.md) | ❌ BGP seulement | ⚠️ MetalLB requis en plus |
+| **`cilium`** *(défaut)* | `platform-up.sh` → [`cilium/`](cilium/LISEZ-MOI.md) | ✅ pool + annonce ARP | ✅ oui |
+| `calico` | `platform-up.sh` → [`calico/`](calico/LISEZ-MOI.md) | ❌ BGP seulement | ⚠️ MetalLB requis en plus |
 | `flannel` | **Talos**, au bootstrap | ❌ | ❌ non |
 | `none` | toi | ❌ | selon ce que tu installes |
 
@@ -81,7 +81,7 @@ cert-manager**.
 > 💡 Les StorageClass ne sont pas interchangeables : `longhorn-r1` (1 réplica) est le socle
 > des applis qui **répliquent déjà** au niveau applicatif (PostgreSQL, Vault), `longhorn`
 > (3 réplicas) pour le reste, `local-path` pour l'éphémère. Voir
-> [`longhorn/`](longhorn/README.md) et [`local-path-storage/`](local-path-storage/README.md).
+> [`longhorn/`](longhorn/LISEZ-MOI.md) et [`local-path-storage/`](local-path-storage/LISEZ-MOI.md).
 
 ## 🌐 `LAB_DOMAIN` — le domaine des UI
 
@@ -139,53 +139,53 @@ reste dans n'importe quel ordre.
 
 | Dossier | Rôle | Installation | StorageClass fournie |
 |---|---|---|---|
-| [`longhorn/`](longhorn/README.md) | stockage bloc distribué ; **prérequis Talos** (extensions iscsi, montage rshared) | Helm manuelle | `longhorn`, `longhorn-r1` |
-| [`local-path-storage/`](local-path-storage/README.md) | stockage local dynamique (hostPath), sans Longhorn | `local-path-up.sh` | `local-path` |
-| [`minio-s3/`](minio-s3/README.md) | stockage objet S3 + console, **1 nœud** | `minio-up.sh` | — (consomme `local-path`) |
-| [`minio-s3/cluster/`](minio-s3/cluster/README.md) | MinIO **distribué** 4 nœuds, erasure coding EC:2 — cible des backups | `minio-cluster-up.sh` | — (consomme `local-path`) |
+| [`longhorn/`](longhorn/LISEZ-MOI.md) | stockage bloc distribué ; **prérequis Talos** (extensions iscsi, montage rshared) | Helm manuelle | `longhorn`, `longhorn-r1` |
+| [`local-path-storage/`](local-path-storage/LISEZ-MOI.md) | stockage local dynamique (hostPath), sans Longhorn | `local-path-up.sh` | `local-path` |
+| [`minio-s3/`](minio-s3/LISEZ-MOI.md) | stockage objet S3 + console, **1 nœud** | `minio-up.sh` | — (consomme `local-path`) |
+| [`minio-s3/cluster/`](minio-s3/cluster/LISEZ-MOI.md) | MinIO **distribué** 4 nœuds, erasure coding EC:2 — cible des backups | `minio-cluster-up.sh` | — (consomme `local-path`) |
 
 ### 🐘 Bases de données
 
 | Dossier | Rôle | Installation | Prérequis |
 |---|---|---|---|
-| [`cloudnative-pg/`](cloudnative-pg/README.md) | opérateur PostgreSQL HA `0.29.0` (app v1.30.0) + cluster de démo 3 nœuds, failover auto, **backups S3 + PITR** | `cloudnative-pg-up.sh` | SC `longhorn-r1` ; backups → `minio-s3/cluster` |
+| [`cloudnative-pg/`](cloudnative-pg/LISEZ-MOI.md) | opérateur PostgreSQL HA `0.29.0` (app v1.30.0) + cluster de démo 3 nœuds, failover auto, **backups S3 + PITR** | `cloudnative-pg-up.sh` | SC `longhorn-r1` ; backups → `minio-s3/cluster` |
 
 ### 🔐 Secrets
 
 | Dossier | Rôle | Installation | Prérequis |
 |---|---|---|---|
-| [`vault-cluster/`](vault-cluster/README.md) | HashiCorp Vault HA (Raft) 3 nœuds, UI/API sous `vault.talos.lab.example.io` | Helm manuelle | SC `longhorn` ; descellement manuel |
-| [`vault-secret-operator/`](vault-secret-operator/README.md) | secrets Vault → `Secret` K8s natifs (static KV, dynamic DB, PKI) — côtés Vault **et** K8s | Helm + scripts `vault/` | `vault-cluster` descellé |
+| [`vault-cluster/`](vault-cluster/LISEZ-MOI.md) | HashiCorp Vault HA (Raft) 3 nœuds, UI/API sous `vault.talos.lab.example.io` | Helm manuelle | SC `longhorn` ; descellement manuel |
+| [`vault-secret-operator/`](vault-secret-operator/LISEZ-MOI.md) | secrets Vault → `Secret` K8s natifs (static KV, dynamic DB, PKI) — côtés Vault **et** K8s | Helm + scripts `vault/` | `vault-cluster` descellé |
 
 ### 📈 Observabilité
 
 | Dossier | Rôle | Installation | Prérequis |
 |---|---|---|---|
-| [`observability/`](observability/README.md) | kube-prometheus-stack `87.19.0` + Loki `7.1.0` + Alloy `1.11.0` ; UI `grafana` / `prometheus` / `alertmanager` | `observability-up.sh` | SC `longhorn-r1` ; CP ≥ 4 Go |
-| [`node-problem-detector/`](node-problem-detector/README.md) | santé des nodes (kernel, runtime) `2.3.14`, adapté Talos | `node-problem-detector-up.sh` | — |
+| [`observability/`](observability/LISEZ-MOI.md) | kube-prometheus-stack `87.19.0` + Loki `7.1.0` + Alloy `1.11.0` ; UI `grafana` / `prometheus` / `alertmanager` | `observability-up.sh` | SC `longhorn-r1` ; CP ≥ 4 Go |
+| [`node-problem-detector/`](node-problem-detector/LISEZ-MOI.md) | santé des nodes (kernel, runtime) `2.3.14`, adapté Talos | `node-problem-detector-up.sh` | — |
 
 ### 🛡️ Sécurité
 
 | Dossier | Rôle | Installation | Prérequis |
 |---|---|---|---|
-| [`kyverno/`](kyverno/README.md) | policy engine `3.8.2` (app v1.18.2) + Policy Reporter `3.8.1` (UI), policies pédagogiques en Audit | `kyverno-up.sh` | `main-gateway` |
-| [`trivy-operator/`](trivy-operator/README.md) | scanner continu `0.34.0` (CVE, config, secrets, RBAC) ; rapports dans l'UI Policy Reporter | `trivy-operator-up.sh` | `kyverno` (UI partagée) |
+| [`kyverno/`](kyverno/LISEZ-MOI.md) | policy engine `3.8.2` (app v1.18.2) + Policy Reporter `3.8.1` (UI), policies pédagogiques en Audit | `kyverno-up.sh` | `main-gateway` |
+| [`trivy-operator/`](trivy-operator/LISEZ-MOI.md) | scanner continu `0.34.0` (CVE, config, secrets, RBAC) ; rapports dans l'UI Policy Reporter | `trivy-operator-up.sh` | `kyverno` (UI partagée) |
 
 ### 🌐 Réseau & TLS
 
 | Dossier | Rôle | Installation |
 |---|---|---|
-| [`cilium/`](cilium/README.md) | **CNI par défaut** `1.19.6` + pool d'IP LoadBalancer + annonce L2 (ARP) | `cilium-up.sh`, appelé par `platform-up.sh` si `CNI=cilium` |
-| [`calico/`](calico/README.md) | **CNI alternatif** `v3.32.1` (opérateur Tigera) — CNI **seul**, sans annonce L2 | `calico-up.sh`, appelé par `platform-up.sh` si `CNI=calico` |
-| [`envoy-gateway/`](envoy-gateway/README.md) | contrôleur Envoy Gateway + `main-gateway` (`:80` et `:443` wildcard) + apps de démo | `platform-up.sh` |
-| [`cert-manager/`](cert-manager/README.md) | certificats TLS wildcard automatiques (ACME DNS-01 Cloudflare) | `platform-up.sh` |
+| [`cilium/`](cilium/LISEZ-MOI.md) | **CNI par défaut** `1.19.6` + pool d'IP LoadBalancer + annonce L2 (ARP) | `cilium-up.sh`, appelé par `platform-up.sh` si `CNI=cilium` |
+| [`calico/`](calico/LISEZ-MOI.md) | **CNI alternatif** `v3.32.1` (opérateur Tigera) — CNI **seul**, sans annonce L2 | `calico-up.sh`, appelé par `platform-up.sh` si `CNI=calico` |
+| [`envoy-gateway/`](envoy-gateway/LISEZ-MOI.md) | contrôleur Envoy Gateway + `main-gateway` (`:80` et `:443` wildcard) + apps de démo | `platform-up.sh` |
+| [`cert-manager/`](cert-manager/LISEZ-MOI.md) | certificats TLS wildcard automatiques (ACME DNS-01 Cloudflare) | `platform-up.sh` |
 
 ### 🧪 Démos
 
 | Dossier | Rôle | Installation |
 |---|---|---|
-| [`argocd/`](argocd/README.md) | Argo CD `10.2.1` (GitOps), UI sous `argo.talos.lab.example.io` | `argocd-up.sh` |
-| [`wordpress-example/`](wordpress-example/README.md) | WordPress + MariaDB sur Longhorn, exposé via Envoy | `kubectl apply` |
+| [`argocd/`](argocd/LISEZ-MOI.md) | Argo CD `10.2.1` (GitOps), UI sous `argo.talos.lab.example.io` | `argocd-up.sh` |
+| [`wordpress-example/`](wordpress-example/LISEZ-MOI.md) | WordPress + MariaDB sur Longhorn, exposé via Envoy | `kubectl apply` |
 | `databasement/` | *(addon local, non versionné — cf. `.gitignore`)* | `databasement-up.sh` |
 
 ## 🌍 Accès distant (Tailscale + Cloudflare)
@@ -217,7 +217,7 @@ routable telle quelle.
   exige `limits.cpu` que les manifestes maison ne posent jamais (choix délibéré : pas de
   throttling CPU), et `require-labels` attend `app.kubernetes.io/name` là où ils utilisent
   `app:`. Le rapport est donc bruyant par construction — voir
-  [`kyverno/`](kyverno/README.md).
+  [`kyverno/`](kyverno/LISEZ-MOI.md).
 - **Les émetteurs de métriques sont coupés par défaut.** `serviceMonitor`/`podMonitor` sont
   à `false` chez trivy-operator, CloudNativePG et node-problem-detector : Prometheus ne
   collecte rien d'eux tant que tu ne les as pas basculés après l'install d'observability.
@@ -228,8 +228,8 @@ routable telle quelle.
 
 ## 📚 Références
 
-- [`../README.md`](../README.md) — le lab Talos/Vagrant, du `vagrant up` au cluster prêt
-- [`../talos/UPGRADE.md`](../talos/UPGRADE.md) — mise à jour Talos et Kubernetes
+- [`../LISEZ-MOI.md`](../LISEZ-MOI.md) — le lab Talos/Vagrant, du `vagrant up` au cluster prêt
+- [`../talos/MISE-A-JOUR.md`](../talos/MISE-A-JOUR.md) — mise à jour Talos et Kubernetes
 - [Gateway API](https://gateway-api.sigs.k8s.io/) ·
   [Cilium](https://docs.cilium.io/) ·
   [Envoy Gateway](https://gateway.envoyproxy.io/) ·

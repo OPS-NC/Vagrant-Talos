@@ -1,5 +1,5 @@
 <!-- i18n -->
-**English** · [Français](LISEZ-MOI.md)
+[English](README.md) · **Français**
 <!-- /i18n -->
 
 # 🐙 `argocd/` — Argo CD (GitOps) exposé via la Gateway API
@@ -11,7 +11,7 @@
 
 > 🌐 **`talos.lab.example.io` est le domaine NEUTRE du dépôt (public)** : `argocd-up.sh` le
 > remplace par `LAB_DOMAIN` (`lab.env`) dans les values Helm **et** l'`HTTPRoute`. Cf.
-> [`../README.md`](../README.md#-lab_domain--le-domaine-des-ui).
+> [`../LISEZ-MOI.md`](../LISEZ-MOI.md#-lab_domain--le-domaine-des-ui).
 
 ## 🎯 À quoi ça sert
 
@@ -35,8 +35,8 @@ mode recommandé derrière un ingress/gateway qui gère le TLS.
 
 | Prérequis | Pourquoi | Vérifier |
 |---|---|---|
-| `main-gateway` avec l'écouteur **`https:443`** ([`../envoy-gateway/`](../envoy-gateway/README.md)) | porte l'UI en HTTPS | `kubectl get gateway -n envoy-gateway-system` |
-| Cert wildcard `wildcard-talos-lab-example-io-tls` **`READY=True`** ([`../cert-manager/`](../cert-manager/README.md)) | sinon TLS non trusté | `kubectl -n envoy-gateway-system get certificate` |
+| `main-gateway` avec l'écouteur **`https:443`** ([`../envoy-gateway/`](../envoy-gateway/LISEZ-MOI.md)) | porte l'UI en HTTPS | `kubectl get gateway -n envoy-gateway-system` |
+| Cert wildcard `wildcard-talos-lab-example-io-tls` **`READY=True`** ([`../cert-manager/`](../cert-manager/LISEZ-MOI.md)) | sinon TLS non trusté | `kubectl -n envoy-gateway-system get certificate` |
 | DNS `argo.talos.lab.example.io → 192.168.56.200` en **DNS-only** | hostname de l'`HTTPRoute` | `curl --resolve` sinon (cf. ✅) |
 | Rien côté Talos | Argo CD n'a besoin d'aucun privilège ni `hostPath` | `kubectl -n argocd get pods` |
 
@@ -149,7 +149,7 @@ kubectl -n argocd delete application guestbook        # nettoyage (prune=true su
 - **404 / route non rattachée** → `kubectl -n argocd describe httproute argocd-server` :
   `sectionName: https` doit exister sur `main-gateway`, et le hostname matcher le wildcard.
 - **Certificat non trusté** → l'écouteur `https` sert-il bien `wildcard-talos-lab-example-io-tls` ?
-  (cf. [`../cert-manager/README.md`](../cert-manager/README.md)).
+  (cf. [`../cert-manager/LISEZ-MOI.md`](../cert-manager/LISEZ-MOI.md)).
 - **UI OK mais `argocd login` KO** → ajouter `--grpc-web`.
 
 ## ⚠️ Pièges
@@ -164,11 +164,11 @@ kubectl -n argocd delete application guestbook        # nettoyage (prune=true su
 - **Argo CD peut se battre avec `kubectl`** : si tu confies un addon à une `Application` avec
   `selfHeal: true`, tout `kubectl edit` manuel sera annulé. Choisis ton mode de déploiement.
 - **Empiler cet addon sur des control planes trop justes en RAM** finit par affamer etcd.
-  `lab.env` (`CP_MEM`) est la molette ; voir les pièges de [`../README.md`](../README.md).
+  `lab.env` (`CP_MEM`) est la molette ; voir les pièges de [`../LISEZ-MOI.md`](../LISEZ-MOI.md).
 
 ## 📚 Références
 
 - [Argo CD — Ingress / reverse proxy (`server.insecure`)](https://argo-cd.readthedocs.io/en/stable/operator-manual/ingress/)
 - [Argo CD — déclaration d'`Application`](https://argo-cd.readthedocs.io/en/stable/operator-manual/declarative-setup/)
 - [argo-helm — releases du chart](https://github.com/argoproj/argo-helm/releases)
-- [`../envoy-gateway/README.md`](../envoy-gateway/README.md) — le Gateway qui porte cette route
+- [`../envoy-gateway/LISEZ-MOI.md`](../envoy-gateway/LISEZ-MOI.md) — le Gateway qui porte cette route

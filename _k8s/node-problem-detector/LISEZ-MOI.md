@@ -1,5 +1,5 @@
 <!-- i18n -->
-**English** · [Français](LISEZ-MOI.md)
+[English](README.md) · **Français**
 <!-- /i18n -->
 
 # 🩺 `node-problem-detector/` — santé des nodes (NodeConditions + Events), adapté Talos

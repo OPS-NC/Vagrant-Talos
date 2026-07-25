@@ -1,5 +1,5 @@
 <!-- i18n -->
-**English** · [Français](LISEZ-MOI.md)
+[English](README.md) · **Français**
 <!-- /i18n -->
 
 # 📁 `local-path-storage/` — stockage local dynamique (sans Longhorn), adapté Talos

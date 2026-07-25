@@ -1,5 +1,5 @@
 <!-- i18n -->
-**English** · [Français](LISEZ-MOI.md)
+[English](README.md) · **Français**
 <!-- /i18n -->
 
 # 🐘 `cloudnative-pg/` — PostgreSQL HA déclaratif (opérateur CloudNativePG)

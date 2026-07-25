@@ -1,5 +1,5 @@
 <!-- i18n -->
-**English** · [Français](LISEZ-MOI.md)
+[English](README.md) · **Français**
 <!-- /i18n -->
 
 # 🔒 `vault-cluster/` — HashiCorp Vault HA (Raft), UI exposée en HTTPS
@@ -101,14 +101,14 @@ kubectl apply -f _k8s/vault-cluster/httproute.yaml
 >   _k8s/vault-cluster/httproute.yaml | kubectl apply -f -
 > ```
 >
-> (cf. [`../README.md`](../README.md#-lab_domain--le-domaine-des-ui)).
+> (cf. [`../LISEZ-MOI.md`](../LISEZ-MOI.md#-lab_domain--le-domaine-des-ui)).
 
 ## 🔧 Brancher le VSO
 
 Le VSO (`../vault-secret-operator/`) est déjà câblé sur `http://vault.vault.svc.cluster.local:8200`
 via le `VaultConnection` « default » de son `values.yaml`. Côté Vault, il reste à activer l'auth
 Kubernetes, les moteurs de secrets, les policies et les roles : tout est dans
-`../vault-secret-operator/vault/README.md`.
+`../vault-secret-operator/vault/LISEZ-MOI.md`.
 
 ## ✅ Vérifier
 

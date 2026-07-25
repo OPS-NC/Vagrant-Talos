@@ -1,5 +1,5 @@
 <!-- i18n -->
-**English** · [Français](LISEZ-MOI.md)
+[English](README.md) · **Français**
 <!-- /i18n -->
 
 # 🐆 `calico/` — CNI alternatif : réseau pod + NetworkPolicy, **sans** IP LoadBalancer
@@ -267,5 +267,5 @@ helm uninstall calico -n tigera-operator
 - [Calico — Configure BGP peering / advertise service IPs](https://docs.tigera.io/calico/latest/networking/configuring/bgp)
 - [Calico — Get started with NetworkPolicy](https://docs.tigera.io/calico/latest/network-policy/get-started/calico-policy/calico-network-policy)
 - [MetalLB — Layer 2 configuration](https://metallb.io/configuration/#layer-2-configuration)
-- [`../cilium/README.md`](../cilium/README.md) — le CNI par défaut du lab, et son annonce L2
-- [`../envoy-gateway/README.md`](../envoy-gateway/README.md) — le consommateur du VIP `.200`
+- [`../cilium/LISEZ-MOI.md`](../cilium/LISEZ-MOI.md) — le CNI par défaut du lab, et son annonce L2
+- [`../envoy-gateway/LISEZ-MOI.md`](../envoy-gateway/LISEZ-MOI.md) — le consommateur du VIP `.200`

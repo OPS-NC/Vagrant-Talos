@@ -1,5 +1,5 @@
 <!-- i18n -->
-**English** · [Français](LISEZ-MOI.md)
+[English](README.md) · **Français**
 <!-- /i18n -->
 
 # 📜 `cert-manager/` — TLS wildcard automatique (ACME DNS-01 Cloudflare)
@@ -30,7 +30,7 @@ sécurité à cliquer et sans CA maison à distribuer.
 
 | Prérequis | Pourquoi | Vérifier |
 |---|---|---|
-| `main-gateway` en place ([`../envoy-gateway/`](../envoy-gateway/README.md)) | c'est l'objet que cert-manager observe | `kubectl get gateway -n envoy-gateway-system` |
+| `main-gateway` en place ([`../envoy-gateway/`](../envoy-gateway/LISEZ-MOI.md)) | c'est l'objet que cert-manager observe | `kubectl get gateway -n envoy-gateway-system` |
 | **CRD Gateway API** présentes | cert-manager les découvre au démarrage (installées par le chart Envoy Gateway) | `kubectl get crd gateways.gateway.networking.k8s.io` |
 | Zone `example.io` chez Cloudflare, `*.talos.lab.example.io → 192.168.56.200` en **DNS-only** | le solveur DNS-01 écrit dans cette zone | `dig +short TXT _acme-challenge.talos.lab.example.io` |
 | **Token API Cloudflare** (`Zone/DNS/Edit` + `Zone/Zone/Read`, scopé `example.io`) | permet à cert-manager de poser le TXT | `kubectl -n cert-manager get secret cloudflare-api-token` |
@@ -44,7 +44,7 @@ Le token se met dans **`lab.env`** (`CLOUDFLARE_API_TOKEN=…`, fichier gitignor
 > défaut : les 2 derniers labels de `LAB_DOMAIN`) et `LAB_ACME_EMAIL` (défaut `admin@<zone>`).
 > Le `Certificate`/`Secret` TLS suit le domaine : `wildcard-<LAB_DOMAIN avec des tirets>-tls`.
 > Sans substitution, le solveur ne matcherait jamais ta zone et le certificat resterait en
-> attente. Cf. [`../README.md`](../README.md#-lab_domain--le-domaine-des-ui).
+> attente. Cf. [`../LISEZ-MOI.md`](../LISEZ-MOI.md#-lab_domain--le-domaine-des-ui).
 
 ## ⚡ Installation
 
@@ -184,4 +184,4 @@ curl -sS -o /dev/null -w '%{http_code} verify=%{ssl_verify_result}\n' \
 - [cert-manager — Gateway API integration](https://cert-manager.io/docs/usage/gateway/)
 - [cert-manager — DNS-01 Cloudflare](https://cert-manager.io/docs/configuration/acme/dns01/cloudflare/)
 - [Let's Encrypt — Rate limits](https://letsencrypt.org/docs/rate-limits/)
-- [`../envoy-gateway/README.md`](../envoy-gateway/README.md) — le Gateway qui porte ce certificat
+- [`../envoy-gateway/LISEZ-MOI.md`](../envoy-gateway/LISEZ-MOI.md) — le Gateway qui porte ce certificat

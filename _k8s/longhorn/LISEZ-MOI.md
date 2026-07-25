@@ -1,5 +1,5 @@
 <!-- i18n -->
-**English** · [Français](LISEZ-MOI.md)
+[English](README.md) · **Français**
 <!-- /i18n -->
 
 # 🐮 `longhorn/` — stockage bloc répliqué (Longhorn 1.12) sur Talos
@@ -207,7 +207,7 @@ kubectl apply -f _k8s/longhorn/httproute.yaml
 >   _k8s/longhorn/httproute.yaml | kubectl apply -f -
 > ```
 >
-> (cf. [`../README.md`](../README.md#-lab_domain--le-domaine-des-ui)).
+> (cf. [`../LISEZ-MOI.md`](../LISEZ-MOI.md#-lab_domain--le-domaine-des-ui)).
 
 | Interface | URL / commande | Auth |
 |---|---|---|
@@ -252,4 +252,4 @@ Cert wildcard `*.talos.lab.example.io` déjà porté par l'écouteur `https` (ce
 - [Longhorn — Talos Linux Support (1.12)](https://longhorn.io/docs/1.12.0/advanced-resources/os-distro-specific/talos-linux-support/)
 - [Longhorn — Quick Installation](https://longhorn.io/docs/1.12.0/deploy/install/)
 - [Talos Image Factory](https://factory.talos.dev/)
-- `talos/UPGRADE.md` §5 — ajouter les extensions à un cluster déjà installé.
+- `talos/MISE-A-JOUR.md` §5 — ajouter les extensions à un cluster déjà installé.

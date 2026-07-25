@@ -1,5 +1,5 @@
 <!-- i18n -->
-**English** · [Français](LISEZ-MOI.md)
+[English](README.md) · **Français**
 <!-- /i18n -->
 
 # 🐝 `cilium/` — CNI, IP LoadBalancer et annonce L2 (ARP)
@@ -14,7 +14,7 @@
 - **CNI** en mode tunnel **VXLAN**, épinglé sur l'interface host-only (cf. ⚠️ Pièges).
 - **IP LoadBalancer** : un pool `.200-.230` remplace le cloud provider absent.
 - **Annonce L2 (ARP)** : l'IP devient joignable depuis l'hôte, donc via Tailscale
-  (cf. [`../README.md`](../README.md), section « Accès distant »).
+  (cf. [`../LISEZ-MOI.md`](../LISEZ-MOI.md), section « Accès distant »).
 - **Observabilité réseau** : Hubble (relay + UI) est activé, pratique pour montrer les flux.
 
 ## 📋 Prérequis
@@ -58,7 +58,7 @@ ici si tu déroules la plateforme complète.
 | `l2announcements.enabled=true` | **active** le contrôleur qui répond à l'ARP ; sans lui la `CiliumL2AnnouncementPolicy` est ignorée |
 | `externalIPs.enabled=true` | prise en charge des `externalIPs` de Services |
 | `kubeProxyReplacement=false` | on garde le kube-proxy de Talos (cf. ⚠️ Pièges pour le remplacer) |
-| `envoy.enabled=false` | pas besoin de l'Envoy **embarqué** de Cilium : le lab utilise le contrôleur [`../envoy-gateway/`](../envoy-gateway/README.md), un composant distinct |
+| `envoy.enabled=false` | pas besoin de l'Envoy **embarqué** de Cilium : le lab utilise le contrôleur [`../envoy-gateway/`](../envoy-gateway/LISEZ-MOI.md), un composant distinct |
 | `cgroup.autoMount.enabled=false` + `cgroup.hostRoot=/sys/fs/cgroup` | adaptation **Talos** : le cgroupfs est déjà monté par l'OS |
 | `securityContext.capabilities.*` | capabilities **listées explicitement** (agent et `cleanCiliumState`) au lieu du mode privilégié : c'est la configuration documentée par Talos |
 | `hubble.*` + `bandwidthManager.enabled=true` | observabilité des flux + gestion de bande passante (démos) |
@@ -107,7 +107,7 @@ kubectl -n kube-system port-forward svc/hubble-ui 12000:80     # puis http://loc
   §9 du README racine au lieu de `cilium-up.sh`).
 - **VIP qui répond au `ping` depuis l'hôte mais pas depuis un peer Tailscale** → normal :
   l'ARP ne traverse pas un routeur. Il faut `--advertise-routes` sur l'hôte
-  (cf. [`../README.md`](../README.md)).
+  (cf. [`../LISEZ-MOI.md`](../LISEZ-MOI.md)).
 - **`--set autoDirectNodeRoutes=true` (ou `ipv4NativeRoutingCIDR`) est interdit ici** : ce sont
   des options de **routage natif**, incompatibles avec le mode tunnel. L'agent sort en `fatal`
   (« auto-direct-node-routes cannot be used with tunneling ») et boucle en `CrashLoopBackOff`.
@@ -126,4 +126,4 @@ kubectl -n kube-system port-forward svc/hubble-ui 12000:80     # puis http://loc
 - [Talos — Deploying Cilium](https://www.talos.dev/latest/kubernetes-guides/network/deploying-cilium/)
 - [Cilium — LoadBalancer IPAM](https://docs.cilium.io/en/stable/network/lb-ipam/)
 - [Cilium — L2 Announcements](https://docs.cilium.io/en/stable/network/l2-announcements/)
-- [`../envoy-gateway/README.md`](../envoy-gateway/README.md) — le consommateur du VIP `.200`
+- [`../envoy-gateway/LISEZ-MOI.md`](../envoy-gateway/LISEZ-MOI.md) — le consommateur du VIP `.200`

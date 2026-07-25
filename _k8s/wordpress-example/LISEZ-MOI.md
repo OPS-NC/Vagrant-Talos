@@ -1,5 +1,5 @@
 <!-- i18n -->
-**English** · [Français](LISEZ-MOI.md)
+[English](README.md) · **Français**
 <!-- /i18n -->
 
 # 📝 `wordpress-example/` — WordPress + MariaDB (démo de stockage persistant)
@@ -20,9 +20,9 @@
 
 | Prérequis | Pourquoi | Vérifier |
 |---|---|---|
-| **StorageClass `longhorn`** ([`../longhorn/`](../longhorn/README.md)) | les 2 PVC la nomment explicitement | `kubectl get sc longhorn` |
-| `main-gateway` + écouteur `https:443` ([`../envoy-gateway/`](../envoy-gateway/README.md)) | porte l'`HTTPRoute` | `kubectl get gateway -n envoy-gateway-system` |
-| Cert wildcard `READY=True` ([`../cert-manager/`](../cert-manager/README.md)) | HTTPS trusté | `kubectl -n envoy-gateway-system get certificate` |
+| **StorageClass `longhorn`** ([`../longhorn/`](../longhorn/LISEZ-MOI.md)) | les 2 PVC la nomment explicitement | `kubectl get sc longhorn` |
+| `main-gateway` + écouteur `https:443` ([`../envoy-gateway/`](../envoy-gateway/LISEZ-MOI.md)) | porte l'`HTTPRoute` | `kubectl get gateway -n envoy-gateway-system` |
+| Cert wildcard `READY=True` ([`../cert-manager/`](../cert-manager/LISEZ-MOI.md)) | HTTPS trusté | `kubectl -n envoy-gateway-system get certificate` |
 | DNS `wordpress.talos.lab.example.io → 192.168.56.200` (**DNS-only**) | hostname de la route | `curl --resolve` sinon (cf. ✅) |
 
 > ⚠️ **Aucun garde-fou : il n'y a pas de `*-up.sh` ici.** Le manifeste référence la StorageClass
@@ -31,7 +31,7 @@
 > `Pending` eux aussi. Vérifie `kubectl get sc` **avant**. Pour une démo sans Longhorn, remplace
 > `storageClassName: longhorn` par `local-path` dans les deux PVC — en assumant qu'un PV
 > `local-path` est **node-local et non répliqué** (cf.
-> [`../local-path-storage/`](../local-path-storage/README.md)).
+> [`../local-path-storage/`](../local-path-storage/LISEZ-MOI.md)).
 
 ## ⚡ Installation
 
@@ -49,7 +49,7 @@ Tout est dans ce seul fichier, namespace **`wordpress-test`** inclus.
 >   _k8s/wordpress-example/wordpress-mariadb.yaml | kubectl apply -f -
 > ```
 >
-> (cf. [`../README.md`](../README.md#-lab_domain--le-domaine-des-ui)).
+> (cf. [`../LISEZ-MOI.md`](../LISEZ-MOI.md#-lab_domain--le-domaine-des-ui)).
 
 > Trois endroits à couvrir dans ce manifeste : le `hostname` de l'`HTTPRoute` **et**
 > `WP_HOME`/`WP_SITEURL` (`WORDPRESS_CONFIG_EXTRA`) — WordPress génère ses URL depuis
@@ -109,7 +109,7 @@ voit les deux volumes se détacher puis se rattacher — et sur quel node ils so
 - **Des mots de passe en clair dans le manifeste.** Le `Secret mariadb` est écrit en
   `stringData` avec des valeurs d'exemple versionnées dans le dépôt : c'est un **support de
   formation**, pas un modèle. Hors lab, passer par un `Secret` créé hors Git (voire par
-  [`../vault-secret-operator/`](../vault-secret-operator/README.md), qui fait exactement ça).
+  [`../vault-secret-operator/`](../vault-secret-operator/LISEZ-MOI.md), qui fait exactement ça).
   Changer ces valeurs **après** le premier démarrage ne suffit pas : MariaDB n'initialise ses
   identifiants qu'à la création du `datadir`.
 - **PVC `Pending` sans erreur visible** → StorageClass `longhorn` absente (voir 📋 Prérequis) ou
@@ -136,4 +136,4 @@ kubectl delete -f _k8s/wordpress-example/wordpress-mariadb.yaml   # supprime le 
 
 - [Image Docker `wordpress` — variables d'environnement](https://hub.docker.com/_/wordpress)
 - [WordPress — `WP_HOME` / `WP_SITEURL` derrière un proxy](https://developer.wordpress.org/apis/wp-config-php/#wp-siteurl)
-- [`../longhorn/README.md`](../longhorn/README.md) — le stockage que cette démo exerce
+- [`../longhorn/LISEZ-MOI.md`](../longhorn/LISEZ-MOI.md) — le stockage que cette démo exerce

@@ -1,5 +1,5 @@
 <!-- i18n -->
-**English** · [Français](MISE-A-JOUR.md)
+[English](UPGRADE.md) · **Français**
 <!-- /i18n -->
 
 # ⬆️ Upgrade Talos (et Kubernetes)
@@ -131,7 +131,7 @@ talosctl -n 192.168.56.101 get extensions      # iscsi-tools + util-linux-tools 
 
 > 💡 Pour un cluster **neuf**, il est plus simple d'ajouter
 > `--config-patch @_k8s/longhorn/patch-longhorn.yaml` au `gen config` — voir
-> [`../_k8s/longhorn/README.md`](../_k8s/longhorn/README.md).
+> [`../_k8s/longhorn/LISEZ-MOI.md`](../_k8s/longhorn/LISEZ-MOI.md).
 
 ## ✅ 6. Après l'upgrade
 
@@ -196,4 +196,4 @@ Post-upgrade : Longhorn 5 nodes `Ready`, Argo CD et UI Longhorn servis en HTTPS 
 - [Talos — Upgrading Talos Linux](https://www.talos.dev/latest/talos-guides/upgrading-talos/)
 - [Talos — Upgrading Kubernetes](https://www.talos.dev/latest/kubernetes-guides/upgrading-kubernetes/)
 - [Image Factory](https://factory.talos.dev/) — extensions bakées dans l'installeur
-- [`../_k8s/longhorn/README.md`](../_k8s/longhorn/README.md) — prérequis Talos de Longhorn
+- [`../_k8s/longhorn/LISEZ-MOI.md`](../_k8s/longhorn/LISEZ-MOI.md) — prérequis Talos de Longhorn

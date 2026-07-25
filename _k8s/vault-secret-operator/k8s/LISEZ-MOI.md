@@ -1,5 +1,5 @@
 <!-- i18n -->
-**English** · [Français](LISEZ-MOI.md)
+[English](README.md) · **Français**
 <!-- /i18n -->
 
 # 🧾 `k8s/` — les CR **côté Kubernetes**
@@ -27,7 +27,7 @@ role, SA, namespace, audience, mount) donne `SecretSynced: false` dans les event
 | Vault configuré (`../vault/`) | l'identité doit exister **avant** le premier login | `vault list auth/kubernetes/role` |
 | Un `VaultConnection` joignable | `default` posé par `../values.yaml`, ou `01-vaultconnection.yaml` | `kubectl get vaultconnection -A` |
 
-Ordre global d'installation et vue d'ensemble : `../README.md`.
+Ordre global d'installation et vue d'ensemble : `../LISEZ-MOI.md`.
 
 ## ⚡ Appliquer
 
@@ -60,7 +60,7 @@ kubectl apply -f 50-demo-deployment.yaml    # app qui consomme les 3 Secret + re
 > neutre du dépôt public). Il doit rester **dans** l'`allowed_domains` du role PKI, lui-même
 > posé depuis `LAB_DOMAIN` par `../vault/00-secrets-engines.sh`. Si tu as ton propre domaine :
 > `sed 's/talos\.lab\.example\.io/talos.lab.mon-domaine.tld/g' 30-pki-tls.yaml | kubectl apply -f -`
-> (cf. [`../../README.md`](../../README.md#-lab_domain--le-domaine-des-ui)).
+> (cf. [`../../LISEZ-MOI.md`](../../LISEZ-MOI.md#-lab_domain--le-domaine-des-ui)).
 
 ## 🔧 Les fichiers
 
@@ -91,8 +91,8 @@ La boucle complète, la plus simple à observer. Objets créés (tous dans le ns
 ### `pg-dynamic-rotate/` — mot de passe PostgreSQL roté par Vault
 
 Static role : le **username reste fixe**, seul le mot de passe change ; le consommateur est
-relancé à chaque rotation. La config Vault correspondante est détaillée dans `../vault/README.md`,
-le scénario complet (prérequis PostgreSQL inclus) dans `../README.md`.
+relancé à chaque rotation. La config Vault correspondante est détaillée dans `../vault/LISEZ-MOI.md`,
+le scénario complet (prérequis PostgreSQL inclus) dans `../LISEZ-MOI.md`.
 
 | Objet | Détail |
 |---|---|
@@ -131,7 +131,7 @@ kubectl -n vault-secrets-operator logs deploy/vault-secrets-operator-controller-
   `../vault/00-secrets-engines.sh:19` monte le moteur `database` sur **`database/`** (pas de
   `-path=db`), et la policy `vso-dynamic-db.hcl` n'autorise que `db/creds/demo-app`. Résultat :
   `403`/`404` systématique. Correction côté Vault (`vault secrets enable -path=db database`) et
-  explication complète dans `../vault/README.md`. Le moteur `database` a **aussi** besoin d'une
+  explication complète dans `../vault/LISEZ-MOI.md`. Le moteur `database` a **aussi** besoin d'une
   connexion et d'un role `creds/demo-app` pointant une vraie base — laissés en commentaire dans le
   script.
 - **`50-demo-deployment.yaml` ne démarre pas si un des 3 Secret manque.** Aucune référence n'est
@@ -141,7 +141,7 @@ kubectl -n vault-secrets-operator logs deploy/vault-secrets-operator-controller-
 - **`02` et `03` sont deux alternatives, pas deux étapes.** Appliquer les deux crée deux `VaultAuth`
   pour le même role — inutile, et source de confusion sur lequel un CR utilise réellement.
 - **`SecretSynced: false`** : lire l'event du CR (`kubectl describe`). En pratique soit un login
-  refusé (role / SA / namespace / audience — cf. `../vault/README.md`), soit un `mount`/`path` faux.
+  refusé (role / SA / namespace / audience — cf. `../vault/LISEZ-MOI.md`), soit un `mount`/`path` faux.
 - **Le `Secret` change mais pas le pod** : il manque `rolloutRestartTargets`. Le `Secret` K8s est
   bien à jour (`kubectl get secret` le prouve), mais le process garde l'ancienne valeur en mémoire.
 - **`VaultPKISecret` refusé** : `commonName` hors des `allowed_domains` du role PKI, ou `ttl`

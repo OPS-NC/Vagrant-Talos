@@ -1,5 +1,5 @@
 <!-- i18n -->
-**English** · [Français](CLAUDE.fr.md)
+[English](CLAUDE.md) · **Français**
 <!-- /i18n -->
 
 # 🤖 CLAUDE.md

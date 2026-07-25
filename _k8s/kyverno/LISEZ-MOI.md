@@ -1,5 +1,5 @@
 <!-- i18n -->
-**English** · [Français](LISEZ-MOI.md)
+[English](README.md) · **Français**
 <!-- /i18n -->
 
 # ⚖️ `kyverno/` — policy engine Kubernetes + UI Policy Reporter
@@ -11,7 +11,7 @@
 
 > 🌐 **`talos.lab.example.io` est le domaine NEUTRE du dépôt (public)** : `kyverno-up.sh` le
 > remplace par `LAB_DOMAIN` (`lab.env`) au moment du `kubectl apply`. Cf.
-> [`../README.md`](../README.md#-lab_domain--le-domaine-des-ui).
+> [`../LISEZ-MOI.md`](../LISEZ-MOI.md#-lab_domain--le-domaine-des-ui).
 
 ## 🎯 À quoi ça sert
 
@@ -216,7 +216,7 @@ helm -n kyverno uninstall kyverno            # retire aussi les CRD → supprime
 kubectl delete ns kyverno
 ```
 
-> ⚠️ Si [`../trivy-operator/`](../trivy-operator/README.md) est installé, il **perd son UI** :
+> ⚠️ Si [`../trivy-operator/`](../trivy-operator/LISEZ-MOI.md) est installé, il **perd son UI** :
 > c'est Policy Reporter (namespace `kyverno`) qui l'héberge.
 
 ## 📚 Références
@@ -225,4 +225,4 @@ kubectl delete ns kyverno
 - [Kyverno — bibliothèque de policies](https://kyverno.io/policies/)
 - [Kyverno — PolicyException](https://kyverno.io/docs/exceptions/)
 - [Policy Reporter](https://kyverno.github.io/policy-reporter/)
-- [`../trivy-operator/README.md`](../trivy-operator/README.md) — le volet **détectif**, même UI
+- [`../trivy-operator/LISEZ-MOI.md`](../trivy-operator/LISEZ-MOI.md) — le volet **détectif**, même UI

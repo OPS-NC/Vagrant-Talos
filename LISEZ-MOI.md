@@ -1,5 +1,5 @@
 <!-- i18n -->
-**English** · [Français](LISEZ-MOI.md)
+[English](README.md) · **Français**
 <!-- /i18n -->
 
 # 🏠 🐧 VagrantLab-Talos
@@ -23,8 +23,8 @@ vagrant up                      # crée les VMs, elles bootent en mode maintenan
 | | |
 |---|---|
 | 📖 **Documentation navigable** | `make docs` puis ouvrir `docs/index.html` |
-| 📦 **Couche applicative** | [`_k8s/README.md`](_k8s/README.md) |
-| ⬆️ **Mises à jour Talos / K8s** | [`talos/UPGRADE.md`](talos/UPGRADE.md) |
+| 📦 **Couche applicative** | [`_k8s/LISEZ-MOI.md`](_k8s/LISEZ-MOI.md) |
+| ⬆️ **Mises à jour Talos / K8s** | [`talos/MISE-A-JOUR.md`](talos/MISE-A-JOUR.md) |
 
 ---
 
@@ -177,7 +177,7 @@ Variables lues par `cluster-up.sh` mais absentes du modèle (toutes ont un défa
 > 🌐 **`LAB_DOMAIN` : le dépôt est public, donc son défaut est neutre**
 > (`talos.lab.example.io`). Les manifestes `_k8s/` portent ce domaine ; les scripts
 > `*-up.sh` le remplacent à la volée par `LAB_DOMAIN` (`sed`), sans jamais réécrire les
-> fichiers versionnés. Mets **ton** domaine dans `lab.env` (cf. [`_k8s/README.md`](_k8s/README.md)).
+> fichiers versionnés. Mets **ton** domaine dans `lab.env` (cf. [`_k8s/LISEZ-MOI.md`](_k8s/LISEZ-MOI.md)).
 
 Le 1er control plane est toujours `talos-cp1` (`192.168.56.10`). Le nom de VM
 VirtualBox/Vagrant est **identique** au hostname Talos (cf. §8).
@@ -318,7 +318,7 @@ kubectl get nodes -o wide
 
 ## 📦 5. Et après : la couche applicative
 
-Le cluster nu ne fait rien d'utile. Tout le reste vit dans **[`_k8s/`](_k8s/README.md)** :
+Le cluster nu ne fait rien d'utile. Tout le reste vit dans **[`_k8s/`](_k8s/LISEZ-MOI.md)** :
 Cilium, Envoy Gateway, cert-manager, Longhorn, Vault, PostgreSQL, Prometheus/Loki, Kyverno,
 Trivy, MinIO…
 
@@ -329,7 +329,7 @@ Trivy, MinIO…
 ```
 
 Après le bootstrap, les nodes restent `NotReady` tant que le CNI n'est pas installé — c'est
-normal, `platform-up.sh` s'en charge. Voir [`_k8s/README.md`](_k8s/README.md) pour la chaîne
+normal, `platform-up.sh` s'en charge. Voir [`_k8s/LISEZ-MOI.md`](_k8s/LISEZ-MOI.md) pour la chaîne
 de dépendances complète et la liste des addons.
 
 > ⚠️ **Cette couche exige `CNI=cilium`** (le défaut). Elle repose sur un Service
@@ -367,7 +367,7 @@ dig +short argo.talos.lab.example.io      # doit répondre 192.168.56.200
 > (Let's Encrypt, cf. point b).
 
 > ℹ️ Le lab n'est donc joignable que depuis l'hôte, ou via un accès au réseau host-only
-> (Tailscale — voir [`_k8s/README.md`](_k8s/README.md#-accès-distant-tailscale--cloudflare)).
+> (Tailscale — voir [`_k8s/LISEZ-MOI.md`](_k8s/LISEZ-MOI.md#-accès-distant-tailscale--cloudflare)).
 > Un wildcard public qui pointe vers une IP privée est sans risque d'exploitation, mais il
 > publie l'existence du lab et son plan d'adressage : à toi de voir.
 
@@ -647,8 +647,8 @@ Références : [Talos Linux](https://www.talos.dev/) ·
 
 | `CNI=` | Patch Talos | Qui installe | IP `LoadBalancer` |
 |---|---|---|---|
-| **`cilium`** *(défaut)* | `cni-cilium.yaml` → `none` | `platform-up.sh` → [`_k8s/cilium/`](_k8s/cilium/README.md) | ✅ pool + annonce L2 (ARP) |
-| `calico` | `cni-calico.yaml` → `none` | `platform-up.sh` → [`_k8s/calico/`](_k8s/calico/README.md) | ❌ BGP seulement |
+| **`cilium`** *(défaut)* | `cni-cilium.yaml` → `none` | `platform-up.sh` → [`_k8s/cilium/`](_k8s/cilium/LISEZ-MOI.md) | ✅ pool + annonce L2 (ARP) |
+| `calico` | `cni-calico.yaml` → `none` | `platform-up.sh` → [`_k8s/calico/`](_k8s/calico/LISEZ-MOI.md) | ❌ BGP seulement |
 | `flannel` | `cni-flannel.yaml` | **Talos**, au bootstrap | ❌ |
 | `none` | `cni-none.yaml` | toi | ❌ |
 
@@ -672,7 +672,7 @@ bout. `calico` est là pour **comparer les CNI** et travailler les `NetworkPolic
 `flannel` pour un cluster nu, si tu veux juste explorer Talos.
 
 L'installation de Cilium (chart épinglé `1.19.6`, pool L2, `--set devices=enp0s8`) est
-documentée et scriptée dans **[`_k8s/cilium/README.md`](_k8s/cilium/README.md)** — c'est la
+documentée et scriptée dans **[`_k8s/cilium/LISEZ-MOI.md`](_k8s/cilium/LISEZ-MOI.md)** — c'est la
 source de vérité, `platform-up.sh` l'appelle pour toi.
 
 > ⚠️ **Calico n'annonce pas les IP de Service `LoadBalancer`.** Il ne sait le faire qu'en
@@ -680,7 +680,7 @@ source de vérité, `platform-up.sh` l'appelle pour toi.
 > Avec `CNI=calico` il faut donc **installer MetalLB** (mode L2) *et* adapter
 > `_k8s/envoy-gateway/Envoy-Proxy.yml`, qui épingle `loadBalancerClass:
 > io.cilium/l2-announcer` (`platform-up.sh` retire cette ligne hors Cilium). Marche à suivre
-> complète : [`_k8s/calico/README.md`](_k8s/calico/README.md).
+> complète : [`_k8s/calico/LISEZ-MOI.md`](_k8s/calico/LISEZ-MOI.md).
 
 > ⚠️ **Changer de CNI sur un cluster existant n'est pas supporté** : `vagrant destroy` puis
 > reconstruire. Deux CNI qui coexistent se disputent le réseau des pods.

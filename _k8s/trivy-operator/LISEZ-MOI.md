@@ -1,5 +1,5 @@
 <!-- i18n -->
-**English** · [Français](LISEZ-MOI.md)
+[English](README.md) · **Français**
 <!-- /i18n -->
 
 # 🔎 `trivy-operator/` — scanner de sécurité continu (Aqua Trivy Operator)
@@ -40,7 +40,7 @@
 
 | Prérequis | Pourquoi | Vérifier |
 |---|---|---|
-| [`../kyverno/`](../kyverno/README.md) installé | il fournit **Policy Reporter + l'UI** ; sans lui le script le signale et continue — Trivy tourne, mais l'UI unifiée n'a pas la source « trivy » | `helm -n kyverno status policy-reporter` |
+| [`../kyverno/`](../kyverno/LISEZ-MOI.md) installé | il fournit **Policy Reporter + l'UI** ; sans lui le script le signale et continue — Trivy tourne, mais l'UI unifiée n'a pas la source « trivy » | `helm -n kyverno status policy-reporter` |
 | Accès Internet depuis les nodes | chaque job de scan télécharge la **base de CVE** | `kubectl -n trivy-system logs deploy/trivy-operator` |
 | Rien côté Talos (une fois le node-collector coupé) | les jobs de scan tournent sans privilège | `kubectl -n trivy-system get pods` |
 
@@ -140,7 +140,7 @@ kubectl -n kyverno get configauditreports -o json | jq -r \
 Trivy Operator expose des métriques (compteurs de vulnérabilités par workload). Une fois
 **kube-prometheus-stack** installé (CRD `ServiceMonitor` présent), passe
 `serviceMonitor.enabled: true` dans `values.yaml` puis relance le script : les compteurs
-deviennent scrapables et alertables. Voir [`../observability/`](../observability/README.md).
+deviennent scrapables et alertables. Voir [`../observability/`](../observability/LISEZ-MOI.md).
 
 ## ⚠️ Pièges
 
@@ -165,4 +165,4 @@ deviennent scrapables et alertables. Voir [`../observability/`](../observability
 - [`aquasecurity/k8s-node-collector`](https://github.com/aquasecurity/k8s-node-collector) — le
   composant incompatible Talos (voir ses montages `hostPath`)
 - [Policy Reporter — plugin Trivy](https://kyverno.github.io/policy-reporter/)
-- [`../kyverno/README.md`](../kyverno/README.md) — le volet **préventif**, et l'UI partagée
+- [`../kyverno/LISEZ-MOI.md`](../kyverno/LISEZ-MOI.md) — le volet **préventif**, et l'UI partagée

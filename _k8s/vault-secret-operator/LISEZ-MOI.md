@@ -1,5 +1,5 @@
 <!-- i18n -->
-**English** · [Français](LISEZ-MOI.md)
+[English](README.md) · **Français**
 <!-- /i18n -->
 
 # 🔑 `vault-secret-operator/` — secrets Vault synchronisés en `Secret` K8s natifs
@@ -80,9 +80,9 @@ L'ordre compte : **Vault d'abord** (l'identité doit exister avant qu'un client 
 puis l'opérateur, puis les CR.
 
 ```bash
-# 1. Côté Vault : auth kubernetes + moteurs + policies + roles      -> voir vault/README.md
+# 1. Côté Vault : auth kubernetes + moteurs + policies + roles      -> voir vault/LISEZ-MOI.md
 export VAULT_ADDR=https://vault.talos.lab.example.io
-export VAULT_TOKEN=<root-token>                                  # cf. ../vault-cluster/README.md
+export VAULT_TOKEN=<root-token>                                  # cf. ../vault-cluster/LISEZ-MOI.md
 ./_k8s/vault-secret-operator/vault/talos-lab.sh
 
 # 2. L'opérateur (chart épinglé en 1.5.0)
@@ -93,7 +93,7 @@ helm upgrade --install vault-secrets-operator hashicorp/vault-secrets-operator \
   -f _k8s/vault-secret-operator/values.yaml
 kubectl -n vault-secrets-operator rollout status deploy/vault-secrets-operator-controller-manager
 
-# 3. Les CR côté cluster                                            -> voir k8s/README.md
+# 3. Les CR côté cluster                                            -> voir k8s/LISEZ-MOI.md
 kubectl apply -f _k8s/vault-secret-operator/k8s/nginx-test-vault/nginx-test-vault.yaml
 ```
 
@@ -124,8 +124,8 @@ kubectl get vaultconnection -A                  # le "default" posé par values.
 kubectl get vaultauth,vaultstaticsecret,vaultdynamicsecret,vaultpkisecret -A
 ```
 
-Les vérifications par scénario sont dans `k8s/README.md`, celles côté serveur dans
-`vault/README.md`.
+Les vérifications par scénario sont dans `k8s/LISEZ-MOI.md`, celles côté serveur dans
+`vault/LISEZ-MOI.md`.
 
 ## 🧪 Scénarios
 
@@ -145,7 +145,7 @@ vault kv put talos-lab/nginx-test-vault/config \
 kubectl -n nginx-test-vault rollout status deploy/nginx-test-vault
 ```
 
-Détail des objets créés : `k8s/README.md`. Détail de la config Vault : `vault/README.md`.
+Détail des objets créés : `k8s/LISEZ-MOI.md`. Détail de la config Vault : `vault/LISEZ-MOI.md`.
 
 ### 2. Rotation du mot de passe PostgreSQL par Vault (static role)
 
@@ -213,7 +213,7 @@ kubectl -n pg-rotate-demo get deploy pg-rotate-demo -o jsonpath='{.metadata.gene
 kubectl -n pg-rotate-demo get pods -l app=pg-rotate-demo -w
 ```
 
-Ce que le script écrit dans Vault : `vault/README.md`. Les objets K8s : `k8s/README.md`.
+Ce que le script écrit dans Vault : `vault/LISEZ-MOI.md`. Les objets K8s : `k8s/LISEZ-MOI.md`.
 
 > ⚠️ **Chaque rotation = un rollout du consommateur.** Avec `ROTATION_PERIOD=2m`, le pod alpine
 > redémarre toutes les 2 minutes ; remonter la période après la démo.
@@ -262,12 +262,12 @@ Ce que le script écrit dans Vault : `vault/README.md`. Les objets K8s : `k8s/RE
 - **Login refusé (`permission denied` / `403`)** : le SA ou le namespace du pod ne correspond pas au
   role Vault (`bound_service_account_*`), ou l'audience ne matche pas
   (`VaultAuth.spec.kubernetes.audiences` doit être dans les `audience` du role). C'est 90 % des
-  cas — le test de login « à blanc » de `vault/README.md` l'isole en une commande.
+  cas — le test de login « à blanc » de `vault/LISEZ-MOI.md` l'isole en une commande.
 - **Vault ne peut pas valider le JWT** : `auth/kubernetes/config` mal renseigné. Vault
   **in-cluster** : son SA doit avoir `system:auth-delegator` (le chart le fait via
   `server.authDelegator.enabled=true`). Vault **externe** : `kubernetes_host` +
   `kubernetes_ca_cert` + `token_reviewer_jwt` sont tous les trois obligatoires. Et attention au bug
-  de `vault/01-kubernetes-auth.sh` documenté dans `vault/README.md`.
+  de `vault/01-kubernetes-auth.sh` documenté dans `vault/LISEZ-MOI.md`.
 - **`disable_iss_validation`** : `true` par défaut depuis Vault 1.9 — ne pas le repasser à `false`
   avec des tokens projetés courts (l'`iss` varie), sinon tous les logins cassent.
 - **Secret jamais mis à jour dans le pod** : il manque `rolloutRestartTargets`. Le `Secret` K8s est
@@ -278,7 +278,7 @@ Ce que le script écrit dans Vault : `vault/README.md`. Les objets K8s : `k8s/RE
 - **CA TLS de Vault** : en HTTPS avec une CA privée, fournir `caCertSecretRef` au `VaultConnection`,
   sinon `x509: certificate signed by unknown authority`. `skipTLSVerify: true` = lab uniquement.
 - **La démo `k8s/20-dynamic-db.yaml` est cassée par un décalage de mount** (`db` vs `database`) :
-  détail et correctif dans `vault/README.md`.
+  détail et correctif dans `vault/LISEZ-MOI.md`.
 
 ## 📚 Références
 

@@ -1,5 +1,5 @@
 <!-- i18n -->
-**English** · [Français](LISEZ-MOI.md)
+[English](README.md) · **Français**
 <!-- /i18n -->
 
 # 🧺 `minio-s3/cluster/` — MinIO distribué 4 nœuds (erasure coding) sur local-path
@@ -64,7 +64,7 @@ En interne : `http://minio.minio-cluster.svc.cluster.local:9000`.
 
 Image épinglée dans `minio-cluster.yaml` :
 **`docker.io/pgsty/minio:RELEASE.2026-06-18T00-00-00Z`** (fork Pigsty — récent + console
-d'admin, cf. `../README.md`).
+d'admin, cf. `../LISEZ-MOI.md`).
 
 ## 🔧 Ce que fait le script
 
@@ -180,11 +180,11 @@ Puis repointer les jobs de backup (`MINIO_ENDPOINT` / `endpointURL`) vers
   `https://minio-cluster-console.talos.lab.example.io` dans le manifeste — domaine **neutre** du
   dépôt public, substitué par `minio-cluster-up.sh` depuis `LAB_DOMAIN` (`lab.env`) en même temps
   que les hostnames des `HTTPRoute`. Un `kubectl apply` direct garde le domaine d'exemple et
-  casse les redirections de login. Cf. [`../../README.md`](../../README.md#-lab_domain--le-domaine-des-ui).
+  casse les redirections de login. Cf. [`../../LISEZ-MOI.md`](../../LISEZ-MOI.md#-lab_domain--le-domaine-des-ui).
 
 ## 📚 Références
 
-- `../README.md` — MinIO standalone, et le détail du **pourquoi le fork `pgsty/minio`**.
+- `../LISEZ-MOI.md` — MinIO standalone, et le détail du **pourquoi le fork `pgsty/minio`**.
 - `../../local-path-storage/` — la StorageClass consommée par les 4 drives.
 - `../../cloudnative-pg/` — les sauvegardes PostgreSQL qui visent ce cluster.
 - [Documentation MinIO (Kubernetes)](https://min.io/docs/minio/kubernetes/upstream/) — déploiement

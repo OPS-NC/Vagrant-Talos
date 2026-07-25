@@ -1,5 +1,5 @@
 <!-- i18n -->
-**English** · [Français](LISEZ-MOI.md)
+[English](README.md) · **Français**
 <!-- /i18n -->
 
 # 📈 `observability/` — métriques (Prometheus/Grafana) + logs (Loki/Alloy)
@@ -10,7 +10,7 @@
 
 > 🌐 **`talos.lab.example.io` est le domaine NEUTRE du dépôt (public)** : `observability-up.sh`
 > le remplace par `LAB_DOMAIN` (`lab.env`) dans les values Helm **et** les `HTTPRoute`. Cf.
-> [`../README.md`](../README.md#-lab_domain--le-domaine-des-ui).
+> [`../LISEZ-MOI.md`](../LISEZ-MOI.md#-lab_domain--le-domaine-des-ui).
 
 ## 🎯 À quoi ça sert
 
