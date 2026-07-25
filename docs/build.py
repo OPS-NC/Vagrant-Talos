@@ -23,7 +23,7 @@ Utilisation :
 
 BILINGUE : chaque page existe en deux versions, dans le MÊME dossier —
 l'anglais porte le nom canonique (`README.md`, `CLAUDE.md`, `UPGRADE.md`), le
-français son miroir (`LISEZ-MOI.md`, `CLAUDE.fr.md`, `MISE-A-JOUR.md`), cf.
+français son miroir (`LISEZ-MOI.md`, `MISE-A-JOUR.md`), cf.
 MIROIRS. L'anglais est la langue par défaut ; le sélecteur EN/FR de la barre
 latérale bascule tout le site et l'URL (`#fr/_k8s-longhorn-readme`).
 
@@ -67,9 +67,13 @@ FORCER: set[str] = set()
 # nom du fichier anglais (canonique) -> nom de son miroir français, même dossier.
 MIROIRS = {
     "README.md":  "LISEZ-MOI.md",
-    "CLAUDE.md":  "CLAUDE.fr.md",
     "UPGRADE.md": "MISE-A-JOUR.md",
 }
+
+# Pages ANGLAIS SEULEMENT par choix : pas de miroir français, et donc pas de badge
+# « pas encore traduit » — ce serait signaler un oubli là où il y a une décision.
+# CLAUDE.md s'adresse aux agents de code, dont la langue de travail est l'anglais.
+SANS_MIROIR = {"CLAUDE.md"}
 LANGUES = ("en", "fr")
 LANGUE_DEFAUT = "en"
 
@@ -123,7 +127,7 @@ LIBELLES: dict[str, dict[str, str]] = {
 # (titres par langue, emoji, chemins ANGLAIS ou dossiers, dans l'ordre d'affichage)
 GROUPES: list[tuple[dict[str, str], str, list[str]]] = [
     ({"en": "The lab",       "fr": "Le lab"},           "🏠",
-     ["README.md", "CLAUDE.md", "talos/UPGRADE.md"]),
+     ["README.md", "talos/UPGRADE.md"]),
     ({"en": "Platform",      "fr": "Plateforme"},       "📦", ["_k8s/README.md"]),
     ({"en": "Networking",    "fr": "Réseau"},           "🌐",
      ["_k8s/cilium", "_k8s/calico", "_k8s/envoy-gateway", "_k8s/cert-manager"]),
@@ -139,6 +143,9 @@ GROUPES: list[tuple[dict[str, str], str, list[str]]] = [
      ["_k8s/kyverno", "_k8s/trivy-operator"]),
     ({"en": "Demos",         "fr": "Démos"},            "🧪",
      ["_k8s/argocd", "_k8s/wordpress-example"]),
+    # En dernier, volontairement : CLAUDE.md ne s'adresse pas au lecteur du lab mais
+    # aux agents de code, et il occupait la 2e place du menu.
+    ({"en": "AI agent",      "fr": "Agent IA"},         "🤖", ["CLAUDE.md"]),
 ]
 AUTRES = {"en": "Other", "fr": "Autres"}
 
@@ -902,8 +909,10 @@ def rendre(docs: list[dict]) -> list[dict]:
                 "chemin": chemin,
                 "groupe": doc["groupe"][langue],
                 "suivi": doc["suivi"],
-                # un document sans miroir s'affiche en anglais dans le menu français
-                "traduit": doc["chemins"]["en"] != doc["chemins"]["fr"] or langue == "en",
+                # un document sans miroir s'affiche en anglais dans le menu français ;
+                # ceux de SANS_MIROIR l'assument et ne portent pas de badge
+                "traduit": (doc["chemins"]["en"] != doc["chemins"]["fr"]
+                            or langue == "en" or doc["chemin"] in SANS_MIROIR),
             })
     return rendus
 
@@ -1057,7 +1066,11 @@ def main() -> int:
     for doc in docs:
         etat = "" if doc["suivi"] else "  (non commité)"
         miroir = doc["chemins"]["fr"]
-        etat += "" if miroir != doc["chemin"] else "  (⚠️ pas de miroir FR)"
+        if miroir == doc["chemin"]:
+            # distinguer l'oubli (à corriger) du choix assumé (SANS_MIROIR)
+            etat += ("  (EN seulement, assumé)" if doc["chemin"] in SANS_MIROIR
+                     else "  (⚠️ pas de miroir FR)")
+            miroir = "—"
         print(f"   {doc['emoji']} {doc['chemin']:44s} ↔ {miroir}{etat}")
 
     if alertes:
