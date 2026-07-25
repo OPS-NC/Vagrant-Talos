@@ -24,6 +24,15 @@ operator:
   # l'operator reste au repos entre deux — donc PAS de scan constant.
   scannerReportTTL: "30m"
 
+  # node-collector DÉSACTIVÉ : il est INCOMPATIBLE avec Talos. Il bind-monte /etc/systemd,
+  # /lib/systemd, /etc/kubernetes… or Talos n'a pas de systemd et / + /etc sont read-only
+  # → `CreateContainerError: mkdir /etc/systemd: read-only file system` (et, avant ça, refus
+  # PodSecurity baseline sur hostPID/hostPath). On coupe donc les deux scanners qui le
+  # lancent. Les scans images/config/secrets/RBAC continuent normalement ; seuls les
+  # rapports « node » (infra assessment + cluster compliance) disparaissent.
+  infraAssessmentScannerEnabled: false
+  clusterComplianceEnabled: false
+
 trivy:
   # Mode Standalone : chaque job embarque son scan (simple). Pour un gros cluster, préférer
   # `builtInTrivyServer: true` (un serveur trivy partagé garde la base de CVE en cache).
