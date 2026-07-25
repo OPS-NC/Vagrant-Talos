@@ -55,8 +55,10 @@ that is the guard to run after renaming a heading or adding a page.
 ## ⚠️ Pitfalls (already hit — do not repeat)
 
 - **Do NOT re-run `cluster-up.sh` against an already-installed cluster**: `wait_maintenance`
-  loops on `get disks --insecure` **with no timeout**; a node in secure mode never answers
-  → infinite hang. To grow a running cluster: README §6.1.
+  polls `get disks --insecure`, which a node in secure mode never answers. Both waits are
+  bounded since #53 (`WAIT_MAINTENANCE`, 300 s; `WAIT_SECURE`, 600 s — both overridable) and
+  fail with a message naming the two likely causes, so this no longer hangs forever — it just
+  wastes the timeout. To grow a running cluster: README §6.1.
 - **Do NOT regenerate `_out/` (nor `FORCE=1`) on a running cluster**: new secrets/CA ⇒ broken
   cluster. Only regenerate after `vagrant destroy`.
 - **Addressing**: topology and addressing live in **`lab.env`** (single source read by both the
@@ -71,8 +73,9 @@ that is the guard to run after renaming a heading or adding a page.
   `talos/cluster-up.sh` (fallback default) and `lab.env`. Both defaults are now aligned on
   `v1.13.7` — keep them that way on every bump, and remember that `INSTALLER_IMAGE` (factory
   image, tag included) overrides `TALOS_VERSION` for what actually lands on disk.
-- **`CP_MEM=2048` (the template default) starves etcd** as soon as you stack `_k8s/` addons:
-  3 GB minimum, 4 GB in practice (`observability/` requires it).
+- **Never lower `CP_MEM` below `3072`**: 2 GB control planes starve etcd as soon as `_k8s/`
+  addons stack up. The template now ships `4096` (and so does the `Vagrantfile` fallback),
+  which `observability/` requires. Cost of the default topology: 18 GB of host RAM.
 - **Renaming VMs**: destroy (`vagrant destroy`) BEFORE changing `s[:name]` in the
   `Vagrantfile`, otherwise the old VMs become orphans in VirtualBox.
 - **`vagrant up` fails after a `destroy`** (`VERR_ALREADY_EXISTS` on the `temp_clone_…`

@@ -55,8 +55,10 @@ c'est le garde-fou à lancer après avoir renommé un titre ou ajouté une page.
 ## ⚠️ Pièges (déjà rencontrés — ne pas refaire)
 
 - **Ne PAS relancer `cluster-up.sh` sur un cluster déjà installé** : `wait_maintenance` fait
-  `get disks --insecure` en boucle **sans timeout** ; un node en mode sécurisé n'y répond
-  jamais → blocage infini. Pour agrandir un cluster en route : README §6.1.
+  `get disks --insecure`, à quoi un node en mode sécurisé ne répond jamais. Les deux attentes
+  sont bornées depuis #53 (`WAIT_MAINTENANCE`, 300 s ; `WAIT_SECURE`, 600 s — surchargeables)
+  et échouent avec un message nommant les deux causes probables : plus de blocage infini,
+  juste le timeout perdu. Pour agrandir un cluster en route : README §6.1.
 - **Ne PAS régénérer `_out/` (ni `FORCE=1`) sur un cluster en route** : nouveaux secrets/CA
   ⇒ cluster cassé. Régénérer uniquement après `vagrant destroy`.
 - **Adressage** : topologie et adressage vivent dans **`lab.env`** (source unique lue par le
@@ -72,8 +74,10 @@ c'est le garde-fou à lancer après avoir renommé un titre ou ajouté une page.
   alignés sur `v1.13.7` — les garder ainsi à chaque bump, et se souvenir que
   `INSTALLER_IMAGE` (image factory, tag inclus) masque `TALOS_VERSION` pour ce qui est
   réellement installé sur disque.
-- **`CP_MEM=2048` (défaut du modèle) affame etcd** dès qu'on empile les addons `_k8s/` :
-  3 Go minimum, 4 Go en pratique (`observability/` l'exige).
+- **Ne jamais descendre `CP_MEM` sous `3072`** : des control planes à 2 Go affament etcd dès
+  qu'on empile les addons `_k8s/`. Le modèle livre désormais `4096` (comme le défaut de repli
+  du `Vagrantfile`), ce qu'`observability/` exige. Coût de la topologie par défaut : 18 Go de
+  RAM hôte.
 - **Renommer les VMs** : détruire (`vagrant destroy`) AVANT de changer `s[:name]` dans le
   `Vagrantfile`, sinon les anciennes VMs deviennent orphelines dans VirtualBox.
 - **`vagrant up` KO après `destroy`** (`VERR_ALREADY_EXISTS` au rename `temp_clone_…`) :

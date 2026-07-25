@@ -147,7 +147,7 @@ cp lab.env.example lab.env
 | `INSTALLER_IMAGE` | Image Factory image | installer with extensions (iscsi for Longhorn) |
 | `CONTROL_PLANES` | `3` | `1` = single, `3` = HA with a VIP |
 | `WORKERS` | `3` | number of workers |
-| `CP_MEM` / `CP_CPU` | `2048` / `2` | control plane resources |
+| `CP_MEM` / `CP_CPU` | `4096` / `2` | control plane resources (**never below `3072`**: etcd) |
 | `WK_MEM` / `WK_CPU` | `2048` / `2` | worker resources |
 | `CNI` | `cilium` | `cilium`, `calico`, `flannel` or `none` (see §9) |
 | `LAB_DOMAIN` | `talos.lab.example.io` | UI domain (`*.<domain>`: wildcard TLS + `HTTPRoute`) |
@@ -170,12 +170,24 @@ Variables read by `cluster-up.sh` but missing from the template (all have a defa
 > lays down, `platform-up.sh` decides what Helm installs afterwards, and two disagreeing
 > values give you two competing CNIs — a broken pod network.
 
-> ⚠️ **`CP_MEM=2048` is too tight.** As soon as you stack the `_k8s/` addons, 2 GB control
-> planes starve etcd and the cluster collapses under load. Move to `CP_MEM=4096`
-> (`observability/` requires it explicitly).
+> ⚠️ **Do not lower `CP_MEM` below `3072`.** 2 GB control planes starve etcd as soon as the
+> `_k8s/` addons stack up, and the cluster collapses under load — `observability/` requires
+> 4 GB explicitly. That is why the template ships `4096`.
 
-> 💡 For a one-off try, a real environment variable wins without touching `lab.env`:
-> `CONTROL_PLANES=1 vagrant up`.
+> 💰 **What the default topology costs**: 3 × 4 GB + 3 × 2 GB = **18 GB of RAM**, 12 vCPU and
+> ~6 × 20 GB of disk. A 16 GB host cannot run it — use the minimal lab below.
+
+> 💡 **Minimal lab (2 VMs, ~6 GB).** Enough for Talos itself and the base platform
+> (`platform-up.sh`); the data addons expect the default 3 workers (Longhorn replicates ×3,
+> `observability/` wants 4 GB control planes). Edit **`lab.env`**:
+> ```bash
+> CONTROL_PLANES=1
+> WORKERS=1
+> ```
+> ⚠️ **Edit the file, do not just export the variable.** `CONTROL_PLANES=1 vagrant up` only
+> affects `vagrant`: `cluster-up.sh` re-reads `lab.env` and would wait for control planes
+> `.20`/`.30` that were never created. To override on the fly, pass the variable to **both**
+> commands: `CONTROL_PLANES=1 vagrant up && CONTROL_PLANES=1 ./talos/cluster-up.sh`.
 
 > 🌐 **`LAB_DOMAIN`: the repo is public, so its default is neutral**
 > (`talos.lab.example.io`). The `_k8s/` manifests carry that domain; the `*-up.sh` scripts
@@ -213,7 +225,9 @@ CNI=flannel      ./talos/cluster-up.sh               # CNI laid down by Talos, n
 
 > ⚠️ **NEVER re-run `cluster-up.sh` on an already-installed cluster.** Its maintenance mode
 > wait polls the nodes with `--insecure`; an already-installed node (secure mode) never
-> answers → infinite hang. To grow a running cluster, see §6.1.
+> answers. The wait is bounded (`WAIT_MAINTENANCE`, 300 s) and then fails with an explicit
+> message — but it still wasted five minutes and applied nothing. To grow a running cluster,
+> see §6.1.
 
 > ⚠️ **NEVER regenerate `_out/` (nor `FORCE=1`) on a running cluster**: `gen config` produces
 > new secrets and new CAs, which breaks the existing cluster. Do it only after a

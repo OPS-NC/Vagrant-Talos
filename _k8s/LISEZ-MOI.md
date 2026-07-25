@@ -221,8 +221,8 @@ routable telle quelle.
 - **Les émetteurs de métriques sont coupés par défaut.** `serviceMonitor`/`podMonitor` sont
   à `false` chez trivy-operator, CloudNativePG et node-problem-detector : Prometheus ne
   collecte rien d'eux tant que tu ne les as pas basculés après l'install d'observability.
-- **`CP_MEM=2048` (défaut de `lab.env.example`) est sous le minimum réel.** Empiler ces
-  addons sur des control planes à 2 Go affame etcd. Passe à `CP_MEM=4096`.
+- **Ne descends jamais `CP_MEM` sous `3072`.** Empiler ces addons sur des control planes à
+  2 Go affame etcd. `lab.env.example` livre `4096`, ce qu'`observability/` exige.
 - **Un `git add -A` peut publier des secrets d'addons locaux.** `_k8s/databasement/` est
   désormais gitignoré pour cette raison — vérifie `git status` avant de commiter.
 

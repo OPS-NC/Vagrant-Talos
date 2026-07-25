@@ -40,7 +40,7 @@
 
 > ⚠️ **RAM des control-plane.** Sur des CP à **3 Go**, empiler cette pile sur le reste du lab
 > **sature etcd/apiserver** (incident vécu : OOM en boucle, API injoignable). À **4 Go**, la
-> pile tient à ~50 % de la mémoire CP. Or `lab.env.example` livre **`CP_MEM=2048`** — sous le
+> pile tient à ~50 % de la mémoire CP. Tout ce qui est sous **`CP_MEM=3072`** est sous le
 > minimum, et 2 Go **affament déjà etcd** tout seuls. Corriger `lab.env` **avant** d'installer,
 > puis `vagrant reload` des CP **un par un**.
 
