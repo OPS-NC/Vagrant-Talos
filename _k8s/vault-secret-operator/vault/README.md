@@ -1,253 +1,259 @@
-# ⚙️ `vault/` — la configuration **côté Vault**
+<!-- i18n -->
+**English** · [Français](LISEZ-MOI.md)
+<!-- /i18n -->
 
-> La moitié serveur du câblage VSO. Ces scripts créent tout ce que le VSO va **consommer** :
-> la méthode d'auth Kubernetes, les moteurs de secrets, les policies (moindre privilège) et les
-> roles qui relient une identité K8s à une policy. Le pendant côté cluster est dans `../k8s/`.
+# ⚙️ `vault/` — the configuration **on the Vault side**
 
-## 🎯 Le contrat d'identité
+> The server half of the VSO wiring. These scripts create everything the VSO is going to
+> **consume**: the Kubernetes auth method, the secrets engines, the policies (least privilege) and
+> the roles that tie a K8s identity to a policy. The cluster-side counterpart is in `../k8s/`.
 
-VSO présente le **token JWT** du `ServiceAccount` de l'app. Vault le valide via l'API
-**TokenReview** du cluster, puis vérifie qu'il correspond à un **role**
-(`bound_service_account_names` + `_namespaces` + `audience`). Si oui, Vault renvoie un token
-porteur des **policies** du role — donc des droits de lecture précis, et rien d'autre.
+## 🎯 The identity contract
+
+VSO presents the **JWT token** of the app's `ServiceAccount`. Vault validates it through the
+cluster's **TokenReview** API, then checks that it matches a **role**
+(`bound_service_account_names` + `_namespaces` + `audience`). If it does, Vault returns a token
+carrying the role's **policies** — so precise read rights, and nothing else.
 
 ```
-JWT du SA (audience "vault")  ─►  auth/kubernetes/config (TokenReview)  ─►  role  ─►  policy
+SA JWT (audience "vault")     ─►  auth/kubernetes/config (TokenReview)  ─►  role  ─►  policy
                                                                                        │
                                     kvv2/ · database/ · pki/ · transit/  ◄─────────────┘
 ```
 
-Casser un seul maillon (nom du SA, namespace, audience, chemin de policy, nom de mount) donne un
-`403` côté VSO et un `SecretSynced: false` sur le CR. C'est l'écrasante majorité des pannes.
+Break a single link (SA name, namespace, audience, policy path, mount name) and you get a `403` on
+the VSO side and a `SecretSynced: false` on the CR. That is the overwhelming majority of failures.
 
-## 📋 Prérequis
+## 📋 Prerequisites
 
-| Prérequis | Pourquoi | Vérifier |
+| Prerequisite | Why | Verify |
 |---|---|---|
-| CLI `vault` sur l'hôte | tous les scripts l'appellent | `vault version` |
-| `VAULT_ADDR` **exporté** | sinon le CLI tape `https://127.0.0.1:8200` | `echo $VAULT_ADDR` |
-| `VAULT_TOKEN` **exporté** (root/admin) | activer des moteurs et écrire des policies | `vault token lookup` |
-| Vault **descellé** | un Vault scellé refuse tout | `vault status` → `Sealed false` |
-| `KUBECONFIG` (uniquement `pg-dynamic-rotate.sh`) | lit le mot de passe superuser CNPG | `kubectl get nodes` |
+| `vault` CLI on the host | every script calls it | `vault version` |
+| `VAULT_ADDR` **exported** | otherwise the CLI hits `https://127.0.0.1:8200` | `echo $VAULT_ADDR` |
+| `VAULT_TOKEN` **exported** (root/admin) | enabling engines and writing policies | `vault token lookup` |
+| Vault **unsealed** | a sealed Vault refuses everything | `vault status` → `Sealed false` |
+| `KUBECONFIG` (only for `pg-dynamic-rotate.sh`) | reads the CNPG superuser password | `kubectl get nodes` |
 
 ```bash
-export VAULT_ADDR="https://vault.talos.lab.example.io"   # ou http://127.0.0.1:8200 en port-forward
-export VAULT_TOKEN="<root-token>"                    # cf. ../../vault-cluster/README.md
-vault status                                         # doit répondre Sealed=false
+export VAULT_ADDR="https://vault.talos.lab.example.io"   # or http://127.0.0.1:8200 via port-forward
+export VAULT_TOKEN="<root-token>"                    # see ../../vault-cluster/README.md
+vault status                                         # must answer Sealed=false
 ```
 
-Port-forward si Vault n'est pas exposé :
+Port-forward if Vault is not exposed:
 `kubectl -n vault port-forward svc/vault-active 8200:8200`.
 
-> ⚠️ **`VAULT_ADDR`/`VAULT_TOKEN` posés dans `lab.env` n'ont AUCUN effet** : aucun script ne lit ce
-> fichier. Il faut les **exporter** (ou `set -a; . ./lab.env; set +a`). Détail et précautions dans
-> `../../vault-cluster/README.md` (section Pièges).
+> ⚠️ **`VAULT_ADDR`/`VAULT_TOKEN` set in `lab.env` have NO effect**: no script reads that file. You
+> have to **export** them (or `set -a; . ./lab.env; set +a`). Details and precautions in
+> `../../vault-cluster/README.md` (Pitfalls section).
 
-## ⚡ Deux parcours
+## ⚡ Two paths
 
-Le dossier contient **deux jeux de scripts** qui ne servent pas la même chose. Ne pas les mélanger :
-ils utilisent des mounts, des namespaces et des noms de role différents.
+The directory holds **two sets of scripts** that do not serve the same purpose. Do not mix them:
+they use different mounts, namespaces and role names.
 
-### Parcours A — le lab réel (testé)
+### Path A — the real lab (tested)
 
 ```bash
-./_k8s/vault-secret-operator/vault/talos-lab.sh          # auth k8s + moteur talos-lab/ + démo
-./_k8s/vault-secret-operator/vault/pg-dynamic-rotate.sh  # moteur database/ + rotation PG
+./_k8s/vault-secret-operator/vault/talos-lab.sh          # k8s auth + talos-lab/ engine + demo
+./_k8s/vault-secret-operator/vault/pg-dynamic-rotate.sh  # database/ engine + PG rotation
 ```
 
-C'est le chemin qui tourne vraiment : mount KV-v2 **`talos-lab/`** (un sous-dossier par appli) et
-rotation d'un mot de passe PostgreSQL par static role. Les démos K8s correspondantes sont
-`../k8s/nginx-test-vault/` et `../k8s/pg-dynamic-rotate/`.
+This is the path that actually runs: KV-v2 mount **`talos-lab/`** (one subdirectory per app) and
+rotation of a PostgreSQL password through a static role. The matching K8s demos are
+`../k8s/nginx-test-vault/` and `../k8s/pg-dynamic-rotate/`.
 
-### Parcours B — la démo pédagogique (mounts `kvv2/`, `pki/`, `transit/`)
+### Path B — the teaching demo (mounts `kvv2/`, `pki/`, `transit/`)
 
 ```bash
 cd _k8s/vault-secret-operator/vault
-bash 00-secrets-engines.sh                 # moteurs + un secret de démo + CA PKI + clé transit
-MODE=incluster bash 01-kubernetes-auth.sh   # auth/kubernetes (voir le piège plus bas !)
+bash 00-secrets-engines.sh                 # engines + a demo secret + PKI CA + transit key
+MODE=incluster bash 01-kubernetes-auth.sh   # auth/kubernetes (see the pitfall below!)
 bash 02-roles.sh                            # policies + roles vso-static/-dynamic/-pki/-transit
 ```
 
-Elle sert de support de lecture pour les CR numérotés de `../k8s/` (`10-`, `20-`, `30-`, `40-`).
-Deux de ses trois scripts ont des défauts documentés en ⚠️ **Pièges** — les lire avant.
+It serves as reading material for the numbered CRs in `../k8s/` (`10-`, `20-`, `30-`, `40-`). Two
+of its three scripts have flaws documented under ⚠️ **Pitfalls** — read them first.
 
-## 🔧 Ce que chaque script écrit dans Vault
+## 🔧 What each script writes into Vault
 
-### `00-secrets-engines.sh` — les moteurs de secrets
+### `00-secrets-engines.sh` — the secrets engines
 
-| Objet Vault | Commande | Note |
+| Vault object | Command | Note |
 |---|---|---|
-| `kvv2/` | `vault secrets enable -path=kvv2 -version=2 kv` | secrets statiques |
-| `kvv2/demo/app` | `vault kv put … username password` | secret de démo, **écrasé à chaque relance** |
-| `database/` | `vault secrets enable database` | ⚠️ monté sur **`database/`**, pas `db/` — cf. Pièges |
-| `pki/` | `enable -path=pki pki` + `secrets tune -max-lease-ttl=87600h` | 10 ans de bail max |
-| CA racine PKI | `vault write pki/root/generate/internal common_name=$LAB_DOMAIN ttl=87600h` | `LAB_DOMAIN` (lab.env, défaut `talos.lab.example.io`) ; ⚠️ **empile** une CA par relance — cf. Pièges |
-| `pki/config/urls` | `issuing_certificates` + `crl_distribution_points` sur `$VAULT_ADDR` | dépend de `VAULT_ADDR` |
-| `pki/roles/demo` | `allowed_domains=$LAB_DOMAIN allow_subdomains=true max_ttl=72h` RSA 2048 | borne ce que le `VaultPKISecret` peut demander — le CN de `30-pki-tls.yaml` doit y rester |
-| `transit/` + clé `vso-client-cache` | `enable transit` ; `write -f transit/keys/vso-client-cache` | chiffrement du cache client VSO |
+| `kvv2/` | `vault secrets enable -path=kvv2 -version=2 kv` | static secrets |
+| `kvv2/demo/app` | `vault kv put … username password` | demo secret, **overwritten on every run** |
+| `database/` | `vault secrets enable database` | ⚠️ mounted on **`database/`**, not `db/` — see Pitfalls |
+| `pki/` | `enable -path=pki pki` + `secrets tune -max-lease-ttl=87600h` | 10 years of max lease |
+| PKI root CA | `vault write pki/root/generate/internal common_name=$LAB_DOMAIN ttl=87600h` | `LAB_DOMAIN` (lab.env, default `talos.lab.example.io`); ⚠️ **stacks** one CA per run — see Pitfalls |
+| `pki/config/urls` | `issuing_certificates` + `crl_distribution_points` on `$VAULT_ADDR` | depends on `VAULT_ADDR` |
+| `pki/roles/demo` | `allowed_domains=$LAB_DOMAIN allow_subdomains=true max_ttl=72h` RSA 2048 | bounds what the `VaultPKISecret` may request — the CN of `30-pki-tls.yaml` must stay inside it |
+| `transit/` + key `vso-client-cache` | `enable transit` ; `write -f transit/keys/vso-client-cache` | encryption of the VSO client cache |
 
-La connexion et le role du moteur `database` sont laissés **en commentaire** dans le script (ils
-dépendent de ta base). Le parcours A, lui, les écrit pour de vrai (`pg-dynamic-rotate.sh`).
+The connection and the role of the `database` engine are left **commented out** in the script (they
+depend on your database). Path A, on the other hand, writes them for real
+(`pg-dynamic-rotate.sh`).
 
-### `01-kubernetes-auth.sh` — la méthode d'auth
+### `01-kubernetes-auth.sh` — the auth method
 
-Deux modes, selon où tourne Vault. C'est le point qui bloque le plus.
+Two modes, depending on where Vault runs. This is the step that blocks people the most.
 
-**`MODE=incluster`** (notre cas) — Vault appelle TokenReview avec le token de **son propre pod** :
-son `ServiceAccount` doit porter le ClusterRole `system:auth-delegator`, ce que le chart
-`hashicorp/vault` fait par défaut (`server.authDelegator.enabled=true`). La config se réduit alors
-à `kubernetes_host` ; `token_reviewer_jwt` et `kubernetes_ca_cert` restent vides (Vault utilise le
-CA monté dans son conteneur). `disable_iss_validation` reste à `true` (défaut ≥ Vault 1.9).
+**`MODE=incluster`** (our case) — Vault calls TokenReview with the token of **its own pod**: its
+`ServiceAccount` must carry the `system:auth-delegator` ClusterRole, which the `hashicorp/vault`
+chart does by default (`server.authDelegator.enabled=true`). The config then boils down to
+`kubernetes_host`; `token_reviewer_jwt` and `kubernetes_ca_cert` stay empty (Vault uses the CA
+mounted in its container). `disable_iss_validation` stays `true` (the default since Vault 1.9).
 
-**`MODE=external`** — Vault est hors du cluster, il ne peut rien déduire. Il faut lui fournir :
-1. un `ServiceAccount` **délégateur** côté K8s (`system:auth-delegator`) ;
-2. son **token long** (`token_reviewer_jwt`), avec lequel Vault validera les JWT des apps ;
-3. l'**endpoint** de l'API (`KUBE_HOST`, par défaut la VIP du lab `https://192.168.56.5:6443`,
-   cf. `talos/patch-cp.yaml`) **et** le CA de cette API (`SA_CA_CRT`).
+**`MODE=external`** — Vault sits outside the cluster and can infer nothing. You have to give it:
+1. a **delegator** `ServiceAccount` on the K8s side (`system:auth-delegator`);
+2. its **long-lived token** (`token_reviewer_jwt`), with which Vault will validate the apps' JWTs;
+3. the API **endpoint** (`KUBE_HOST`, by default the lab's VIP `https://192.168.56.5:6443`,
+   see `talos/patch-cp.yaml`) **and** the CA of that API (`SA_CA_CRT`).
 
 ```bash
 MODE=external KUBE_HOST=https://192.168.56.5:6443 SA_JWT=… SA_CA_CRT=… bash 01-kubernetes-auth.sh
 ```
 
-Les commandes `kubectl` qui produisent `SA_JWT` / `SA_CA_CRT` sont en commentaire dans le script.
+The `kubectl` commands that produce `SA_JWT` / `SA_CA_CRT` are commented out in the script.
 
 ### `02-roles.sh` — policies + roles
 
-Charge les 4 fichiers de `policies/`, puis crée 4 roles `auth/kubernetes`. Tous en `token_ttl=15m`
-et `audience=vault` (qui **doit** matcher `VaultAuth.spec.kubernetes.audiences` côté K8s).
+Loads the 4 files from `policies/`, then creates 4 `auth/kubernetes` roles. All with
+`token_ttl=15m` and `audience=vault` (which **must** match `VaultAuth.spec.kubernetes.audiences`
+on the K8s side).
 
-| Role Vault | SA / namespace bindé | Policy |
+| Vault role | Bound SA / namespace | Policy |
 |---|---|---|
 | `vso-static` | `vso-app` / `demo` | `vso-static-kv` |
 | `vso-dynamic` | `vso-app` / `demo` | `vso-dynamic-db` |
 | `vso-pki` | `vso-app` / `demo` | `vso-pki` |
 | `vso-transit` | `vault-secrets-operator-controller-manager` / `vault-secrets-operator` | `vso-transit` |
 
-`vso-transit` est le role de **l'opérateur lui-même** (chiffrement de son cache client), pas d'une
+`vso-transit` is the role of **the operator itself** (encryption of its client cache), not of an
 app.
 
-### `talos-lab.sh` — le moteur du lab
+### `talos-lab.sh` — the lab engine
 
-Auth Kubernetes (`kubernetes_host=https://kubernetes.default.svc`), moteur KV-v2 **`talos-lab/`**,
-secret `talos-lab/nginx-test-vault/config` (3 clés `APP_*`), policy
-`talos-lab-nginx-test-vault` (lecture de `talos-lab/data|metadata/nginx-test-vault/*` seulement) et
-role `nginx-test-vault` bindé au SA/ns `nginx-test-vault`.
+Kubernetes auth (`kubernetes_host=https://kubernetes.default.svc`), KV-v2 engine
+**`talos-lab/`**, secret `talos-lab/nginx-test-vault/config` (3 `APP_*` keys), policy
+`talos-lab-nginx-test-vault` (read on `talos-lab/data|metadata/nginx-test-vault/*` only) and role
+`nginx-test-vault` bound to the SA/ns `nginx-test-vault`.
 
-Ajouter une appli = un sous-dossier `talos-lab/<appli>/…`, une policy scopée à ce sous-dossier, un
-role dédié au SA/ns de l'appli. Ce script est le gabarit à copier.
+Adding an app = a `talos-lab/<app>/…` subdirectory, a policy scoped to that subdirectory, a role
+dedicated to the app's SA/ns. This script is the template to copy.
 
-### `pg-dynamic-rotate.sh` — rotation du mot de passe PostgreSQL
+### `pg-dynamic-rotate.sh` — PostgreSQL password rotation
 
-Vault prend en gestion un user PG **fixe** (`vault-rotate`) et n'en **rotate que le mot de passe**
-(static role) — la chaîne de connexion de l'app reste stable. Vue d'ensemble du scénario et
-prérequis PostgreSQL : `../README.md`.
+Vault takes over a **fixed** PG user (`vault-rotate`) and **rotates its password only** (static
+role) — the app's connection string stays stable. Scenario overview and PostgreSQL prerequisites:
+`../README.md`.
 
-| Objet Vault | Commande (résumé) | Rôle |
+| Vault object | Command (summary) | Purpose |
 |---|---|---|
-| `database/` | `vault secrets enable database` | moteur « base de données » |
-| `database/config/pg-demo` | `plugin_name=postgresql-database-plugin allowed_roles=vault-rotate connection_url=…@pg-demo-rw.cnpg-demo…/postgres?sslmode=require username=postgres password=<superuser> password_authentication=scram-sha-256` | **où** Vault se connecte et **comment** (admin `postgres`, TLS). Le mot de passe est lu dans le Secret `pg-demo-superuser` par le script. |
-| `database/static-roles/vault-rotate` | `db_name=pg-demo username=vault-rotate rotation_period=$ROTATION_PERIOD` | prend en gestion le user PG fixe. `db_name` = nom de la **connexion**, pas de la base. `ROTATION_PERIOD` par défaut `3h`. |
-| Policy `pg-rotate-demo` | `path "database/static-creds/vault-rotate" { capabilities = ["read"] }` | droit minimal : lire ce seul static-creds |
-| Role `auth/kubernetes/role/pg-rotate-demo` | SA `pg-rotate` / ns `pg-rotate-demo`, `audience=vault` | **qui** peut se logger et **quels** droits il reçoit |
+| `database/` | `vault secrets enable database` | the "database" engine |
+| `database/config/pg-demo` | `plugin_name=postgresql-database-plugin allowed_roles=vault-rotate connection_url=…@pg-demo-rw.cnpg-demo…/postgres?sslmode=require username=postgres password=<superuser> password_authentication=scram-sha-256` | **where** Vault connects and **how** (admin `postgres`, TLS). The password is read from the `pg-demo-superuser` Secret by the script. |
+| `database/static-roles/vault-rotate` | `db_name=pg-demo username=vault-rotate rotation_period=$ROTATION_PERIOD` | takes over the fixed PG user. `db_name` = the name of the **connection**, not of the database. `ROTATION_PERIOD` defaults to `3h`. |
+| Policy `pg-rotate-demo` | `path "database/static-creds/vault-rotate" { capabilities = ["read"] }` | minimal right: read that one static-creds |
+| Role `auth/kubernetes/role/pg-rotate-demo` | SA `pg-rotate` / ns `pg-rotate-demo`, `audience=vault` | **who** may log in and **which** rights they get |
 
 ```bash
-vault read database/static-creds/vault-rotate     # username (fixe) + password courant + ttl restant
-vault write -f database/rotate-role/vault-rotate  # forcer une rotation immédiate
+vault read database/static-creds/vault-rotate     # username (fixed) + current password + remaining ttl
+vault write -f database/rotate-role/vault-rotate  # force an immediate rotation
 ```
 
-## 🛡️ Les policies
+## 🛡️ The policies
 
-Une policy = un usage, scopée au chemin exact. Aucun wildcard de mount.
+One policy = one use, scoped to the exact path. No mount wildcard.
 
-| Fichier | Autorise |
+| File | Allows |
 |---|---|
-| `policies/vso-static-kv.hcl` | `read` sur `kvv2/data/demo/app` + `kvv2/metadata/demo/app` |
-| `policies/vso-dynamic-db.hcl` | `read` sur `db/creds/demo-app` (⚠️ mount `db/` — cf. Pièges) + `update` sur `sys/leases/renew\|revoke` |
-| `policies/vso-pki.hcl` | `create`/`update` sur `pki/issue/demo` et `pki/revoke` |
-| `policies/vso-transit-cache.hcl` | `encrypt`/`decrypt` de la clé `vso-client-cache` (opérateur) |
-| `policies/talos-lab-nginx-test-vault.hcl` | `read` sur `talos-lab/data\|metadata/nginx-test-vault/*` |
+| `policies/vso-static-kv.hcl` | `read` on `kvv2/data/demo/app` + `kvv2/metadata/demo/app` |
+| `policies/vso-dynamic-db.hcl` | `read` on `db/creds/demo-app` (⚠️ mount `db/` — see Pitfalls) + `update` on `sys/leases/renew\|revoke` |
+| `policies/vso-pki.hcl` | `create`/`update` on `pki/issue/demo` and `pki/revoke` |
+| `policies/vso-transit-cache.hcl` | `encrypt`/`decrypt` with the `vso-client-cache` key (operator) |
+| `policies/talos-lab-nginx-test-vault.hcl` | `read` on `talos-lab/data\|metadata/nginx-test-vault/*` |
 
-> ℹ️ **KV-v2** : le chemin de policy est `<mount>/data/<path>` pour les données et
-> `<mount>/metadata/<path>` pour les versions — **pas** `<mount>/<path>`. Erreur classique.
+> ℹ️ **KV-v2**: the policy path is `<mount>/data/<path>` for the data and
+> `<mount>/metadata/<path>` for the versions — **not** `<mount>/<path>`. Classic mistake.
 
-## ✅ Vérifier
+## ✅ Verify
 
 ```bash
 vault status                                       # Sealed=false
 vault secrets list                                 # kvv2/, database/, pki/, transit/, talos-lab/
-vault auth list                                    # kubernetes/ présent
-vault read auth/kubernetes/config                  # kubernetes_host DOIT être une vraie URL
+vault auth list                                    # kubernetes/ present
+vault read auth/kubernetes/config                  # kubernetes_host MUST be a real URL
 vault list auth/kubernetes/role                     # vso-*, nginx-test-vault, pg-rotate-demo
 vault policy list
-vault kv get kvv2/demo/app                          # secret de démo (parcours B)
-vault kv get talos-lab/nginx-test-vault/config       # secret du lab (parcours A)
-vault list pki/issuers                              # UNE seule CA attendue (cf. Pièges)
+vault kv get kvv2/demo/app                          # demo secret (path B)
+vault kv get talos-lab/nginx-test-vault/config       # lab secret (path A)
+vault list pki/issuers                              # exactly ONE CA expected (see Pitfalls)
 
-# Test de login « à blanc », sans passer par VSO — isole les problèmes d'identité :
+# Dry-run login test, without going through VSO — isolates identity problems:
 JWT=$(kubectl -n demo create token vso-app --audience=vault)
-vault write auth/kubernetes/login role=vso-static jwt="$JWT"   # doit renvoyer un token + sa policy
+vault write auth/kubernetes/login role=vso-static jwt="$JWT"   # must return a token + its policy
 ```
 
-## ⚠️ Pièges
+## ⚠️ Pitfalls
 
-- **La démo « dynamic DB » ne peut pas fonctionner en l'état — décalage de mount.**
-  `00-secrets-engines.sh:19` fait `vault secrets enable database`, **sans `-path`** : le moteur est
-  donc monté sur **`database/`**. Or `../k8s/20-dynamic-db.yaml:11` demande `mount: db` et
-  `policies/vso-dynamic-db.hcl:5` n'autorise que `db/creds/demo-app`. Le `VaultDynamicSecret` ne
-  peut renvoyer qu'un **403 ou un 404**, quoi qu'on fasse par ailleurs. Pour aligner le tout sur
-  `db/`, il faut monter le moteur au bon endroit :
+- **The "dynamic DB" demo cannot work as it stands — mount mismatch.**
+  `00-secrets-engines.sh:19` runs `vault secrets enable database`, **without `-path`**: the engine
+  is therefore mounted on **`database/`**. But `../k8s/20-dynamic-db.yaml:11` asks for `mount: db`
+  and `policies/vso-dynamic-db.hcl:5` only allows `db/creds/demo-app`. The `VaultDynamicSecret`
+  can only return a **403 or a 404**, whatever else you do. To line everything up on `db/`, mount
+  the engine in the right place:
   ```bash
-  vault secrets enable -path=db database      # au lieu de : vault secrets enable database
+  vault secrets enable -path=db database      # instead of: vault secrets enable database
   ```
-  (Le parcours A n'est pas concerné : `pg-dynamic-rotate.sh` écrit et lit cohéremment `database/`.)
-- **`01-kubernetes-auth.sh` en mode `incluster` casse tous les logins.** La ligne 26 écrit
-  `kubernetes_host="https://\$KUBERNETES_PORT_443_TCP_ADDR:443"` : le `\$` est un `$` **littéral**
-  en bash, et Vault ne fait aucune substitution d'environnement sur les valeurs de config. Vault
-  stocke donc la chaîne telle quelle, et toute authentification via `auth/kubernetes` échoue.
-  Le script frère fait correctement `kubernetes_host="https://kubernetes.default.svc"`
-  (`talos-lab.sh:22`). Diagnostic :
+  (Path A is not affected: `pg-dynamic-rotate.sh` writes and reads `database/` consistently.)
+- **`01-kubernetes-auth.sh` in `incluster` mode breaks every login.** Line 26 writes
+  `kubernetes_host="https://\$KUBERNETES_PORT_443_TCP_ADDR:443"`: the `\$` is a **literal** `$` in
+  bash, and Vault performs no environment substitution on config values. Vault therefore stores
+  the string as-is, and any authentication through `auth/kubernetes` fails.
+  The sibling script gets it right with `kubernetes_host="https://kubernetes.default.svc"`
+  (`talos-lab.sh:22`). Diagnosis:
   ```bash
-  vault read auth/kubernetes/config     # si kubernetes_host contient un "$", c'est ce bug
-  vault write auth/kubernetes/config kubernetes_host="https://kubernetes.default.svc"   # correctif
+  vault read auth/kubernetes/config     # if kubernetes_host contains a "$", this is the bug
+  vault write auth/kubernetes/config kubernetes_host="https://kubernetes.default.svc"   # fix
   ```
-- **Les scripts `00-`/`01-`/`02-` ne sont PAS idempotents, contrairement à ce que dit leur
-  en-tête.** Trois raisons distinctes :
-  - `00-secrets-engines.sh:16` (`vault kv put kvv2/demo/app …`) et `talos-lab.sh:31-34`
-    (`APP_SECRET_TOKEN`) **réécrasent la valeur** et créent une **nouvelle version KV** à chaque
-    relance. Si tu as fait tourner le secret pour observer la resync du VSO, relancer le script
-    remet silencieusement la valeur d'origine.
-  - `00-secrets-engines.sh:35-36` : depuis Vault 1.11 (multi-issuers), `pki/root/generate/internal`
-    **n'échoue plus** sur un mount déjà configuré — il ajoute simplement un **nouvel émetteur**.
-    Le garde-fou `|| echo "(CA racine déjà générée)"` ne se déclenche donc jamais, et chaque
-    relance **empile une CA racine de plus**. Contrôler avec `vault list pki/issuers` et supprimer
-    les doublons (`vault delete pki/issuer/<id>`).
-  - `pg-dynamic-rotate.sh` réécrit `database/config/pg-demo` et le static role à chaque passage.
-    C'est le mécanisme prévu pour changer `ROTATION_PERIOD`, mais ce n'est pas neutre.
-- **Aucune garde d'environnement dans `00-`/`01-`/`02-`**, contrairement à `talos-lab.sh:14-15` et
-  `pg-dynamic-rotate.sh:21-22` qui refusent de démarrer sans `VAULT_ADDR`/`VAULT_TOKEN`. Sans
-  `VAULT_ADDR`, le CLI tape silencieusement `https://127.0.0.1:8200` ; le script ne s'arrête qu'à
-  la ligne 38 de `00-` (`${VAULT_ADDR}` sous `set -u` → *unbound variable*), donc **après** avoir
-  déjà tenté d'écrire. Exporter les deux variables avant de lancer quoi que ce soit.
-- **`00-secrets-engines.sh:11` masque toutes les erreurs Vault.** Le helper
-  `enable() { vault secrets enable "$@" 2>/dev/null || echo "  (déjà activé : $*)"; }` avale
-  `stderr` : un `Vault is sealed`, un `permission denied` ou un `connection refused` s'affichent
-  comme **« (déjà activé) »**. Le script s'interrompra bien à la commande suivante (`set -e`), mais
-  avec un diagnostic trompeur. En cas de doute, relancer la commande à la main sans `2>/dev/null`.
-- **`permission denied` au login** : le SA/namespace du pod ne matche pas
-  `bound_service_account_names`/`_namespaces`, ou l'**audience** du JWT ≠ `audience` du role. Le
-  test de login « à blanc » de la section ✅ isole le problème sans impliquer VSO.
-- **`error validating token: … 403`** : le reviewer n'a pas `system:auth-delegator` (in-cluster), ou
-  le `token_reviewer_jwt` est faux/expiré (externe).
-- **Ne pas remettre `disable_iss_validation=false`** : le défaut est `true` depuis Vault 1.9, et
-  l'`iss` des tokens projetés varie → logins cassés.
-- **Secrets de démo en clair dans les scripts.** `00-secrets-engines.sh` et `talos-lab.sh` posent
-  des valeurs bidon, versionnées dans git. C'est assumé pour un lab ; en prod, les valeurs
-  s'injectent hors git (`vault kv put … @-` depuis un pipe, ou un vrai flux d'approvisionnement).
+- **The `00-`/`01-`/`02-` scripts are NOT idempotent, contrary to what their header claims.**
+  Three distinct reasons:
+  - `00-secrets-engines.sh:16` (`vault kv put kvv2/demo/app …`) and `talos-lab.sh:31-34`
+    (`APP_SECRET_TOKEN`) **overwrite the value** and create a **new KV version** on every run. If
+    you rotated the secret to watch the VSO resync, re-running the script silently puts the
+    original value back.
+  - `00-secrets-engines.sh:35-36`: since Vault 1.11 (multi-issuers), `pki/root/generate/internal`
+    **no longer fails** on an already configured mount — it simply adds a **new issuer**.
+    The `|| echo "(CA racine déjà générée)"` guard therefore never fires, and every run **stacks
+    one more root CA**. Check with `vault list pki/issuers` and delete the duplicates
+    (`vault delete pki/issuer/<id>`).
+  - `pg-dynamic-rotate.sh` rewrites `database/config/pg-demo` and the static role on every pass.
+    That is the intended mechanism for changing `ROTATION_PERIOD`, but it is not a no-op.
+- **No environment guard in `00-`/`01-`/`02-`**, unlike `talos-lab.sh:14-15` and
+  `pg-dynamic-rotate.sh:21-22`, which refuse to start without `VAULT_ADDR`/`VAULT_TOKEN`. Without
+  `VAULT_ADDR`, the CLI silently hits `https://127.0.0.1:8200`; the script only stops at line 38 of
+  `00-` (`${VAULT_ADDR}` under `set -u` → *unbound variable*), so **after** it has already tried to
+  write. Export both variables before running anything.
+- **`00-secrets-engines.sh:11` hides every Vault error.** The helper
+  `enable() { vault secrets enable "$@" 2>/dev/null || echo "  (déjà activé : $*)"; }` swallows
+  `stderr`: a `Vault is sealed`, a `permission denied` or a `connection refused` all show up as
+  **"(déjà activé)"**. The script will indeed stop at the next command (`set -e`), but with a
+  misleading diagnosis. When in doubt, re-run the command by hand without `2>/dev/null`.
+- **`permission denied` at login**: the pod's SA/namespace does not match
+  `bound_service_account_names`/`_namespaces`, or the JWT's **audience** ≠ the role's `audience`.
+  The dry-run login test in the ✅ section isolates the problem without involving VSO.
+- **`error validating token: … 403`**: the reviewer lacks `system:auth-delegator` (in-cluster), or
+  the `token_reviewer_jwt` is wrong/expired (external).
+- **Do not set `disable_iss_validation=false` again**: the default has been `true` since Vault 1.9,
+  and the `iss` of projected tokens varies → broken logins.
+- **Demo secrets in cleartext in the scripts.** `00-secrets-engines.sh` and `talos-lab.sh` write
+  dummy values, versioned in git. That is accepted for a lab; in production, values are injected
+  outside git (`vault kv put … @-` from a pipe, or a real provisioning pipeline).
 
-## 📚 Références
+## 📚 References
 
 - [Kubernetes auth method](https://developer.hashicorp.com/vault/docs/auth/kubernetes)
 - [Kubernetes auth — HTTP API](https://developer.hashicorp.com/vault/api-docs/auth/kubernetes)
-- [Policies Vault](https://developer.hashicorp.com/vault/docs/concepts/policies)
-- [Moteur `database` — static roles](https://developer.hashicorp.com/vault/docs/secrets/databases#static-roles)
-- [Moteur PKI — multi-issuers](https://developer.hashicorp.com/vault/docs/secrets/pki/considerations)
+- [Vault policies](https://developer.hashicorp.com/vault/docs/concepts/policies)
+- [`database` engine — static roles](https://developer.hashicorp.com/vault/docs/secrets/databases#static-roles)
+- [PKI engine — multi-issuers](https://developer.hashicorp.com/vault/docs/secrets/pki/considerations)

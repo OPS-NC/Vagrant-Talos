@@ -1,19 +1,23 @@
-# 🩺 `node-problem-detector/` — santé des nodes (NodeConditions + Events), adapté Talos
+<!-- i18n -->
+**English** · [Français](LISEZ-MOI.md)
+<!-- /i18n -->
 
-> **[node-problem-detector](https://github.com/kubernetes/node-problem-detector)** (NPD) : un
-> DaemonSet qui tourne sur **chaque node** (control-plane inclus), lit le journal du noyau et
-> remonte les problèmes bas-niveau à Kubernetes en **NodeConditions** et **Events**.
+# 🩺 `node-problem-detector/` — node health (NodeConditions + Events), adapted to Talos
 
-## 🎯 À quoi ça sert
+> **[node-problem-detector](https://github.com/kubernetes/node-problem-detector)** (NPD): a
+> DaemonSet that runs on **every node** (control planes included), reads the kernel log and
+> reports low-level problems to Kubernetes as **NodeConditions** and **Events**.
 
-Directement motivé par l'incident **cp2** (guest figé) : NPD aurait produit un event
-`TaskHung`/`OOMKilling` **visible via `kubectl`**, au lieu d'un simple `NotReady` opaque.
+## 🎯 Purpose
 
-### Ce qu'il détecte (kernel-monitor, via `/dev/kmsg`)
+Directly motivated by the **cp2** incident (frozen guest): NPD would have produced a
+`TaskHung`/`OOMKilling` event **visible through `kubectl`**, instead of an opaque bare `NotReady`.
 
-| Signal noyau | Remontée |
+### What it detects (kernel-monitor, via `/dev/kmsg`)
+
+| Kernel signal | Reported as |
 |---|---|
-| `Killed process … total-vm:…` (OOM-killer) | Event `OOMKilling` |
+| `Killed process … total-vm:…` (OOM killer) | Event `OOMKilling` |
 | `task … blocked for more than … seconds` | Event `TaskHung` |
 | `unregister_netdevice: waiting for …` | Event `UnregisterNetDevice` |
 | NULL pointer dereference / `divide error` | Event `KernelOops` |
@@ -21,92 +25,90 @@ Directement motivé par l'incident **cp2** (guest figé) : NPD aurait produit un
 | `Remounting filesystem read-only` | Condition **`ReadonlyFilesystem=True`** |
 | `task docker:… blocked for more than … seconds` | Condition **`KernelDeadlock=True`** |
 
-NPD maintient en continu ces deux conditions sur chaque node (`KernelDeadlock`,
-`ReadonlyFilesystem`, à `False` en temps normal) : c'est dessus qu'on alerte.
+NPD keeps these two conditions continuously up to date on every node (`KernelDeadlock`,
+`ReadonlyFilesystem`, `False` in normal times): that is what you alert on.
 
-### Adaptation Talos (important)
+### Talos adaptation (important)
 
-- **kernel-monitor seulement** (`/config/kernel-monitor.json`, lecture de `/dev/kmsg`). Le
-  chart charge par défaut *kernel-monitor **+ docker-monitor***, et les moniteurs upstream
-  restants reposent sur `journald` : **ni docker ni systemd n'existent sur Talos** (pas de
-  `/var/log/journal`) → ils échouent. `values.yaml` réduit donc `settings.log_monitors` au seul
-  kernel-monitor.
-- **Namespace en PodSecurity `privileged`** : NPD tourne en `privileged` (accès `/dev/kmsg`),
-  refusé par le défaut cluster Talos `baseline`. Le script labellise le namespace.
-- **Tolérations** `NoSchedule/Exists` → NPD tourne **aussi sur les control-plane** (cp1/2/3).
+- **kernel-monitor only** (`/config/kernel-monitor.json`, reading `/dev/kmsg`). The chart loads
+  *kernel-monitor **+ docker-monitor*** by default, and the remaining upstream monitors rely on
+  `journald`: **neither docker nor systemd exists on Talos** (no `/var/log/journal`) → they fail.
+  So `values.yaml` reduces `settings.log_monitors` to kernel-monitor alone.
+- **Namespace in PodSecurity `privileged`**: NPD runs `privileged` (access to `/dev/kmsg`),
+  which the Talos cluster default `baseline` rejects. The script labels the namespace.
+- **`NoSchedule/Exists` tolerations** → NPD runs **on the control planes too** (cp1/2/3).
 
-## ⚡ Installation
+## ⚡ Install
 
 ```bash
 ./_k8s/node-problem-detector/node-problem-detector-up.sh
 ```
 
-Version épinglée : chart **`deliveryhero/node-problem-detector` 2.3.14** (app **v0.8.19**),
-surchargeable par `NPD_VERSION=…`. Aucun prérequis : ni stockage, ni Gateway, ni CRD.
+Pinned version: chart **`deliveryhero/node-problem-detector` 2.3.14** (app **v0.8.19**),
+overridable with `NPD_VERSION=…`. No prerequisites: no storage, no Gateway, no CRD.
 
-## 🔧 Ce que fait le script
+## 🔧 What the script does
 
-1. crée le namespace `node-problem-detector` et le labellise
-   `pod-security.kubernetes.io/{enforce,warn,audit}=privileged` ;
-2. installe le chart avec `values.yaml` (kernel-monitor seul, `privileged`, tolérations,
-   métriques sur `:20257`) et attend le DaemonSet.
+1. creates the `node-problem-detector` namespace and labels it
+   `pod-security.kubernetes.io/{enforce,warn,audit}=privileged`;
+2. installs the chart with `values.yaml` (kernel-monitor only, `privileged`, tolerations,
+   metrics on `:20257`) and waits for the DaemonSet.
 
-## ✅ Vérifier
+## ✅ Verify
 
 ```bash
-kubectl -n node-problem-detector get pods -o wide          # 1 pod par node (CP + workers), 1/1
-# Conditions posées par NPD (False = sain) :
+kubectl -n node-problem-detector get pods -o wide          # 1 pod per node (CP + workers), 1/1
+# Conditions set by NPD (False = healthy):
 kubectl get nodes -o json | jq -r '.items[] | .metadata.name as $n
   | .status.conditions[] | select(.type|test("KernelDeadlock|ReadonlyFilesystem"))
   | "\($n)  \(.type)=\(.status)"'
-# Logs d'un agent (doit charger UNIQUEMENT kernel-monitor, 0 erreur) :
+# Logs of one agent (must load ONLY kernel-monitor, 0 errors):
 kubectl -n node-problem-detector logs ds/node-problem-detector | grep -E 'kernel-monitor|Problem detector started'
 ```
 
-## 🧪 Tester une détection (optionnel)
+## 🧪 Test a detection (optional)
 
-Injecter une entrée kmsg de test sur un node déclenche l'event NPD — il faut un pod privilégié
-sur le node (Talos n'a pas de shell) :
+Injecting a test kmsg entry on a node triggers the NPD event — you need a privileged pod on the
+node (Talos has no shell):
 
 ```bash
-# depuis un pod privilégié qui a /dev/kmsg :
+# from a privileged pod that has /dev/kmsg:
 echo "task test:1234 blocked for more than 120 seconds." > /dev/kmsg   # -> event TaskHung
 kubectl get events -A --field-selector reason=TaskHung
 ```
 
-## 📈 Métriques
+## 📈 Metrics
 
-NPD expose des métriques Prometheus sur `:20257` (`metrics.enabled: true`), mais **le
-ServiceMonitor est coupé** : le CRD n'existe qu'après `../observability/`. Une fois cet addon
-installé, passer `metrics.serviceMonitor.enabled: true` dans `values.yaml` et relancer le
-script → compteurs `problem_counter` / `problem_gauge` par type de problème.
+NPD exposes Prometheus metrics on `:20257` (`metrics.enabled: true`), but **the ServiceMonitor is
+off**: the CRD only exists after `../observability/`. Once that component is installed, set
+`metrics.serviceMonitor.enabled: true` in `values.yaml` and re-run the script →
+`problem_counter` / `problem_gauge` counters per problem type.
 
-## ⚠️ Pièges
+## ⚠️ Pitfalls
 
-- **`settings.custom_monitors: []` dans `values.yaml` ne fait RIEN.** Cette clé **n'existe pas**
-  dans le chart 2.3.14 : les vraies clés sont `settings.custom_monitor_definitions` (map de
-  fichiers de config montés dans `/custom-config`) et `settings.custom_plugin_monitors` (liste,
-  vide par défaut). Helm accepte silencieusement une valeur inconnue → aucune erreur, aucun
-  effet. Le commentaire du fichier laisse croire à une désactivation explicite ; en réalité les
-  plugin-monitors sont déjà vides par défaut, et c'est **`log_monitors`** (bien réel) qui fait
-  tout le travail d'adaptation Talos.
-- **La condition `KernelDeadlock` ne passera (presque) jamais à `True` sur Talos.** Dans
-  `kernel-monitor.json` (v0.8.19) la seule règle permanente qui la déclenche est le motif
-  `task docker:\w+ blocked for more than \w+ seconds` — un processus **`docker`**, qui n'existe
-  pas sur Talos (containerd). Un hang réel remontera en **event `TaskHung`** (règle temporaire,
-  tous processus confondus), pas en condition de node : alerter sur les **Events**, pas
-  seulement sur `KernelDeadlock`. `ReadonlyFilesystem`, lui, fonctionne normalement
+- **`settings.custom_monitors: []` in `values.yaml` does NOTHING.** That key **does not exist**
+  in chart 2.3.14: the real keys are `settings.custom_monitor_definitions` (a map of config files
+  mounted into `/custom-config`) and `settings.custom_plugin_monitors` (a list, empty by
+  default). Helm silently accepts an unknown value → no error, no effect. The comment in the file
+  makes it look like an explicit opt-out; in reality the plugin monitors are already empty by
+  default, and it is **`log_monitors`** (very much real) that does all the Talos adaptation work.
+- **The `KernelDeadlock` condition will (almost) never go `True` on Talos.** In
+  `kernel-monitor.json` (v0.8.19) the only permanent rule that raises it is the pattern
+  `task docker:\w+ blocked for more than \w+ seconds` — a **`docker`** process, which does not
+  exist on Talos (containerd). A real hang shows up as a **`TaskHung` event** (temporary rule,
+  any process), not as a node condition: alert on the **Events**, not only on `KernelDeadlock`.
+  `ReadonlyFilesystem`, on the other hand, works normally
   (`Remounting filesystem read-only`).
-- **NPD ne corrige rien : il rend visible.** Le remède (cordon/drain, reschedule, reboot,
-  auto-remédiation) reste à l'opérateur, ou à un outil type **Draino** / **Descheduler**.
-- **Un gel « total » peut passer sous le radar.** Comme sur cp2, un guest qui fige sans rien
-  écrire dans kmsg ne produit aucune trace : NPD aide surtout sur les pannes **OOM / I/O / FS /
-  task-hung**, qui, elles, laissent une ligne noyau.
-- **Écrire dans `/dev/kmsg` pour tester nécessite un pod privilégié** : sur Talos il n'y a ni
-  SSH ni shell sur le node, on ne peut pas « juste » se connecter pour injecter la ligne.
+- **NPD fixes nothing: it makes things visible.** The remedy (cordon/drain, reschedule, reboot,
+  auto-remediation) is left to the operator, or to a tool like **Draino** / **Descheduler**.
+- **A "total" freeze can slip under the radar.** As on cp2, a guest that freezes without writing
+  anything to kmsg leaves no trace: NPD mainly helps with **OOM / I/O / FS / task-hung**
+  failures, which do leave a kernel line behind.
+- **Writing to `/dev/kmsg` to test it requires a privileged pod**: on Talos there is neither
+  SSH nor a shell on the node, you cannot "just" log in to inject the line.
 
-## 📚 Références
+## 📚 References
 
 - [node-problem-detector (upstream)](https://github.com/kubernetes/node-problem-detector)
-- [Chart deliveryhero/node-problem-detector](https://github.com/deliveryhero/helm-charts/tree/master/stable/node-problem-detector)
-- Addon lié : `../observability/` (scrape des métriques NPD, alerting sur les NodeConditions)
+- [deliveryhero/node-problem-detector chart](https://github.com/deliveryhero/helm-charts/tree/master/stable/node-problem-detector)
+- Related addon: `../observability/` (scraping the NPD metrics, alerting on the NodeConditions)

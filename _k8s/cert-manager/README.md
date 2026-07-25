@@ -1,72 +1,78 @@
-# 📜 `cert-manager/` — TLS wildcard automatique (ACME DNS-01 Cloudflare)
+<!-- i18n -->
+**English** · [Français](LISEZ-MOI.md)
+<!-- /i18n -->
 
-> **Un certificat `*.talos.lab.example.io` public, émis et renouvelé sans rien faire.** cert-manager
-> surveille `main-gateway`, y lit une annotation, crée le `Certificate`, prouve à Let's Encrypt
-> que tu contrôles le domaine via un **TXT DNS chez Cloudflare**, puis remplit le Secret que
-> l'écouteur `:443` d'Envoy sert. Aucun port entrant, aucun `Certificate` écrit à la main.
+# 📜 `cert-manager/` — automatic wildcard TLS (ACME DNS-01 Cloudflare)
 
-## 🎯 À quoi ça sert
+> **A public `*.talos.lab.example.io` certificate, issued and renewed with zero effort.**
+> cert-manager watches `main-gateway`, reads an annotation on it, creates the `Certificate`,
+> proves to Let's Encrypt that you control the domain through a **DNS TXT record at Cloudflare**,
+> then fills the Secret that Envoy's `:443` listener serves. No inbound port, no hand-written
+> `Certificate`.
 
-Toutes les UI du lab (`argo.`, `vault.`, `longhorn.`, `grafana.`, `kyverno.`, `wordpress.`…)
-sont servies en HTTPS **trusté par les navigateurs** derrière une IP privée, sans exception de
-sécurité à cliquer et sans CA maison à distribuer.
+## 🎯 Purpose
 
-### Pourquoi DNS-01, pourquoi Let's Encrypt
+Every lab UI (`argo.`, `vault.`, `longhorn.`, `grafana.`, `kyverno.`, `wordpress.`…) is served
+over HTTPS **trusted by browsers** behind a private IP, with no security exception to click and
+no home-made CA to distribute.
 
-- **DNS-01** : Let's Encrypt vérifie le domaine via un TXT `_acme-challenge.talos.lab.example.io`,
-  posé par cert-manager avec le token Cloudflare. **Aucune connexion entrante requise** → ça
-  marche derrière un réseau host-only + Tailscale, là où HTTP-01 échouerait.
-- **Wildcard** : seul DNS-01 sait émettre `*.talos.lab.example.io` (HTTP-01 ne peut pas).
-- **Let's Encrypt plutôt que Cloudflare Origin CA** : comme le DNS est en **DNS-only (nuage
-  gris)**, le TLS est terminé par **Envoy**, pas par l'edge Cloudflare. C'est donc le
-  navigateur qui valide le certificat d'Envoy → il doit être **publiquement trusté**. Un cert
-  *Origin CA* (trusté seulement par l'edge Cloudflare) serait rejeté.
+### Why DNS-01, why Let's Encrypt
 
-## 📋 Prérequis
+- **DNS-01**: Let's Encrypt validates the domain through a
+  `_acme-challenge.talos.lab.example.io` TXT record, written by cert-manager with the Cloudflare
+  token. **No inbound connection required** → it works behind a host-only network + Tailscale,
+  where HTTP-01 would fail.
+- **Wildcard**: only DNS-01 can issue `*.talos.lab.example.io` (HTTP-01 cannot).
+- **Let's Encrypt rather than Cloudflare Origin CA**: since DNS is in **DNS-only mode (grey
+  cloud)**, TLS is terminated by **Envoy**, not by the Cloudflare edge. So it is the browser that
+  validates Envoy's certificate → it must be **publicly trusted**. An *Origin CA* cert (trusted
+  only by the Cloudflare edge) would be rejected.
 
-| Prérequis | Pourquoi | Vérifier |
+## 📋 Prerequisites
+
+| Prerequisite | Why | Check |
 |---|---|---|
-| `main-gateway` en place ([`../envoy-gateway/`](../envoy-gateway/README.md)) | c'est l'objet que cert-manager observe | `kubectl get gateway -n envoy-gateway-system` |
-| **CRD Gateway API** présentes | cert-manager les découvre au démarrage (installées par le chart Envoy Gateway) | `kubectl get crd gateways.gateway.networking.k8s.io` |
-| Zone `example.io` chez Cloudflare, `*.talos.lab.example.io → 192.168.56.200` en **DNS-only** | le solveur DNS-01 écrit dans cette zone | `dig +short TXT _acme-challenge.talos.lab.example.io` |
-| **Token API Cloudflare** (`Zone/DNS/Edit` + `Zone/Zone/Read`, scopé `example.io`) | permet à cert-manager de poser le TXT | `kubectl -n cert-manager get secret cloudflare-api-token` |
+| `main-gateway` in place ([`../envoy-gateway/`](../envoy-gateway/README.md)) | that is the object cert-manager watches | `kubectl get gateway -n envoy-gateway-system` |
+| **Gateway API CRDs** present | cert-manager discovers them at startup (installed by the Envoy Gateway chart) | `kubectl get crd gateways.gateway.networking.k8s.io` |
+| `example.io` zone at Cloudflare, `*.talos.lab.example.io → 192.168.56.200` in **DNS-only** mode | the DNS-01 solver writes into that zone | `dig +short TXT _acme-challenge.talos.lab.example.io` |
+| **Cloudflare API token** (`Zone/DNS/Edit` + `Zone/Zone/Read`, scoped to `example.io`) | lets cert-manager write the TXT record | `kubectl -n cert-manager get secret cloudflare-api-token` |
 
-Le token se met dans **`lab.env`** (`CLOUDFLARE_API_TOKEN=…`, fichier gitignoré) : c'est là que
-`platform-up.sh` va le chercher pour créer le Secret.
+The token goes into **`lab.env`** (`CLOUDFLARE_API_TOKEN=…`, a gitignored file): that is where
+`platform-up.sh` picks it up to create the Secret.
 
-> 🌐 **Domaine neutre par défaut** (le dépôt est public) : les manifestes portent
-> `talos.lab.example.io` et la zone `example.io`. `platform-up.sh` substitue à la volée, depuis
-> `lab.env` : `LAB_DOMAIN` (hostname du wildcard), `LAB_DNS_ZONE` (le `dnsZones` du solveur —
-> défaut : les 2 derniers labels de `LAB_DOMAIN`) et `LAB_ACME_EMAIL` (défaut `admin@<zone>`).
-> Le `Certificate`/`Secret` TLS suit le domaine : `wildcard-<LAB_DOMAIN avec des tirets>-tls`.
-> Sans substitution, le solveur ne matcherait jamais ta zone et le certificat resterait en
-> attente. Cf. [`../README.md`](../README.md#-lab_domain--le-domaine-des-ui).
+> 🌐 **Neutral domain by default** (the repo is public): the manifests carry
+> `talos.lab.example.io` and the `example.io` zone. `platform-up.sh` substitutes on the fly, from
+> `lab.env`: `LAB_DOMAIN` (wildcard hostname), `LAB_DNS_ZONE` (the solver's `dnsZones` — default:
+> the last 2 labels of `LAB_DOMAIN`) and `LAB_ACME_EMAIL` (default `admin@<zone>`). The TLS
+> `Certificate`/`Secret` follows the domain: `wildcard-<LAB_DOMAIN with dashes>-tls`. Without the
+> substitution the solver would never match your zone and the certificate would stay pending. See
+> [`../README.md`](../README.md#-lab_domain--the-ui-domain).
 
-## ⚡ Installation
+## ⚡ Install
 
-cert-manager **est** installé par la plateforme, étape `[4/4]` :
+cert-manager **is** installed by the platform, step `[4/4]`:
 
 ```bash
 ./_k8s/platform-up.sh
 ```
 
-Chart `jetstack/cert-manager` **`v1.20.2`**, épinglé dans `../platform-up.sh`
-(`CERT_MANAGER_VERSION`). Le script :
+Chart `jetstack/cert-manager` **`v1.20.2`**, pinned in `../platform-up.sh`
+(`CERT_MANAGER_VERSION`). The script:
 
-1. installe le chart avec `crds.enabled=true` et **`config.enableGatewayAPI=true`** (intégration
-   Gateway API, non gatée par un feature-flag depuis cert-manager 1.15) ;
-2. crée le Secret `cloudflare-api-token` depuis `lab.env` (il avertit et continue si le token
-   est vide — le certificat restera alors en attente) ;
-3. applique **`02-clusterissuer-staging.yaml`** et **`03-clusterissuer-prod.yaml`** ;
-4. attend `Ready=True` sur le `Certificate` `wildcard-talos-lab-example-io-tls` — nom dérivé de
-   `LAB_DOMAIN` (~1-2 min, 24 × 10 s).
+1. installs the chart with `crds.enabled=true` and **`config.enableGatewayAPI=true`** (Gateway API
+   integration, no longer behind a feature flag since cert-manager 1.15);
+2. creates the `cloudflare-api-token` Secret from `lab.env` (it warns and continues if the token
+   is empty — the certificate then stays pending);
+3. applies **`02-clusterissuer-staging.yaml`** and **`03-clusterissuer-prod.yaml`**;
+4. waits for `Ready=True` on the `wildcard-talos-lab-example-io-tls` `Certificate` — a name
+   derived from `LAB_DOMAIN` (~1-2 min, 24 × 10 s).
 
 <details>
-<summary>Équivalent manuel (poser uniquement cette brique)</summary>
+<summary>Manual equivalent (installing only this component)</summary>
 
 ```bash
 helm repo add jetstack https://charts.jetstack.io && helm repo update
-# --version : garder celle de platform-up.sh (CERT_MANAGER_VERSION)
+# --version: keep the one from platform-up.sh (CERT_MANAGER_VERSION)
 helm upgrade --install cert-manager jetstack/cert-manager \
   --namespace cert-manager --create-namespace \
   --version v1.20.2 \
@@ -76,108 +82,106 @@ helm upgrade --install cert-manager jetstack/cert-manager \
   --set config.enableGatewayAPI=true
 kubectl -n cert-manager rollout status deploy/cert-manager
 kubectl create secret generic cloudflare-api-token -n cert-manager \
-  --from-literal=api-token='<TON_TOKEN>'
+  --from-literal=api-token='<YOUR_TOKEN>'
 kubectl apply -f _k8s/cert-manager/02-clusterissuer-staging.yaml \
               -f _k8s/cert-manager/03-clusterissuer-prod.yaml
 ```
 </details>
 
-## 🔧 Comment le certificat est émis
+## 🔧 How the certificate is issued
 
 ```
 Gateway main-gateway
   ├─ annotation cert-manager.io/cluster-issuer: letsencrypt-prod
   └─ listener https (hostname *.talos.lab.example.io, certificateRefs: wildcard-talos-lab-example-io-tls)
         │
-        ▼  cert-manager (config.enableGatewayAPI=true) observe le Gateway
-   Certificate wildcard-talos-lab-example-io-tls   (dnsNames déduits du `hostname` de l'écouteur)
-        │  Order ──► Challenge dns-01 ──► TXT _acme-challenge.talos.lab.example.io (API Cloudflare)
+        ▼  cert-manager (config.enableGatewayAPI=true) watches the Gateway
+   Certificate wildcard-talos-lab-example-io-tls   (dnsNames derived from the listener `hostname`)
+        │  Order ──► Challenge dns-01 ──► TXT _acme-challenge.talos.lab.example.io (Cloudflare API)
         ▼
-   Secret wildcard-talos-lab-example-io-tls  (ns envoy-gateway-system)  ──►  servi par Envoy sur :443
+   Secret wildcard-talos-lab-example-io-tls  (ns envoy-gateway-system)  ──►  served by Envoy on :443
 ```
 
-Le `Certificate` **et** le Secret naissent dans le namespace du Gateway
-(`envoy-gateway-system`), pas dans `cert-manager`. Le renouvellement est automatique (à ~2/3 de
-la durée de vie).
+The `Certificate` **and** the Secret are born in the Gateway's namespace
+(`envoy-gateway-system`), not in `cert-manager`. Renewal is automatic (at ~2/3 of the lifetime).
 
-> 💡 **Sans l'intégration Gateway API**, le résultat s'obtient à la main : écrire un
+> 💡 **Without the Gateway API integration**, you get the same result by hand: write a
 > `Certificate` (`dnsNames: ["*.talos.lab.example.io"]`, `issuerRef: letsencrypt-prod`,
-> `secretName: wildcard-talos-lab-example-io-tls`) et laisser l'écouteur le référencer. Même
-> résultat, c'est juste toi qui crées l'objet au lieu de cert-manager.
+> `secretName: wildcard-talos-lab-example-io-tls`) and let the listener reference it. Same
+> outcome, you just create the object instead of cert-manager.
 
-### Fichiers
+### Files
 
-| Fichier | Rôle |
+| File | Role |
 |---------|------|
-| `01-cloudflare-api-token.example.yaml` | **gabarit** du Secret token — ne jamais committer le vrai (préférer `lab.env` + `platform-up.sh`) |
-| `02-clusterissuer-staging.yaml` | `ClusterIssuer` Let's Encrypt **staging** (quotas larges, cert non trusté) |
-| `03-clusterissuer-prod.yaml` | `ClusterIssuer` Let's Encrypt **prod** (cert trusté) — celui référencé par le Gateway |
-| `04-gateway-https-example.yaml` | **illustration historique, à NE PAS appliquer** (cf. ⚠️ Pièges) |
+| `01-cloudflare-api-token.example.yaml` | **template** for the token Secret — never commit the real one (prefer `lab.env` + `platform-up.sh`) |
+| `02-clusterissuer-staging.yaml` | Let's Encrypt **staging** `ClusterIssuer` (generous quotas, untrusted cert) |
+| `03-clusterissuer-prod.yaml` | Let's Encrypt **prod** `ClusterIssuer` (trusted cert) — the one referenced by the Gateway |
+| `04-gateway-https-example.yaml` | **historical illustration, do NOT apply** (see ⚠️ Pitfalls) |
 
-> ⚠️ **`04-gateway-https-example.yaml` ne doit plus être appliqué.** Il contient un `Gateway`
-> `main-gateway` complet (mêmes `name`/`namespace`) : le `kubectl apply` **remplacerait** le
-> Gateway en place. La fusion est **déjà faite** dans `../envoy-gateway/Envoy-Proxy.yml`
-> (écouteur `https:443` + `hostname` wildcard + `certificateRefs` + annotation
-> `cluster-issuer`), et `../platform-up.sh` n'applique que `02-` et `03-`. Garde ce fichier
-> comme support de lecture : il montre, isolée, la partie « HTTPS + cert-manager » du Gateway.
+> ⚠️ **`04-gateway-https-example.yaml` must not be applied any more.** It contains a full
+> `main-gateway` `Gateway` (same `name`/`namespace`): a `kubectl apply` would **replace** the
+> Gateway in place. The merge is **already done** in `../envoy-gateway/Envoy-Proxy.yml`
+> (`https:443` listener + wildcard `hostname` + `certificateRefs` + `cluster-issuer` annotation),
+> and `../platform-up.sh` only applies `02-` and `03-`. Keep the file as reading material: it
+> shows the "HTTPS + cert-manager" part of the Gateway in isolation.
 
-## ✅ Vérifier
+## ✅ Verify
 
 ```bash
-kubectl get clusterissuer                                        # les 2 émetteurs, READY=True
+kubectl get clusterissuer                                        # both issuers, READY=True
 kubectl -n envoy-gateway-system get certificate                  # wildcard-…-tls, READY=True
 kubectl -n envoy-gateway-system describe certificate wildcard-talos-lab-example-io-tls
-                                                                 # events : Order → Challenge → issued
-kubectl get challenges -A                                        # vide une fois validé
+                                                                 # events: Order → Challenge → issued
+kubectl get challenges -A                                        # empty once validated
 
-# Quel certificat Envoy sert-il ? (aucune HTTPRoute nécessaire : on ne teste que le TLS)
+# Which certificate does Envoy serve? (no HTTPRoute needed: we only test TLS)
 echo | openssl s_client -connect 192.168.56.200:443 -servername demo.talos.lab.example.io 2>/dev/null \
   | openssl x509 -noout -subject -issuer -dates
-# attendu : subject=CN=*.talos.lab.example.io, issuer=Let's Encrypt (et non "STAGING")
+# expected: subject=CN=*.talos.lab.example.io, issuer=Let's Encrypt (and not "STAGING")
 ```
 
-Test HTTPS de bout en bout : il faut un hostname **qui porte une `HTTPRoute`** (les routes de
-démo de `../envoy-gateway/GW-Example.yml` matchent par chemin, pas par hostname). Par exemple,
-une fois l'addon Argo CD installé :
+End-to-end HTTPS test: you need a hostname that **carries an `HTTPRoute`** (the demo routes in
+`../envoy-gateway/GW-Example.yml` match by path, not by hostname). For example, once the Argo CD
+component is installed:
 
 ```bash
 curl -sS -o /dev/null -w '%{http_code} verify=%{ssl_verify_result}\n' \
   --resolve argo.talos.lab.example.io:443:192.168.56.200 https://argo.talos.lab.example.io/
-# attendu : 200 verify=0   (verify=0 = chaîne validée sans -k)
+# expected: 200 verify=0   (verify=0 = chain validated without -k)
 ```
 
-## 🚑 Dépannage
+## 🚑 Troubleshooting
 
-- **`Challenge` bloqué en `pending`** → token Cloudflare (permissions ou zone), ou propagation
-  TXT lente. `kubectl describe challenge <name>` donne l'erreur exacte de l'API Cloudflare.
-- **Secret `cloudflare-api-token` absent** → `CLOUDFLARE_API_TOKEN` vide dans `lab.env` au
-  moment du `platform-up.sh` (le script le signale sans échouer). Crée le Secret, puis
-  `kubectl -n envoy-gateway-system delete challenge --all` pour relancer (les `Order`/`Challenge`
-  vivent dans le namespace du `Certificate`, donc du Gateway).
-- **`Certificate` jamais créé malgré l'annotation** → cert-manager ne tourne pas avec
-  `config.enableGatewayAPI=true`, ou il a démarré **avant** les CRD Gateway API :
+- **`Challenge` stuck in `pending`** → Cloudflare token (permissions or zone), or slow TXT
+  propagation. `kubectl describe challenge <name>` gives the exact error from the Cloudflare API.
+- **`cloudflare-api-token` Secret missing** → `CLOUDFLARE_API_TOKEN` was empty in `lab.env` when
+  `platform-up.sh` ran (the script reports it without failing). Create the Secret, then
+  `kubectl -n envoy-gateway-system delete challenge --all` to retry (the `Order`s/`Challenge`s
+  live in the `Certificate`'s namespace, so in the Gateway's).
+- **`Certificate` never created despite the annotation** → cert-manager is not running with
+  `config.enableGatewayAPI=true`, or it started **before** the Gateway API CRDs:
   `kubectl -n cert-manager rollout restart deploy/cert-manager`.
-- **Navigateur qui refuse le certificat** → tu es resté sur `letsencrypt-staging`. Repasse
-  l'annotation du Gateway sur `letsencrypt-prod`, puis supprime le Secret pour forcer une
-  réémission.
-- **Quota Let's Encrypt atteint** (~5 certificats identiques/semaine en prod) → rester en
-  **staging** tant que la chaîne DNS-01 n'est pas validée. C'est tout l'intérêt d'avoir les deux
-  émetteurs.
+- **Browser refusing the certificate** → you are still on `letsencrypt-staging`. Switch the
+  Gateway annotation back to `letsencrypt-prod`, then delete the Secret to force a reissue.
+- **Let's Encrypt quota reached** (~5 identical certificates/week in prod) → stay on **staging**
+  until the DNS-01 chain is validated. That is exactly why both issuers are there.
 
-## ⚠️ Pièges
+## ⚠️ Pitfalls
 
-- **Ne pas appliquer `04-gateway-https-example.yaml`** (voir l'encart plus haut).
-- **Un seul niveau de wildcard** : `*.talos.lab.example.io` couvre `argo.talos.lab.example.io`, pas
-  `a.b.talos.lab.example.io`. Une route avec un hostname non couvert ne s'attachera pas à l'écouteur.
-- **L'e-mail ACME versionné est neutre** (`admin@example.io`) : `platform-up.sh` le remplace par
-  `LAB_ACME_EMAIL` (défaut `admin@<LAB_DNS_ZONE>`). En `kubectl apply -f` direct, tu appliques
-  l'adresse d'exemple — Let's Encrypt refuse certains domaines réservés.
-- **DNS-only obligatoire côté Cloudflare** : en mode « proxy orange », l'edge tenterait de
-  joindre `192.168.56.200` et l'accès casserait (le challenge DNS-01, lui, marcherait quand même).
+- **Do not apply `04-gateway-https-example.yaml`** (see the callout above).
+- **A single wildcard level**: `*.talos.lab.example.io` covers `argo.talos.lab.example.io`, not
+  `a.b.talos.lab.example.io`. A route with a hostname that is not covered will not attach to the
+  listener.
+- **The committed ACME e-mail is neutral** (`admin@example.io`): `platform-up.sh` replaces it with
+  `LAB_ACME_EMAIL` (default `admin@<LAB_DNS_ZONE>`). With a direct `kubectl apply -f`, you apply
+  the example address — and Let's Encrypt rejects some reserved domains.
+- **DNS-only is mandatory on the Cloudflare side**: in "orange proxy" mode the edge would try to
+  reach `192.168.56.200` and access would break (the DNS-01 challenge itself would still work).
 
-## 📚 Références
+## 📚 References
 
 - [cert-manager — Gateway API integration](https://cert-manager.io/docs/usage/gateway/)
 - [cert-manager — DNS-01 Cloudflare](https://cert-manager.io/docs/configuration/acme/dns01/cloudflare/)
 - [Let's Encrypt — Rate limits](https://letsencrypt.org/docs/rate-limits/)
-- [`../envoy-gateway/README.md`](../envoy-gateway/README.md) — le Gateway qui porte ce certificat
+- [`../envoy-gateway/README.md`](../envoy-gateway/README.md) — the Gateway that carries this certificate

@@ -1,90 +1,94 @@
-# 📁 `local-path-storage/` — stockage local dynamique (sans Longhorn), adapté Talos
+<!-- i18n -->
+**English** · [Français](LISEZ-MOI.md)
+<!-- /i18n -->
 
-> Déploie **[Rancher local-path-provisioner](https://github.com/rancher/local-path-provisioner)**
-> `v0.0.30` et une StorageClass **`local-path` par défaut** : des PV taillés dans le disque du
-> worker (`/var/local-path-provisioner`). C'est l'alternative **« sans Longhorn »** du lab —
-> zéro extension Talos, zéro CSI, deux ressources et c'est provisionné.
+# 📁 `local-path-storage/` — dynamic local storage (no Longhorn), Talos-adapted
 
-## 🎯 À quoi ça sert
+> Deploys **[Rancher local-path-provisioner](https://github.com/rancher/local-path-provisioner)**
+> `v0.0.30` and a **default `local-path` StorageClass**: PVs carved out of the worker's disk
+> (`/var/local-path-provisioner`). This is the lab's **"no Longhorn"** alternative — zero Talos
+> extension, zero CSI, two resources and provisioning just works.
 
-Talos n'embarque **aucun** provisioner de stockage : `kubectl get storageclass` renvoie vide et
-tout PVC reste `Pending`. Les addons qui **exigent** un PVC (CloudNativePG ne supporte pas
-`emptyDir` pour PGDATA, MinIO veut un `/data`) ne démarrent pas du tout. Ce provisioner comble
-ce manque sans dépendance externe.
+## 🎯 Purpose
 
-> ⚠️ **Stockage NODE-LOCAL, non répliqué.** Un PV vit sur **un seul** worker. Il **survit** au
-> redémarrage / reschedule d'un pod (tant qu'il revient sur le même node), mais il est **perdu
-> si ce node meurt**. Aucune HA au niveau stockage : à réserver aux données reconstructibles ou
-> aux usages « éphémères assumés ». Pour du répliqué, voir **`../longhorn/`**.
+Talos ships **no** storage provisioner at all: `kubectl get storageclass` returns nothing and
+every PVC stays `Pending`. Components that **require** a PVC (CloudNativePG does not support
+`emptyDir` for PGDATA, MinIO wants a `/data`) never start at all. This provisioner fills the gap
+with no external dependency.
 
-Qui l'utilise dans ce lab :
+> ⚠️ **NODE-LOCAL storage, not replicated.** A PV lives on **one single** worker. It **survives**
+> a pod restart / reschedule (as long as the pod comes back on the same node), but it is **lost
+> if that node dies**. No HA at the storage level: keep it for rebuildable data or for
+> "knowingly ephemeral" use cases. For replicated storage, see **`../longhorn/`**.
+
+Who uses it in this lab:
 
 | Addon | Usage |
 |---|---|
-| `../minio-s3/` | 1 PVC 10 Gi (standalone) |
-| `../minio-s3/cluster/` | 4 PVC 10 Gi — MinIO fait sa propre résilience (erasure coding) par-dessus |
+| `../minio-s3/` | 1 PVC, 10 Gi (standalone) |
+| `../minio-s3/cluster/` | 4 PVCs, 10 Gi — MinIO does its own resilience (erasure coding) on top |
 
-> ℹ️ `../cloudnative-pg/` **n'a pas** de variante local-path : `cluster-demo.yaml` impose
-> `storageClass: longhorn-r1` et `cloudnative-pg-up.sh` s'arrête si cette StorageClass est
-> absente. Une variante « 3 nœuds PostgreSQL sur local-path » est une **piste non implémentée**.
-> Idem `../databasement/`, qui reste sur `emptyDir` (`values.yaml`).
+> ℹ️ `../cloudnative-pg/` has **no** local-path variant: `cluster-demo.yaml` mandates
+> `storageClass: longhorn-r1` and `cloudnative-pg-up.sh` bails out if that StorageClass is
+> missing. A "3 PostgreSQL nodes on local-path" variant is an **unimplemented idea**.
+> Same for `../databasement/`, which stays on `emptyDir` (`values.yaml`).
 
-## 📋 Prérequis
+## 📋 Prerequisites
 
-| Prérequis | Pourquoi | Vérifier |
+| Prerequisite | Why | Verify |
 |---|---|---|
-| Cluster Talos avec CNI opérationnel (`talos/cluster-up.sh`) | le provisioner est un Deployment normal | `kubectl get nodes` |
-| ≥ 1 worker schedulable | chaque PV atterrit sur le node du **premier pod consommateur** (`WaitForFirstConsumer`) | `kubectl get nodes -l '!node-role.kubernetes.io/control-plane'` |
-| Place sur la partition `/var` du worker | les PV sont des dossiers hostPath, pas des volumes taillés | `kubectl describe node <w> \| grep -A3 Allocatable` |
+| Talos cluster with a working CNI (`talos/cluster-up.sh`) | the provisioner is a plain Deployment | `kubectl get nodes` |
+| ≥ 1 schedulable worker | each PV lands on the node of the **first consuming pod** (`WaitForFirstConsumer`) | `kubectl get nodes -l '!node-role.kubernetes.io/control-plane'` |
+| Free space on the worker's `/var` partition | PVs are hostPath directories, not sized volumes | `kubectl describe node <w> \| grep -A3 Allocatable` |
 
-## ⚡ Installation
+## ⚡ Install
 
 ```bash
 ./_k8s/local-path-storage/local-path-up.sh
 ```
 
-Idempotent (`kubectl apply` + `rollout status`). Équivalent manuel :
+Idempotent (`kubectl apply` + `rollout status`). Manual equivalent:
 `kubectl apply -f _k8s/local-path-storage/local-path-storage.yaml`.
 
-## 🔧 Trois écarts vs le manifeste upstream
+## 🔧 Three deviations from the upstream manifest
 
-Le manifeste vendorisé ([`local-path-storage.yaml`](./local-path-storage.yaml)) part de
-l'upstream `v0.0.30`. Les **deux premiers** écarts sont des contraintes **Talos**, le troisième
-est un choix du lab :
+The vendored manifest ([`local-path-storage.yaml`](./local-path-storage.yaml)) starts from
+upstream `v0.0.30`. The **first two** deviations are **Talos** constraints, the third one is a
+lab choice:
 
-| # | Modification | Pourquoi |
+| # | Change | Why |
 |---|---|---|
-| 1 | Chemin `/opt/local-path-provisioner` → **`/var/local-path-provisioner`** | Sur Talos, `/` et `/etc` sont **read-only** ; seule la partition **`/var`** est inscriptible. Un helper-pod qui tente `mkdir /opt/...` échoue (`read-only file system`). |
-| 2 | Namespace `local-path-storage` en **PodSecurity `privileged`** | Les **helper-pods** (création/suppression des dossiers de PV) montent du **hostPath**, refusé par le défaut cluster Talos `baseline`. |
-| 3 | StorageClass `local-path` marquée **par défaut** (`is-default-class`) | Les PVC sans `storageClassName` l'utilisent automatiquement. |
+| 1 | Path `/opt/local-path-provisioner` → **`/var/local-path-provisioner`** | On Talos, `/` and `/etc` are **read-only**; only the **`/var`** partition is writable. A helper pod trying `mkdir /opt/...` fails (`read-only file system`). |
+| 2 | Namespace `local-path-storage` in **PodSecurity `privileged`** | The **helper pods** (creating/deleting the PV directories) mount **hostPath**, which the Talos cluster default `baseline` rejects. |
+| 3 | StorageClass `local-path` marked **default** (`is-default-class`) | PVCs without a `storageClassName` use it automatically. |
 
-> ℹ️ Même piège Pod Security / FS read-only que le node-collector Trivy, mais ici c'est
-> résoluble : le hostPath cible `/var` (inscriptible), pas `/etc/systemd`.
+> ℹ️ Same Pod Security / read-only FS pitfall as the Trivy node-collector, except here it is
+> fixable: the hostPath targets `/var` (writable), not `/etc/systemd`.
 
-### Réglages
+### Tuning
 
-Tout se règle dans `local-path-storage.yaml` :
+Everything is tuned in `local-path-storage.yaml`:
 
-- **Chemin de stockage** — `ConfigMap local-path-config`, clé `config.json` :
+- **Storage path** — `ConfigMap local-path-config`, key `config.json`:
   ```json
   { "nodePathMap":[ { "node":"DEFAULT_PATH_FOR_NON_LISTED_NODES",
                       "paths":["/var/local-path-provisioner"] } ] }
   ```
-  Sur Talos, **rester sous `/var`**. On peut mapper un chemin par node (`"node":"talos-w1"`),
-  par exemple vers un disque supplémentaire monté par la machine config Talos. Après édition :
+  On Talos, **stay under `/var`**. You can map a path per node (`"node":"talos-w1"`), for
+  instance onto an extra disk mounted by the Talos machine config. After editing:
   `kubectl -n local-path-storage rollout restart deploy/local-path-provisioner`.
-- **`reclaimPolicy: Delete`** — le dossier du PV est **supprimé** avec le PVC. `Retain` pour
-  conserver les données.
-- **`volumeBindingMode: WaitForFirstConsumer`** — le PV n'est provisionné qu'au scheduling du
-  pod (le stockage suit le pod sur son node). À conserver.
+- **`reclaimPolicy: Delete`** — the PV directory is **deleted** along with the PVC. Use `Retain`
+  to keep the data.
+- **`volumeBindingMode: WaitForFirstConsumer`** — the PV is only provisioned when the pod is
+  scheduled (storage follows the pod onto its node). Keep it.
 
-## ✅ Vérifier
+## ✅ Verify
 
 ```bash
 kubectl get storageclass                      # local-path (default)
 kubectl -n local-path-storage get pods        # local-path-provisioner 1/1 Running
 
-# Test : un PVC ne se lie qu'à l'arrivée d'un pod (WaitForFirstConsumer)
+# Test: a PVC only binds once a pod shows up (WaitForFirstConsumer)
 kubectl apply -f - <<'EOF'
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -99,45 +103,45 @@ kubectl -n default get pvc lp-test            # STATUS Bound
 kubectl -n default delete pod lp-test; kubectl -n default delete pvc lp-test
 ```
 
-## ⚠️ Pièges
+## ⚠️ Pitfalls
 
-- **La taille demandée par un PVC n'est PAS appliquée.** Un PV local-path est un simple dossier
-  hostPath : `requests.storage: 10Gi` est purement déclaratif, rien ne borne l'écriture. Un
-  workload peut remplir la partition `/var` du worker jusqu'au `DiskPressure` (et l'éviction des
-  pods). Mesuré sur ce lab : **~16,9 Go d'`ephemeral-storage` allocatable par node** pour un
-  disque de 20 Go (`Vagrantfile`, `DISK_SIZE_MB = 20480`) — deux PVC de 10 Gi « tiennent » côte
-  à côte sur le papier, pas dans la réalité. Surveiller :
+- **The size requested by a PVC is NOT enforced.** A local-path PV is a plain hostPath
+  directory: `requests.storage: 10Gi` is purely declarative, nothing caps the writes. A workload
+  can fill the worker's `/var` partition up to `DiskPressure` (and pod eviction). Measured on
+  this lab: **~16.9 GB of allocatable `ephemeral-storage` per node** for a 20 GB disk
+  (`Vagrantfile`, `DISK_SIZE_MB = 20480`) — two 10 Gi PVCs "fit" side by side on paper, not in
+  reality. Watch it:
   ```bash
   kubectl get nodes -o custom-columns=NAME:.metadata.name,EPH:.status.allocatable.ephemeral-storage
   kubectl describe node <worker> | grep -i pressure
   ```
-- **Deux StorageClass par défaut** si `../longhorn/` est installé en parallèle : `local-path`
-  est annotée `is-default-class: "true"` et `longhorn/values.yaml` pose
-  `persistence.defaultClass: true`. Un PVC sans `storageClassName` devient **non déterministe**.
-  Retirer un des deux défauts :
+- **Two default StorageClasses** if `../longhorn/` is installed alongside: `local-path` is
+  annotated `is-default-class: "true"` and `longhorn/values.yaml` sets
+  `persistence.defaultClass: true`. A PVC without `storageClassName` becomes **non-deterministic**.
+  Drop one of the two defaults:
   ```bash
   kubectl annotate storageclass local-path storageclass.kubernetes.io/is-default-class-
   ```
-- **Le helper-pod tourne sur `image: busybox` sans tag** (donc `:latest`, cf.
-  `local-path-storage.yaml`). Ça viole la policy `disallow-latest-tag` de
-  `../kyverno/policies/02-disallow-latest-tag.yaml` : ses deux règles (tag présent, tag ≠
-  `latest`) remonteront un `PolicyReport` en échec sur `helper-pod`. La policy est en mode
-  **Audit** → rien n'est bloqué, mais c'est un « coupable » attendu dans l'UI Policy Reporter.
-- **PV coincés après désinstallation** : les PV déjà provisionnés (et leurs dossiers sous
-  `/var/local-path-provisioner`) ne sont pas nettoyés si des PVC les référencent encore.
-  Supprimer d'abord les workloads/PVC consommateurs.
+- **The helper pod runs `image: busybox` with no tag** (so `:latest`, see
+  `local-path-storage.yaml`). That violates the `disallow-latest-tag` policy of
+  `../kyverno/policies/02-disallow-latest-tag.yaml`: both of its rules (tag present, tag ≠
+  `latest`) will surface a failing `PolicyReport` on `helper-pod`. The policy runs in **Audit**
+  mode → nothing is blocked, but it is an expected "offender" in the Policy Reporter UI.
+- **PVs stuck after uninstall**: already provisioned PVs (and their directories under
+  `/var/local-path-provisioner`) are not cleaned up while PVCs still reference them.
+  Delete the consuming workloads/PVCs first.
 
-## 🧹 Désinstaller
+## 🧹 Uninstall
 
 ```bash
 kubectl delete -f _k8s/local-path-storage/local-path-storage.yaml
 ```
 
-Supprime la StorageClass et le provisioner (voir le dernier piège avant de lancer).
+Removes the StorageClass and the provisioner (read the last pitfall before running it).
 
-## 📚 Références
+## 📚 References
 
 - [Rancher local-path-provisioner](https://github.com/rancher/local-path-provisioner)
-- Manifeste upstream d'origine :
+- Original upstream manifest:
   <https://raw.githubusercontent.com/rancher/local-path-provisioner/v0.0.30/deploy/local-path-storage.yaml>
-- `../longhorn/` — l'alternative répliquée / HA.
+- `../longhorn/` — the replicated / HA alternative.

@@ -1,140 +1,145 @@
-# 🧺 `minio-s3/cluster/` — MinIO distribué 4 nœuds (erasure coding) sur local-path
+<!-- i18n -->
+**English** · [Français](LISEZ-MOI.md)
+<!-- /i18n -->
 
-> Variante **résiliente** du MinIO standalone (`../`) : un **StatefulSet de 4 pods**, 1 drive
-> (PVC `local-path`) par pod, 1 pod par worker. MinIO **erasure-code** les objets sur les 4
-> drives → le stockage objet survit à la perte de nœuds **sans Longhorn**, exactement comme
-> CloudNativePG assure lui-même la réplication de Postgres.
+# 🧺 `minio-s3/cluster/` — distributed 4-node MinIO (erasure coding) on local-path
 
-> ⚠️ **Prérequis BLOQUANT : 4 workers `Ready`.** Le défaut du dépôt (`lab.env.example`) est
-> `WORKERS=3` → avec cette topologie l'addon **ne peut pas démarrer du tout**. Voir Prérequis.
+> The **resilient** variant of the standalone MinIO (`../`): a **4-pod StatefulSet**, 1 drive
+> (`local-path` PVC) per pod, 1 pod per worker. MinIO **erasure-codes** objects across the 4
+> drives → object storage survives node losses **without Longhorn**, exactly the way
+> CloudNativePG handles Postgres replication itself.
 
-## 🎯 À quoi ça sert
+> ⚠️ **BLOCKING prerequisite: 4 `Ready` workers.** The repo default (`lab.env.example`) is
+> `WORKERS=3` → with that topology this component **cannot start at all**. See Prerequisites.
 
-C'est le S3 « pour de vrai » du lab : la cible des sauvegardes PostgreSQL
-(`../../cloudnative-pg/pg-backup-up.sh` et `pg-app-backup-cnpg-up.sh` pointent
-`http://minio.minio-cluster.svc.cluster.local:9000`), et la démo pédagogique de l'erasure
-coding face au standalone.
+## 🎯 Purpose
 
-| | Standalone (`../`) | **Cluster (ici)** |
+This is the lab's "for real" S3: the target of the PostgreSQL backups
+(`../../cloudnative-pg/pg-backup-up.sh` and `pg-app-backup-cnpg-up.sh` point at
+`http://minio.minio-cluster.svc.cluster.local:9000`), and the teaching demo of erasure coding
+against the standalone.
+
+| | Standalone (`../`) | **Cluster (here)** |
 |---|---|---|
-| Workload | Deployment 1 replica | **StatefulSet 4 pods** |
+| Workload | Deployment, 1 replica | **StatefulSet, 4 pods** |
 | Drives | 1 (local-path 10 Gi) | **4** (1 PVC 10 Gi/pod, 1/worker) |
-| Erasure coding | ❌ | ✅ **EC:2** (2 parités) |
-| Résilience | aucune (perte du node = perte data) | **tolère ~2 nœuds/drives down** |
-| Workers requis | 1 | **4** |
-| Namespace | `minio-s3` | `minio-cluster` (coexistent) |
+| Erasure coding | ❌ | ✅ **EC:2** (2 parity blocks) |
+| Resilience | none (losing the node = losing the data) | **tolerates ~2 nodes/drives down** |
+| Workers required | 1 | **4** |
+| Namespace | `minio-s3` | `minio-cluster` (they coexist) |
 
-Exposition (HTTPS via `main-gateway`, wildcard `*.talos.lab.example.io`) :
+Exposure (HTTPS via `main-gateway`, wildcard `*.talos.lab.example.io`):
 
 | Service | URL | Port |
 |---|---|---|
-| **API S3** | `https://minio-cluster.talos.lab.example.io` | 9000 |
-| **Console admin** | `https://minio-cluster-console.talos.lab.example.io` | 9001 |
+| **S3 API** | `https://minio-cluster.talos.lab.example.io` | 9000 |
+| **Admin console** | `https://minio-cluster-console.talos.lab.example.io` | 9001 |
 
-En interne : `http://minio.minio-cluster.svc.cluster.local:9000`.
+Inside the cluster: `http://minio.minio-cluster.svc.cluster.local:9000`.
 
-## 📋 Prérequis
+## 📋 Prerequisites
 
-| Prérequis | Pourquoi | Vérifier |
+| Prerequisite | Why | Verify |
 |---|---|---|
-| **≥ 4 workers `Ready`** | `replicas: 4` + anti-affinité **`requiredDuringScheduling`** sur `kubernetes.io/hostname` (1 pod max par node) ; les control planes sont taintés `NoSchedule` donc **ne comptent pas** | `kubectl get nodes -l '!node-role.kubernetes.io/control-plane'` |
-| StorageClass **`local-path`** (`../../local-path-storage/`) | les 4 PVC du `volumeClaimTemplates` ; le script s'arrête sans elle | `kubectl get storageclass local-path` |
-| `main-gateway` + écouteur `https` + cert wildcard | les deux `HTTPRoute` | `kubectl get gateway -n envoy-gateway-system` |
-| DNS `minio-cluster` + `minio-cluster-console` → `192.168.56.200` | atteindre le VIP Envoy | `getent hosts minio-cluster.talos.lab.example.io` |
+| **≥ 4 `Ready` workers** | `replicas: 4` + **`requiredDuringScheduling`** anti-affinity on `kubernetes.io/hostname` (max 1 pod per node); control planes are tainted `NoSchedule` so they **do not count** | `kubectl get nodes -l '!node-role.kubernetes.io/control-plane'` |
+| StorageClass **`local-path`** (`../../local-path-storage/`) | the 4 PVCs of the `volumeClaimTemplates`; the script bails out without it | `kubectl get storageclass local-path` |
+| `main-gateway` + `https` listener + wildcard cert | both `HTTPRoute`s | `kubectl get gateway -n envoy-gateway-system` |
+| DNS `minio-cluster` + `minio-cluster-console` → `192.168.56.200` | to reach the Envoy VIP | `getent hosts minio-cluster.talos.lab.example.io` |
 
-> ⚠️ **Passer `WORKERS=4` (ou plus) dans `lab.env` avant de monter le cluster.**
-> `lab.env.example` livre `WORKERS=3`, et `minio-cluster-up.sh` ne fait qu'**avertir** (un
-> simple `echo`, pas un `exit`) s'il y a moins de 4 workers. Il applique quand même le
-> manifeste : le 4ᵉ pod reste **`Pending` pour toujours** (anti-affinité stricte, plus aucun node
-> éligible), donc le `rollout status --timeout=300s` **échoue au bout de 5 minutes** et le
-> déploiement démarre au mieux **dégradé dès le premier jour** (3 drives sur 4, zéro marge : une
-> panne de plus et l'erasure set perd son quorum d'écriture). Changer `WORKERS` demande un
-> `vagrant destroy` + remontée du cluster (cf. `CLAUDE.md`) : décide **avant**.
+> ⚠️ **Set `WORKERS=4` (or more) in `lab.env` before building the cluster.**
+> `lab.env.example` ships `WORKERS=3`, and `minio-cluster-up.sh` only **warns** (a plain
+> `echo`, not an `exit`) when there are fewer than 4 workers. It applies the manifest anyway:
+> the 4th pod stays **`Pending` forever** (strict anti-affinity, no eligible node left), so the
+> `rollout status --timeout=300s` **fails after 5 minutes** and the deployment starts at best
+> **degraded from day one** (3 drives out of 4, zero margin: one more failure and the erasure set
+> loses its write quorum). Changing `WORKERS` requires a `vagrant destroy` and a cluster rebuild
+> (see `CLAUDE.md`): decide **beforehand**.
 
-## ⚡ Installation
+## ⚡ Install
 
 ```bash
 ./_k8s/minio-s3/cluster/minio-cluster-up.sh
-# Identifiants réglables : MINIO_ROOT_USER (défaut « admin ») / MINIO_ROOT_PASSWORD (généré)
+# Tunable credentials: MINIO_ROOT_USER (default "admin") / MINIO_ROOT_PASSWORD (generated)
 ```
 
-Image épinglée dans `minio-cluster.yaml` :
-**`docker.io/pgsty/minio:RELEASE.2026-06-18T00-00-00Z`** (fork Pigsty — récent + console
-d'admin, cf. `../README.md`).
+Image pinned in `minio-cluster.yaml`:
+**`docker.io/pgsty/minio:RELEASE.2026-06-18T00-00-00Z`** (Pigsty fork — recent + admin console,
+see `../README.md`).
 
-## 🔧 Ce que fait le script
+## 🔧 What the script does
 
-1. Vérifie `kubectl`, l'apiserver, la StorageClass `local-path`, puis **compte les workers
-   `Ready`** et avertit s'il y en a moins de 4 (sans bloquer).
-2. Crée le namespace `minio-cluster` et le Secret `minio-creds` — **non écrasé** s'il existe.
-3. Applique `minio-cluster.yaml` (Service headless, StatefulSet, Service ClusterIP, 2 `HTTPRoute`).
-4. Attend `rollout status statefulset/minio --timeout=300s`, puis affiche les URL **et les
-   identifiants root en clair** (cf. Pièges).
+1. Checks `kubectl`, the apiserver, the `local-path` StorageClass, then **counts the `Ready`
+   workers** and warns if there are fewer than 4 (without blocking).
+2. Creates the `minio-cluster` namespace and the `minio-creds` Secret — **not overwritten** if
+   it exists.
+3. Applies `minio-cluster.yaml` (headless Service, StatefulSet, ClusterIP Service, 2 `HTTPRoute`s).
+4. Waits for `rollout status statefulset/minio --timeout=300s`, then prints the URLs **and the
+   root credentials in clear text** (see Pitfalls).
 
-### Pourquoi 4 nœuds (et pas 3)
+### Why 4 nodes (and not 3)
 
-MinIO exige un **minimum de 4 drives** par *erasure set*, répartis **uniformément** entre les
-nœuds. Avec **1 drive par pod** (le pattern K8s propre sur local-path) :
+MinIO requires a **minimum of 4 drives** per *erasure set*, spread **evenly** across the nodes.
+With **1 drive per pod** (the clean K8s pattern on local-path):
 
-- **3 nœuds × 1 drive = 3 drives** → sous le minimum **et** non uniforme → refusé.
-- **4 nœuds × 1 drive = 4 drives** → 1 erasure set de 4, **EC:2** → le minimum naturel.
-- 3 nœuds ne redevient possible qu'avec **≥ 2 drives/nœud** (3 × 2 = 6 drives = 1 set de 6),
-  c.-à-d. 2 PVC par pod : plus complexe, non retenu ici.
+- **3 nodes × 1 drive = 3 drives** → below the minimum **and** not even → rejected.
+- **4 nodes × 1 drive = 4 drives** → 1 erasure set of 4, **EC:2** → the natural minimum.
+- 3 nodes only becomes possible again with **≥ 2 drives/node** (3 × 2 = 6 drives = 1 set of 6),
+  i.e. 2 PVCs per pod: more complex, not chosen here.
 
-> ℹ️ EC:2 sur 4 drives = 2 données + 2 parités. On peut **perdre jusqu'à 2 drives/nœuds** en
-> conservant la **lecture** ; l'écriture demande un quorum (≥ moitié + 1 des drives).
+> ℹ️ EC:2 over 4 drives = 2 data + 2 parity. You can **lose up to 2 drives/nodes** and still
+> **read**; writing requires a quorum (≥ half the drives + 1).
 
-### Topologie déployée
+### Deployed topology
 
 ```
-StatefulSet minio (podManagementPolicy: Parallel — les 4 pods démarrent ENSEMBLE et s'attendent)
+StatefulSet minio (podManagementPolicy: Parallel — the 4 pods boot TOGETHER and wait for each other)
   minio-0 @ worker A ─ PVC data-minio-0 (local-path 10Gi)  ┐
-  minio-1 @ worker B ─ PVC data-minio-1                    ├─ 1 pool, 1 erasure set de 4, EC:2
+  minio-1 @ worker B ─ PVC data-minio-1                    ├─ 1 pool, 1 erasure set of 4, EC:2
   minio-2 @ worker C ─ PVC data-minio-2                    │
   minio-3 @ worker D ─ PVC data-minio-3                    ┘
-  ▲ découverte des pairs via le Service HEADLESS minio-hl :
+  ▲ peer discovery via the HEADLESS Service minio-hl:
      server http://minio-{0...3}.minio-hl.minio-cluster.svc.cluster.local:9000/data
-Service minio (ClusterIP) ── équilibre sur les 4 pods ── HTTPRoutes (API + console)
+Service minio (ClusterIP) ── balances across the 4 pods ── HTTPRoutes (API + console)
 ```
 
-Points clés du manifeste :
+Key points of the manifest:
 
-- **`podManagementPolicy: Parallel`** (obligatoire) : en `OrderedReady`, `minio-0` ne serait
-  jamais « ready » sans ses pairs → interblocage. En parallèle, les 4 bootent et forment le quorum.
-- **Service headless `minio-hl`** (`clusterIP: None`, `publishNotReadyAddresses: true`) : DNS
-  stable par pod, résolu **avant** que les pods soient ready.
-- **anti-affinité `hostname` (`required…`)** : 1 pod/worker → erasure réparti sur 4 nœuds distincts.
-- **`startupProbe` `failureThreshold: 30` × 5 s** : jusqu'à 150 s pour former le quorum au boot.
+- **`podManagementPolicy: Parallel`** (mandatory): with `OrderedReady`, `minio-0` would never be
+  "ready" without its peers → deadlock. In parallel, all 4 boot and form the quorum.
+- **Headless Service `minio-hl`** (`clusterIP: None`, `publishNotReadyAddresses: true`): stable
+  per-pod DNS, resolved **before** the pods are ready.
+- **`hostname` anti-affinity (`required…`)**: 1 pod/worker → erasure spread over 4 distinct nodes.
+- **`startupProbe` `failureThreshold: 30` × 5 s**: up to 150 s to form the quorum at boot.
 
-## ✅ Vérifier
+## ✅ Verify
 
 ```bash
-kubectl -n minio-cluster get pods -o wide            # minio-0..3, 1/1, sur 4 workers distincts
+kubectl -n minio-cluster get pods -o wide            # minio-0..3, 1/1, on 4 distinct workers
 mc alias set clu https://minio-cluster.talos.lab.example.io <user> <pass> --insecure
-mc admin info clu                                    # « 4 drives online, 0 offline », EC:2
+mc admin info clu                                    # "4 drives online, 0 offline", EC:2
 ```
 
-## 🌐 Accès
+## 🌐 Access
 
-| Quoi | Comment |
+| What | How |
 |---|---|
-| Console admin | `https://minio-cluster-console.talos.lab.example.io` |
-| API S3 | `https://minio-cluster.talos.lab.example.io` (path-style) |
-| Utilisateur root | `kubectl -n minio-cluster get secret minio-creds -o jsonpath='{.data.root-user}' \| base64 -d; echo` |
-| Mot de passe root | `kubectl -n minio-cluster get secret minio-creds -o jsonpath='{.data.root-password}' \| base64 -d; echo` |
+| Admin console | `https://minio-cluster-console.talos.lab.example.io` |
+| S3 API | `https://minio-cluster.talos.lab.example.io` (path-style) |
+| Root user | `kubectl -n minio-cluster get secret minio-creds -o jsonpath='{.data.root-user}' \| base64 -d; echo` |
+| Root password | `kubectl -n minio-cluster get secret minio-creds -o jsonpath='{.data.root-password}' \| base64 -d; echo` |
 
-Cert Let's Encrypt **staging** → `--insecure` pour `mc`, avertissement à accepter au navigateur.
+Let's Encrypt **staging** cert → `--insecure` for `mc`, and a warning to accept in the browser.
 
-## 🧪 Scénarios
+## 🧪 Scenarios
 
-**Tester la résilience** — supprimer un pod : le cluster reste lisible/écrivable.
+**Test the resilience** — delete a pod: the cluster stays readable/writable.
 
 ```bash
 kubectl -n minio-cluster delete pod minio-2
-mc admin info clu       # 3/4 online, toujours opérationnel ; le pod revient et se resynchronise
+mc admin info clu       # 3/4 online, still operational; the pod comes back and resyncs
 ```
 
-**Migrer depuis le standalone** — les deux MinIO coexistent (namespaces et hostnames distincts) :
+**Migrate from the standalone** — both MinIOs coexist (distinct namespaces and hostnames):
 
 ```bash
 mc alias set std https://minio.talos.lab.example.io <user> <pass> --insecure
@@ -144,44 +149,44 @@ mc mirror --preserve std/pg-backups clu/pg-backups
 mc mirror --preserve std/cnpg-backups clu/cnpg-backups
 ```
 
-Puis repointer les jobs de backup (`MINIO_ENDPOINT` / `endpointURL`) vers
-`http://minio.minio-cluster.svc.cluster.local:9000` — c'est déjà le cas des scripts de
-`../../cloudnative-pg/` — et décommissionner le standalone.
+Then repoint the backup jobs (`MINIO_ENDPOINT` / `endpointURL`) at
+`http://minio.minio-cluster.svc.cluster.local:9000` — already the case for the scripts in
+`../../cloudnative-pg/` — and decommission the standalone.
 
-## ⚠️ Pièges
+## ⚠️ Pitfalls
 
-- **Moins de 4 workers = installation qui ne converge jamais** : le 4ᵉ pod reste `Pending`
-  (anti-affinité `required…`), `rollout status` échoue après 5 min, et l'erasure set tourne
-  d'emblée à 3/4 drives. Le script n'échoue **pas** à ce stade (simple `echo` d'avertissement,
-  `minio-cluster-up.sh`) : ne pas conclure de son démarrage silencieux que la topologie est bonne.
-- **`minio-cluster-up.sh` affiche l'utilisateur et le mot de passe root en clair sur stdout.**
-  Les relire plutôt depuis le Secret (tableau Accès).
-- **Les 4 × 10 Gi ne sont pas des quotas.** `local-path` = dossier hostPath, la taille du PVC
-  n'est **jamais** appliquée. L'`ephemeral-storage` allocatable mesuré ici est de **~16,9 Go par
-  node** (disque de 20 Go partagé avec l'OS et les images) : remplir les buckets provoque du
-  `DiskPressure` et l'**éviction de pods** sur les workers concernés — donc potentiellement la
-  perte simultanée de plusieurs drives MinIO. Surveiller :
+- **Fewer than 4 workers = an install that never converges**: the 4th pod stays `Pending`
+  (`required…` anti-affinity), `rollout status` fails after 5 min, and the erasure set runs at
+  3/4 drives right from the start. The script does **not** fail at that point (just an `echo`
+  warning, `minio-cluster-up.sh`): do not read its quiet start as proof the topology is right.
+- **`minio-cluster-up.sh` prints the root user and password in clear text on stdout.**
+  Read them back from the Secret instead (Access table).
+- **The 4 × 10 Gi are not quotas.** `local-path` = a hostPath directory, the PVC size is **never**
+  enforced. The allocatable `ephemeral-storage` measured here is **~16.9 GB per node** (20 GB disk
+  shared with the OS and the images): filling the buckets causes `DiskPressure` and pod
+  **eviction** on the affected workers — hence potentially the simultaneous loss of several MinIO
+  drives. Watch it:
   ```bash
   kubectl get nodes -o custom-columns=NAME:.metadata.name,EPH:.status.allocatable.ephemeral-storage
   kubectl describe node <worker> | grep -i pressure
   ```
-- **Drives node-local** : perdre un worker = perdre un drive. EC:2 encaisse 2 pertes, pas plus ;
-  un `vagrant destroy` en encaisse 4 (et les données avec).
-- **Scaling** : MinIO grossit par **ajout de server pools** (≥ 4 drives par pool), jamais par
-  ajout d'un drive isolé. Pour agrandir, déclarer un 2ᵉ pool dans les args
+- **Node-local drives**: losing a worker = losing a drive. EC:2 absorbs 2 losses, no more; a
+  `vagrant destroy` absorbs 4 (and the data with them).
+- **Scaling**: MinIO grows by **adding server pools** (≥ 4 drives per pool), never by adding a
+  lone drive. To grow, declare a 2nd pool in the args
   (`… /data http://minio2-{0...3}…/data`).
-- **Perf** : 1 drive/pod sur un disque node-local partagé avec l'OS — suffisant pour un lab,
-  pas pour de la charge réelle.
-- **Console derrière un hostname distinct** : `MINIO_BROWSER_REDIRECT_URL` porte
-  `https://minio-cluster-console.talos.lab.example.io` dans le manifeste — domaine **neutre** du
-  dépôt public, substitué par `minio-cluster-up.sh` depuis `LAB_DOMAIN` (`lab.env`) en même temps
-  que les hostnames des `HTTPRoute`. Un `kubectl apply` direct garde le domaine d'exemple et
-  casse les redirections de login. Cf. [`../../README.md`](../../README.md#-lab_domain--le-domaine-des-ui).
+- **Performance**: 1 drive/pod on a node-local disk shared with the OS — fine for a lab, not for
+  real load.
+- **Console behind a separate hostname**: `MINIO_BROWSER_REDIRECT_URL` carries
+  `https://minio-cluster-console.talos.lab.example.io` in the manifest — the **neutral** domain of
+  the public repo, substituted by `minio-cluster-up.sh` from `LAB_DOMAIN` (`lab.env`) along with
+  the `HTTPRoute` hostnames. A direct `kubectl apply` keeps the example domain and breaks the
+  login redirects. See [`../../README.md`](../../README.md#-lab_domain--the-ui-domain).
 
-## 📚 Références
+## 📚 References
 
-- `../README.md` — MinIO standalone, et le détail du **pourquoi le fork `pgsty/minio`**.
-- `../../local-path-storage/` — la StorageClass consommée par les 4 drives.
-- `../../cloudnative-pg/` — les sauvegardes PostgreSQL qui visent ce cluster.
-- [Documentation MinIO (Kubernetes)](https://min.io/docs/minio/kubernetes/upstream/) — déploiement
-  distribué, erasure coding et quorum.
+- `../README.md` — standalone MinIO, and the details of **why the `pgsty/minio` fork**.
+- `../../local-path-storage/` — the StorageClass consumed by the 4 drives.
+- `../../cloudnative-pg/` — the PostgreSQL backups that target this cluster.
+- [MinIO documentation (Kubernetes)](https://min.io/docs/minio/kubernetes/upstream/) — distributed
+  deployment, erasure coding and quorum.

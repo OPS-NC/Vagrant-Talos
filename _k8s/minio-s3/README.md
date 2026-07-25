@@ -1,87 +1,91 @@
-# 🪣 `minio-s3/` — MinIO standalone (S3 + console d'admin) sur local-path
+<!-- i18n -->
+**English** · [Français](LISEZ-MOI.md)
+<!-- /i18n -->
 
-> Un endpoint **compatible S3** dans le cluster, en **un seul pod**, avec une **console
-> d'administration complète** (fork Pigsty). C'est la version simple : un PVC `local-path`,
-> aucune résilience. La version résiliente est dans **[`cluster/`](./cluster/)**.
+# 🪣 `minio-s3/` — standalone MinIO (S3 + admin console) on local-path
 
-## 🎯 À quoi ça sert
+> An **S3-compatible** endpoint inside the cluster, in a **single pod**, with a **full admin
+> console** (Pigsty fork). This is the simple version: one `local-path` PVC, zero resilience.
+> The resilient version lives in **[`cluster/`](./cluster/)**.
 
-Avoir un S3 local pour tester des backups, des SDK, `mc`, des politiques de buckets — sans
-compte cloud. Deux hostnames exposés en HTTPS via `main-gateway` (wildcard `*.talos.lab.example.io`) :
+## 🎯 Purpose
 
-| Service | URL | Port conteneur |
+Get a local S3 to test backups, SDKs, `mc`, bucket policies — with no cloud account. Two
+hostnames exposed over HTTPS via `main-gateway` (wildcard `*.talos.lab.example.io`):
+
+| Service | URL | Container port |
 |---|---|---|
-| **API S3** | `https://minio.talos.lab.example.io` | 9000 |
-| **Console admin** | `https://minio-console.talos.lab.example.io` | 9001 |
+| **S3 API** | `https://minio.talos.lab.example.io` | 9000 |
+| **Admin console** | `https://minio-console.talos.lab.example.io` | 9001 |
 
-En interne au cluster : `http://minio.minio-s3.svc.cluster.local:9000`.
+Inside the cluster: `http://minio.minio-s3.svc.cluster.local:9000`.
 
-### Standalone (ici) ou distribué ([`cluster/`](./cluster/)) ?
+### Standalone (here) or distributed ([`cluster/`](./cluster/))?
 
-| | **Standalone (ici)** | **Cluster** (`cluster/`) |
+| | **Standalone (here)** | **Cluster** (`cluster/`) |
 |---|---|---|
 | Workload | Deployment, 1 replica | StatefulSet, **4 pods** (`podManagementPolicy: Parallel`) |
-| Drives | 1 PVC `local-path` 10 Gi | **4** PVC `local-path` 10 Gi (1/pod, 1/worker) |
-| Erasure coding | ❌ aucun | ✅ **EC:2** |
-| Résilience | nulle : le node meurt ⇒ données perdues | tolère ~2 nœuds/drives down |
-| Workers requis | 1 | **4** (anti-affinité stricte) |
-| Namespace | `minio-s3` | `minio-cluster` (les deux coexistent) |
+| Drives | 1 `local-path` PVC, 10 Gi | **4** `local-path` PVCs, 10 Gi (1/pod, 1/worker) |
+| Erasure coding | ❌ none | ✅ **EC:2** |
+| Resilience | none: the node dies ⇒ data gone | tolerates ~2 nodes/drives down |
+| Workers required | 1 | **4** (strict anti-affinity) |
+| Namespace | `minio-s3` | `minio-cluster` (both coexist) |
 | Hostnames | `minio` / `minio-console` | `minio-cluster` / `minio-cluster-console` |
 
-> ℹ️ **Les backups du lab ne visent plus ce standalone.** Depuis le passage au cluster MinIO,
-> `../cloudnative-pg/pg-backup-up.sh` et `pg-app-backup-cnpg-up.sh` pointent
-> `http://minio.minio-cluster.svc.cluster.local:9000`. Ce dossier reste le bac à sable simple
-> (et la brique pédagogique « avant/après erasure coding »).
+> ℹ️ **The lab backups no longer target this standalone.** Since the move to the MinIO cluster,
+> `../cloudnative-pg/pg-backup-up.sh` and `pg-app-backup-cnpg-up.sh` point at
+> `http://minio.minio-cluster.svc.cluster.local:9000`. This directory remains the simple sandbox
+> (and the teaching component for "before/after erasure coding").
 
-## 📋 Prérequis
+## 📋 Prerequisites
 
-| Prérequis | Pourquoi | Vérifier |
+| Prerequisite | Why | Verify |
 |---|---|---|
-| StorageClass **`local-path`** (`../local-path-storage/`) | le PVC 10 Gi de `/data` ; `minio-up.sh` s'arrête sans elle | `kubectl get storageclass local-path` |
-| `main-gateway` + écouteur `https` (`../envoy-gateway/`) | porte les deux `HTTPRoute` | `kubectl get gateway -n envoy-gateway-system` |
-| Cert wildcard `*.talos.lab.example.io` (`../cert-manager/`) | TLS des deux hostnames | `kubectl -n envoy-gateway-system get certificate` |
-| DNS `minio` + `minio-console` → `192.168.56.200` | atteindre le VIP Envoy | `getent hosts minio.talos.lab.example.io` |
-| `openssl` sur l'hôte | génère le mot de passe root par défaut | `openssl version` |
+| StorageClass **`local-path`** (`../local-path-storage/`) | the 10 Gi PVC behind `/data`; `minio-up.sh` bails out without it | `kubectl get storageclass local-path` |
+| `main-gateway` + `https` listener (`../envoy-gateway/`) | carries both `HTTPRoute`s | `kubectl get gateway -n envoy-gateway-system` |
+| Wildcard cert `*.talos.lab.example.io` (`../cert-manager/`) | TLS for both hostnames | `kubectl -n envoy-gateway-system get certificate` |
+| DNS `minio` + `minio-console` → `192.168.56.200` | to reach the Envoy VIP | `getent hosts minio.talos.lab.example.io` |
+| `openssl` on the host | generates the default root password | `openssl version` |
 
-## ⚡ Installation
+## ⚡ Install
 
 ```bash
 ./_k8s/minio-s3/minio-up.sh
-# Identifiants réglables : MINIO_ROOT_USER (défaut « admin ») / MINIO_ROOT_PASSWORD (généré)
-MINIO_ROOT_PASSWORD='MonPassLab' ./_k8s/minio-s3/minio-up.sh
+# Tunable credentials: MINIO_ROOT_USER (default "admin") / MINIO_ROOT_PASSWORD (generated)
+MINIO_ROOT_PASSWORD='MyLabPass' ./_k8s/minio-s3/minio-up.sh
 ```
 
-Image épinglée dans `minio-s3.yaml` : **`docker.io/pgsty/minio:RELEASE.2026-06-18T00-00-00Z`**.
+Image pinned in `minio-s3.yaml`: **`docker.io/pgsty/minio:RELEASE.2026-06-18T00-00-00Z`**.
 
-## 🔧 Ce que fait le script
+## 🔧 What the script does
 
-1. Vérifie `kubectl`, l'apiserver et la présence de la StorageClass `local-path`.
-2. Crée le namespace `minio-s3` et le Secret `minio-creds` (`root-user` / `root-password`) —
-   **jamais écrasé** s'il existe : relancer le script ne change pas le mot de passe.
-3. Applique `minio-s3.yaml` : PVC 10 Gi, Deployment (`strategy: Recreate`, car le volume RWO
-   n'accepte pas deux pods), Service ClusterIP, deux `HTTPRoute`.
-4. Attend le `rollout` (180 s) puis affiche les URL **et les identifiants root en clair sur
-   stdout** (cf. Pièges).
+1. Checks `kubectl`, the apiserver and the presence of the `local-path` StorageClass.
+2. Creates the `minio-s3` namespace and the `minio-creds` Secret (`root-user` / `root-password`) —
+   **never overwritten** if it exists: re-running the script does not change the password.
+3. Applies `minio-s3.yaml`: 10 Gi PVC, Deployment (`strategy: Recreate`, since the RWO volume
+   cannot take two pods), ClusterIP Service, two `HTTPRoute`s.
+4. Waits for the `rollout` (180 s) then prints the URLs **and the root credentials in clear text
+   on stdout** (see Pitfalls).
 
-### Pourquoi le fork Pigsty (`pgsty/minio`)
+### Why the Pigsty fork (`pgsty/minio`)
 
-Ni l'image « officielle », ni Bitnami :
+Neither the "official" image nor Bitnami:
 
-- **Bitnami** (`bitnami/minio`) s'appuie depuis **août 2025** sur des images **gelées**
-  (`bitnamilegacy/*`, plus mises à jour).
-- **Upstream `minio/minio`** a **amputé la console communautaire** vers
-  `RELEASE.2025-05-24` (il ne reste qu'un navigateur d'objets : plus de gestion users /
-  buckets / policies / lifecycle depuis le web), puis le dépôt a été **archivé
-  « no longer maintained »** (fév. 2026).
-- **Pigsty** rebuild le serveur MinIO **et restaure la console d'admin complète** → image
-  **récente** ET **administrable**. C'est le fork le plus actif (billet « MinIO is Dead, Long
-  Live MinIO »).
+- **Bitnami** (`bitnami/minio`) has relied since **August 2025** on **frozen** images
+  (`bitnamilegacy/*`, no longer updated).
+- **Upstream `minio/minio`** **gutted the community console** around
+  `RELEASE.2025-05-24` (only an object browser is left: no more user / bucket / policy /
+  lifecycle management from the web), then the repo was **archived as
+  "no longer maintained"** (Feb 2026).
+- **Pigsty** rebuilds the MinIO server **and restores the full admin console** → a **recent** AND
+  **manageable** image. It is the most active fork (see the "MinIO is Dead, Long Live MinIO"
+  post).
 
-Alternatives possibles : upstream épinglé `RELEASE.2025-04-22T22-12-26Z` (dernière release avec
-la console admin officielle, mais figé), autres forks de console (`huncrys/minio-console`,
-`georgmangold/console`), édition payante **AIStor**, ou simplement le CLI **`mc`**.
+Other options: upstream pinned at `RELEASE.2025-04-22T22-12-26Z` (the last release with the
+official admin console, but frozen), other console forks (`huncrys/minio-console`,
+`georgmangold/console`), the paid **AIStor** edition, or simply the **`mc`** CLI.
 
-## ✅ Vérifier
+## ✅ Verify
 
 ```bash
 kubectl -n minio-s3 get pods,pvc,svc,httproute
@@ -89,53 +93,52 @@ curl -sk -o /dev/null -w '%{http_code}\n' --resolve minio.talos.lab.example.io:4
   https://minio.talos.lab.example.io/minio/health/ready      # 200
 ```
 
-## 🌐 Accès
+## 🌐 Access
 
-| Quoi | Comment |
+| What | How |
 |---|---|
-| Console admin | `https://minio-console.talos.lab.example.io` |
-| API S3 | `https://minio.talos.lab.example.io` (path-style, `region` quelconque : `us-east-1`) |
-| Utilisateur root | `kubectl -n minio-s3 get secret minio-creds -o jsonpath='{.data.root-user}' \| base64 -d; echo` |
-| Mot de passe root | `kubectl -n minio-s3 get secret minio-creds -o jsonpath='{.data.root-password}' \| base64 -d; echo` |
+| Admin console | `https://minio-console.talos.lab.example.io` |
+| S3 API | `https://minio.talos.lab.example.io` (path-style, any `region`: `us-east-1`) |
+| Root user | `kubectl -n minio-s3 get secret minio-creds -o jsonpath='{.data.root-user}' \| base64 -d; echo` |
+| Root password | `kubectl -n minio-s3 get secret minio-creds -o jsonpath='{.data.root-password}' \| base64 -d; echo` |
 
-Le cert wildcard est émis par Let's Encrypt **staging** → avertissement TLS à accepter dans le
-navigateur, et `--insecure` pour `mc` (cf. `../cert-manager/`).
+The wildcard cert is issued by Let's Encrypt **staging** → a TLS warning to accept in the
+browser, and `--insecure` for `mc` (see `../cert-manager/`).
 
 ```bash
 mc alias set lab https://minio.talos.lab.example.io <user> <pass> --insecure
-mc mb lab/mon-bucket --insecure                       # créer un bucket
-mc admin user add lab bob <mot-de-passe> --insecure   # gérer les users
+mc mb lab/my-bucket --insecure                        # create a bucket
+mc admin user add lab bob <password> --insecure       # manage users
 mc ls lab --insecure
 ```
 
-## ⚠️ Pièges
+## ⚠️ Pitfalls
 
-- **`minio-up.sh` affiche l'utilisateur ET le mot de passe root en clair sur stdout** (fin de
-  run). Ça finit dans l'historique du terminal, les logs de CI, une capture d'écran… Préférer
-  les relire depuis le Secret (tableau ci-dessus) et penser à nettoyer la sortie si tu la
-  partages.
-- **Aucune résilience.** Deployment 1 replica + 1 PVC `local-path` = stockage **node-local**.
-  Si le worker qui héberge le PV meurt, les objets sont perdus. Pour de la vraie résilience
-  objet, utiliser **[`cluster/`](./cluster/)** (4 drives, EC:2, sur local-path lui aussi — pas
-  besoin de Longhorn : MinIO se réplique tout seul).
-- **Les 10 Gi du PVC ne sont pas une limite.** `local-path` provisionne un dossier hostPath :
-  rien n'empêche MinIO de remplir la partition `/var` du worker. L'`ephemeral-storage`
-  allocatable mesuré sur ce lab est de **~16,9 Go/node** (disque de 20 Go partagé avec l'OS et
-  les images conteneurs) → remplir un bucket déclenche du `DiskPressure` et l'**éviction** de
-  pods sur ce node. Surveiller `kubectl describe node <worker> | grep -i pressure`.
-- **Le Secret `minio-creds` n'est pas dans git** (créé par le script). Le perdre = perdre
-  l'accès root : `kubectl -n minio-s3 delete secret minio-creds` puis relancer le script
-  régénère un mot de passe, mais MinIO garde l'ancien tant que le pod n'est pas recréé.
-- **Console derrière un hostname distinct** : `MINIO_BROWSER_REDIRECT_URL` porte
-  `https://minio-console.talos.lab.example.io` dans `minio-s3.yaml` — domaine **neutre** du dépôt
-  public. `minio-up.sh` la substitue avec les hostnames des `HTTPRoute` depuis `LAB_DOMAIN`
-  (`lab.env`). Un `kubectl apply -f minio-s3.yaml` **direct** garde le domaine d'exemple et casse
-  les redirections de login. Cf. [`../README.md`](../README.md#-lab_domain--le-domaine-des-ui).
+- **`minio-up.sh` prints the root user AND password in clear text on stdout** (end of the run).
+  That ends up in your shell history, CI logs, a screenshot… Prefer reading them back from the
+  Secret (table above), and remember to scrub the output if you share it.
+- **No resilience at all.** A 1-replica Deployment + 1 `local-path` PVC = **node-local** storage.
+  If the worker hosting the PV dies, the objects are gone. For real object resilience, use
+  **[`cluster/`](./cluster/)** (4 drives, EC:2, on local-path as well — no need for Longhorn:
+  MinIO replicates on its own).
+- **The 10 Gi of the PVC is not a limit.** `local-path` provisions a hostPath directory: nothing
+  stops MinIO from filling the worker's `/var` partition. The allocatable `ephemeral-storage`
+  measured on this lab is **~16.9 GB/node** (20 GB disk shared with the OS and the container
+  images) → filling a bucket triggers `DiskPressure` and pod **eviction** on that node. Watch
+  `kubectl describe node <worker> | grep -i pressure`.
+- **The `minio-creds` Secret is not in git** (the script creates it). Losing it means losing root
+  access: `kubectl -n minio-s3 delete secret minio-creds` then re-running the script regenerates
+  a password, but MinIO keeps the old one until the pod is recreated.
+- **Console behind a separate hostname**: `MINIO_BROWSER_REDIRECT_URL` carries
+  `https://minio-console.talos.lab.example.io` in `minio-s3.yaml` — the **neutral** domain of the
+  public repo. `minio-up.sh` substitutes it, along with the `HTTPRoute` hostnames, from `LAB_DOMAIN`
+  (`lab.env`). A **direct** `kubectl apply -f minio-s3.yaml` keeps the example domain and breaks
+  the login redirects. See [`../README.md`](../README.md#-lab_domain--the-ui-domain).
 
-## 📚 Références
+## 📚 References
 
-- MinIO retire l'admin de la console communautaire :
+- MinIO removes admin features from the community console:
   <https://blocksandfiles.com/2025/06/19/minio-removes-management-features-from-basic-community-edition-object-storage-code/>
-- Discussion officielle : <https://github.com/minio/minio/discussions/21326>
-- Images du fork : <https://hub.docker.com/r/pgsty/minio/tags>
-- [`cluster/`](./cluster/) — la variante distribuée 4 nœuds (erasure coding).
+- Official discussion: <https://github.com/minio/minio/discussions/21326>
+- Fork images: <https://hub.docker.com/r/pgsty/minio/tags>
+- [`cluster/`](./cluster/) — the distributed 4-node variant (erasure coding).

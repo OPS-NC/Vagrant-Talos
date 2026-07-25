@@ -12,13 +12,20 @@ build.py — génère `docs/index.html` à partir des README du dépôt.
 
 Page unique et autonome : aucun CDN, aucun asset externe, aucun serveur.
 Le markdown est converti au build (markdown-it-py, CommonMark + tables) et
-coloré par Pygments ; le JS embarqué ne gère que navigation, recherche, thème
-et boutons « copier ».
+coloré par Pygments ; le JS embarqué ne gère que navigation, recherche, langue,
+thème et boutons « copier ».
 
 Utilisation :
     ./docs/build.py                  # uv installe les deps à la volée (PEP 723)
     uv run docs/build.py --out /tmp/doc.html
+    uv run docs/build.py --strict    # échoue si un lien interne ne résout pas
     make docs
+
+BILINGUE : chaque page existe en deux versions, dans le MÊME dossier —
+l'anglais porte le nom canonique (`README.md`, `CLAUDE.md`, `UPGRADE.md`), le
+français son miroir (`LISEZ-MOI.md`, `CLAUDE.fr.md`, `MISE-A-JOUR.md`), cf.
+MIROIRS. L'anglais est la langue par défaut ; le sélecteur EN/FR de la barre
+latérale bascule tout le site et l'URL (`#fr/_k8s-longhorn-readme`).
 
 AJOUTER UNE PAGE : rien à faire, tout `*.md` du dépôt est découvert
 automatiquement. Seuls le regroupement du menu et l'emoji viennent de
@@ -29,10 +36,12 @@ from __future__ import annotations
 
 import argparse
 import html
+import json
 import re
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import unquote
 
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
@@ -54,20 +63,84 @@ EXCLUS = {".git", ".vagrant", ".terraform", "node_modules", "docs", "iso", "_out
 # Un addon qui doit apparaître dans la doc doit donc être versionné.
 FORCER: set[str] = set()
 
+# --- Langues ----------------------------------------------------------------
+# nom du fichier anglais (canonique) -> nom de son miroir français, même dossier.
+MIROIRS = {
+    "README.md":  "LISEZ-MOI.md",
+    "CLAUDE.md":  "CLAUDE.fr.md",
+    "UPGRADE.md": "MISE-A-JOUR.md",
+}
+LANGUES = ("en", "fr")
+LANGUE_DEFAUT = "en"
+
+# Bannière « English · Français » posée en tête de chaque fichier pour les
+# lecteurs de GitHub. La page HTML a son propre sélecteur : on la retire.
+RE_BANNIERE = re.compile(r"<!--\s*i18n\s*-->.*?<!--\s*/i18n\s*-->\s*", re.DOTALL)
+
+# Libellés de l'interface. Tout texte visible du gabarit passe par ici.
+LIBELLES: dict[str, dict[str, str]] = {
+    "en": {
+        "recherche":       "Search…   /",
+        "recherche_aria":  "Search a page",
+        "sommaire":        "On this page",
+        "copier":          "Copy",
+        "copie":           "Copied!",
+        "echec":           "Failed",
+        "vers_clair":      "Switch to light theme",
+        "vers_sombre":     "Switch to dark theme",
+        "menu":            "Open the menu",
+        "langue_aria":     "Documentation language",
+        "source":          "Source:",
+        "sections":        "sections",
+        "badge":           "untracked",
+        "badge_titre":     "Not in git: local directory",
+        "badge_langue":    "EN",
+        "badge_langue_titre": "Not translated yet — English page shown",
+        "sous_titre":      "Talos Linux lab on VirtualBox, driven by Vagrant.",
+    },
+    "fr": {
+        "recherche":       "Rechercher…   /",
+        "recherche_aria":  "Rechercher une page",
+        "sommaire":        "Sur cette page",
+        "copier":          "Copier",
+        "copie":           "Copié !",
+        "echec":           "Échec",
+        "vers_clair":      "Passer en clair",
+        "vers_sombre":     "Passer en sombre",
+        "menu":            "Ouvrir le menu",
+        "langue_aria":     "Langue de la documentation",
+        "source":          "Source :",
+        "sections":        "sections",
+        "badge":           "non commité",
+        "badge_titre":     "Absent de git : dossier local",
+        "badge_langue":    "EN",
+        "badge_langue_titre": "Pas encore traduit — page anglaise affichée",
+        "sous_titre":      "Lab Talos Linux sur VirtualBox, piloté par Vagrant.",
+    },
+}
+
 # --- Plan du menu -----------------------------------------------------------
-# (titre de section, emoji, chemins ou dossiers dans l'ordre d'affichage)
-GROUPES: list[tuple[str, str, list[str]]] = [
-    ("Le lab",           "🏠", ["README.md", "CLAUDE.md", "talos/UPGRADE.md"]),
-    ("Plateforme",       "📦", ["_k8s/README.md"]),
-    ("Réseau",           "🌐", ["_k8s/cilium", "_k8s/calico", "_k8s/envoy-gateway",
-                                "_k8s/cert-manager"]),
-    ("Stockage",         "💾", ["_k8s/longhorn", "_k8s/local-path-storage", "_k8s/minio-s3"]),
-    ("Secrets",          "🔐", ["_k8s/vault-cluster", "_k8s/vault-secret-operator"]),
-    ("Bases de données", "🗄️", ["_k8s/cloudnative-pg", "_k8s/databasement"]),
-    ("Observabilité",    "👁️", ["_k8s/observability", "_k8s/node-problem-detector"]),
-    ("Sécurité",         "🛡️", ["_k8s/kyverno", "_k8s/trivy-operator"]),
-    ("Démos",            "🧪", ["_k8s/argocd", "_k8s/wordpress-example"]),
+# (titres par langue, emoji, chemins ANGLAIS ou dossiers, dans l'ordre d'affichage)
+GROUPES: list[tuple[dict[str, str], str, list[str]]] = [
+    ({"en": "The lab",       "fr": "Le lab"},           "🏠",
+     ["README.md", "CLAUDE.md", "talos/UPGRADE.md"]),
+    ({"en": "Platform",      "fr": "Plateforme"},       "📦", ["_k8s/README.md"]),
+    ({"en": "Networking",    "fr": "Réseau"},           "🌐",
+     ["_k8s/cilium", "_k8s/calico", "_k8s/envoy-gateway", "_k8s/cert-manager"]),
+    ({"en": "Storage",       "fr": "Stockage"},         "💾",
+     ["_k8s/longhorn", "_k8s/local-path-storage", "_k8s/minio-s3"]),
+    ({"en": "Secrets",       "fr": "Secrets"},          "🔐",
+     ["_k8s/vault-cluster", "_k8s/vault-secret-operator"]),
+    ({"en": "Databases",     "fr": "Bases de données"}, "🗄️",
+     ["_k8s/cloudnative-pg", "_k8s/databasement"]),
+    ({"en": "Observability", "fr": "Observabilité"},    "👁️",
+     ["_k8s/observability", "_k8s/node-problem-detector"]),
+    ({"en": "Security",      "fr": "Sécurité"},         "🛡️",
+     ["_k8s/kyverno", "_k8s/trivy-operator"]),
+    ({"en": "Demos",         "fr": "Démos"},            "🧪",
+     ["_k8s/argocd", "_k8s/wordpress-example"]),
 ]
+AUTRES = {"en": "Other", "fr": "Autres"}
 
 EMOJIS: dict[str, str] = {
     "README.md":                                  "🏠",
@@ -96,11 +169,15 @@ EMOJIS: dict[str, str] = {
     "_k8s/wordpress-example/README.md":           "📝",
 }
 
-# Encarts : un marqueur en tête de citation choisit la couleur.
+# Encarts : un marqueur en tête de citation choisit la couleur. Les deux langues
+# partagent la table, d'où les marqueurs FR *et* EN.
 ENCARTS: list[tuple[str, tuple[str, ...]]] = [
-    ("danger", ("⚠️", "🚨", "❌", "attention", "danger", "jamais", "ne pas", "ne jamais")),
-    ("astuce", ("💡", "✅", "🎯", "astuce", "conseil", "bon à savoir")),
-    ("info",   ("ℹ️", "📌", "📝", "🔍", "nb ", "nb :", "note", "remarque", "réf")),
+    ("danger", ("⚠️", "🚨", "❌", "attention", "danger", "jamais", "ne pas", "ne jamais",
+                "never", "do not", "don't", "warning")),
+    ("astuce", ("💡", "✅", "🎯", "astuce", "conseil", "bon à savoir",
+                "tip", "good to know")),
+    ("info",   ("ℹ️", "📌", "📝", "🔍", "nb ", "nb :", "note", "remarque", "réf",
+                "ref", "reminder")),
 ]
 
 
@@ -134,8 +211,13 @@ def ignores(chemins: list[str]) -> set[str]:
         return set()
 
 
+def lire(chemin: str) -> str:
+    """Texte d'une page, bannière de langue retirée."""
+    return RE_BANNIERE.sub("", (RACINE / chemin).read_text(encoding="utf-8"), count=1).lstrip()
+
+
 def decouvrir() -> list[dict]:
-    """Liste les pages markdown du dépôt, ordonnées selon GROUPES."""
+    """Liste les documents du dépôt (une entrée par paire EN/FR), selon GROUPES."""
     suivis = set(git("ls-files", "*.md").split())
     trouves = sorted(
         p.relative_to(RACINE).as_posix()
@@ -144,15 +226,28 @@ def decouvrir() -> list[dict]:
     )
     exclus = ignores(trouves) - FORCER
     restants = [c for c in trouves if c not in exclus]
-    pages: list[dict] = []
 
-    def prendre(chemin: str, groupe: str, emoji_defaut: str) -> None:
+    # apparie chaque page anglaise avec son miroir français, qui sort de la liste :
+    # ce n'est pas un document de plus, c'est l'autre version du même document.
+    miroir_de: dict[str, str] = {}
+    for chemin in list(restants):
+        p = Path(chemin)
+        if p.name in MIROIRS:
+            fr = (p.parent / MIROIRS[p.name]).as_posix()
+            if fr in restants:
+                miroir_de[chemin] = fr
+                restants.remove(fr)
+
+    docs: list[dict] = []
+
+    def prendre(chemin: str, groupe: dict[str, str], emoji_defaut: str) -> None:
         restants.remove(chemin)
-        pages.append({
-            "chemin": chemin,
+        fr = miroir_de.get(chemin, chemin)      # sans miroir : le FR retombe sur l'EN
+        docs.append({
+            "chemin": chemin,                   # chemin canonique (anglais)
+            "chemins": {"en": chemin, "fr": fr},
             "groupe": groupe,
             "emoji": EMOJIS.get(chemin, emoji_defaut),
-            "texte": (RACINE / chemin).read_text(encoding="utf-8"),
             # sans git on ne peut rien affirmer : on ne signale rien
             "suivi": chemin in suivis or not suivis,
         })
@@ -162,15 +257,16 @@ def decouvrir() -> list[dict]:
             if entree.endswith(".md"):
                 if entree in restants:
                     prendre(entree, groupe, emoji)
-            else:  # un dossier : ses README, le moins profond d'abord
+            else:  # un dossier : ses pages canoniques, la moins profonde d'abord
                 for chemin in sorted((c for c in list(restants)
-                                      if c.startswith(entree + "/") and c.endswith("README.md")),
+                                      if c.startswith(entree + "/")
+                                      and Path(c).name in MIROIRS),
                                      key=lambda c: (c.count("/"), c)):
                     prendre(chemin, groupe, emoji)
 
     for chemin in list(restants):     # rien ne disparaît du menu
-        prendre(chemin, "Autres", "📄")
-    return pages
+        prendre(chemin, AUTRES, "📄")
+    return docs
 
 
 # ===========================================================================
@@ -225,7 +321,11 @@ def creer_convertisseur() -> MarkdownIt:
 
 
 def _rendre_fence(self, tokens: list[Token], idx: int, options, env) -> str:
-    """Bloc de code : coloration Pygments + bouton copier + étiquette de langage."""
+    """Bloc de code : coloration Pygments + bouton copier + étiquette de langage.
+
+    Le bouton n'a pas de libellé au build : il est posé par le JS dans la langue
+    active, sinon basculer FR/EN laisserait des « Copier » dans la page anglaise.
+    """
     jeton = tokens[idx]
     langage = (jeton.info or "").strip().split()[0].lower() if jeton.info else ""
     try:
@@ -233,11 +333,10 @@ def _rendre_fence(self, tokens: list[Token], idx: int, options, env) -> str:
                           HtmlFormatter(nowrap=True))
     except ClassNotFound:
         corps = html.escape(jeton.content, quote=False)
-    etiquette = {"bash": "shell", "sh": "shell", "yml": "yaml", "": "texte",
-                 "text": "texte"}.get(langage, langage)
+    etiquette = {"bash": "shell", "sh": "shell", "yml": "yaml", "": "text"}.get(langage, langage)
     return (
         f'<figure class="bloc-code" data-langage="{html.escape(etiquette, quote=True)}">'
-        f'<button class="copier" type="button">Copier</button>'
+        f'<button class="copier" type="button"></button>'
         f'<pre><code>{corps}</code></pre></figure>'
     )
 
@@ -310,6 +409,50 @@ def convertir(md: MarkdownIt, page: dict) -> dict:
         "titre_html": md.renderInline(titre_brut),
         "titre_texte": sans_markdown(titre_brut),
     }
+
+
+# ===========================================================================
+#  Liens internes : `foo/README.md#ancre` → route `#en/foo-readme/ancre`
+# ===========================================================================
+
+RE_LIEN_MD = re.compile(r'href="([^":#?]+\.md)(#[^"]*)?"')
+RE_ID_TITRE = re.compile(r'<h[1-6][^>]*\sid="([^"]+)"')
+
+
+def resoudre(rendu: dict, index: dict[str, dict[str, str]],
+             ancres: dict[str, set[str]], alertes: list[str]) -> str:
+    """Réécrit les liens `*.md` du corps en routes internes de la page unique.
+
+    Sans cette passe, `[cilium/](../cilium/README.md)` resterait un lien
+    *fichier* : cliquable sur GitHub, mort sur GitHub Pages. Le fragment est
+    réconcilié avec les ancres réellement générées côté cible — les ancres
+    GitHub gardent le tiret de tête laissé par l'emoji du titre, les nôtres non.
+    """
+    base = Path(rendu["chemin"]).parent
+    table = index[rendu["langue"]]
+
+    def remplacer(m: re.Match[str]) -> str:
+        cible = (base / m.group(1)).as_posix()
+        cible = Path(cible).resolve().relative_to(RACINE).as_posix() \
+            if (RACINE / cible).exists() else cible
+        id_cible = table.get(cible)
+        if not id_cible:
+            alertes.append(f"{rendu['chemin']} → {m.group(1)} (page absente de la doc)")
+            return m.group(0)
+        # markdown-it percent-encode les caractères non ASCII : les ancres françaises
+        # (`#-accès-distant-…`) arrivent ici en `%C3%A8`, à décoder avant comparaison.
+        frag = unquote((m.group(2) or "")[1:])
+        if frag:
+            for essai in (frag, frag.strip("-_"), ancre(frag)):
+                if essai in ancres[id_cible]:
+                    frag = essai
+                    break
+            else:
+                alertes.append(f"{rendu['chemin']} → {m.group(1)}#{frag} (ancre inconnue)")
+                frag = ""
+        return f'href="#{id_cible}{"/" + frag if frag else ""}"'
+
+    return RE_LIEN_MD.sub(remplacer, rendu["corps"])
 
 
 # ===========================================================================
@@ -412,6 +555,16 @@ a:hover{text-decoration:underline;text-underline-offset:3px}
 .badge{display:inline-block;margin-left:.35rem;padding:0 .34rem;border-radius:4px;
   background:var(--danger-fond);color:var(--danger);font-size:.63rem;font-weight:650;
   text-transform:uppercase;letter-spacing:.04em;vertical-align:middle}
+.badge-langue{background:var(--info-fond);color:var(--info)}
+
+/* ---------- sélecteur de langue ---------- */
+.langues{display:flex;gap:.3rem;padding:0 1.1rem 1rem}
+.langues button{flex:1;padding:.32rem 0;border:1px solid var(--bord-fort);border-radius:7px;
+  background:var(--fond);color:var(--texte-2);font:650 .74rem/1.45 var(--sans);
+  letter-spacing:.05em;cursor:pointer;transition:color .12s,border-color .12s}
+.langues button:hover{color:var(--accent);border-color:var(--accent)}
+.langues button[aria-pressed="true"]{background:var(--accent-doux);color:var(--accent);
+  border-color:var(--accent)}
 
 /* ---------- en-tête de page ---------- */
 .fil{display:flex;align-items:center;gap:.45rem;flex-wrap:wrap;margin-bottom:.55rem;
@@ -518,6 +671,8 @@ details > :not(summary):last-child{margin-bottom:1.05rem}
 /* ---------- barre mobile ---------- */
 .barre{display:none;position:sticky;top:0;z-index:20;align-items:center;gap:.7rem;
   padding:.6rem .9rem;background:var(--fond);border-bottom:1px solid var(--bord)}
+.barre .langues{padding:0;margin-left:auto;gap:.25rem}
+.barre .langues button{padding:.3rem .45rem;min-width:2.3rem}
 .bouton-icone{display:grid;place-items:center;width:2.1rem;height:2.1rem;flex:0 0 auto;
   border:1px solid var(--bord-fort);border-radius:8px;background:var(--fond);
   color:var(--texte-2);font-size:1rem;cursor:pointer}
@@ -535,7 +690,8 @@ details > :not(summary):last-child{margin-bottom:1.05rem}
   .theme-flottant{display:none}
 }
 @media print{
-  .menu,.sommaire,.barre,.copier,.theme-flottant,.header-anchor,.voile{display:none!important}
+  .menu,.sommaire,.barre,.copier,.theme-flottant,.header-anchor,.voile,
+  .langues{display:none!important}
   .enveloppe{grid-template-columns:1fr}
   .page{display:block!important;page-break-after:always}
   .bloc-code,.table-scroll{box-shadow:none}
@@ -550,19 +706,48 @@ details > :not(summary):last-child{margin-bottom:1.05rem}
 
 JS = r"""
 (() => {
+  const LANGUES = __LANGUES__;
+  const LIBELLES = __LIBELLES__;
+  const DEFAUT = __DEFAUT__;
+
   const pages = [...document.querySelectorAll('.page')];
   const liens = [...document.querySelectorAll('.menu a[data-page]')];
   const menu  = document.querySelector('.menu');
   const voile = document.querySelector('.voile');
   const boite = document.querySelector('.sommaire');
+  const champ = document.querySelector('.recherche input');
   let observateur = null;
+
+  /* --- langue : mémorisée, mais toujours déduite de la page affichée --- */
+  const CLE_LANGUE = 'talos-doc-langue';
+  const memoLangue = localStorage.getItem(CLE_LANGUE);
+  let langue = LANGUES.includes(memoLangue) ? memoLangue : DEFAUT;
+  const mots = () => LIBELLES[langue];
+
+  const majLangue = (suivante) => {
+    langue = suivante;
+    localStorage.setItem(CLE_LANGUE, langue);
+    document.documentElement.lang = langue;
+    const m = mots();
+    document.querySelectorAll('.arbre').forEach(a => { a.hidden = a.dataset.langue !== langue; });
+    document.querySelectorAll('.langues button').forEach(b => {
+      b.setAttribute('aria-pressed', String(b.dataset.langue === langue));
+    });
+    champ.placeholder = m.recherche;
+    champ.setAttribute('aria-label', m.recherche_aria);
+    document.querySelectorAll('[data-menu-toggle]').forEach(b => b.setAttribute('aria-label', m.menu));
+    document.querySelectorAll('.langues').forEach(g => g.setAttribute('aria-label', m.langue_aria));
+    document.querySelectorAll('.copier').forEach(b => { b.textContent = m.copier; });
+    majTheme();
+    if (boite.firstElementChild) boite.firstElementChild.textContent = m.sommaire;
+  };
 
   /* --- sommaire de la page affichée + surlignage à la lecture --- */
   const construireSommaire = (page) => {
     const titres = [...page.querySelectorAll('h2[id],h3[id]')];
     observateur?.disconnect();
     if (titres.length < 3) { boite.innerHTML = ''; return; }
-    boite.innerHTML = '<h2>Sur cette page</h2>' + titres.map(h => {
+    boite.innerHTML = `<h2>${mots().sommaire}</h2>` + titres.map(h => {
       const libelle = h.textContent.replace(/#$/, '').trim();
       return `<a href="#${page.id}/${h.id}" data-pour="${h.id}"
                  class="${h.tagName === 'H3' ? 'n3' : ''}">${libelle}</a>`;
@@ -578,9 +763,14 @@ JS = r"""
     titres.forEach(h => observateur.observe(h));
   };
 
-  /* --- routage : #<page>/<section> --- */
+  /* --- routage : #<langue>/<page>/<section> ---
+     L'ancien format (#<page>/<section>, sans langue) reste accepté : les liens
+     déjà partagés continuent d'ouvrir la bonne page, dans la langue courante. */
   const afficher = (id, section) => {
-    const cible = pages.find(p => p.id === id) ?? pages[0];
+    const cible = pages.find(p => p.id === id)
+               ?? pages.find(p => p.dataset.langue === langue)
+               ?? pages[0];
+    if (cible.dataset.langue !== langue) majLangue(cible.dataset.langue);
     pages.forEach(p => p.classList.toggle('visible', p === cible));
     liens.forEach(a => {
       const actif = a.dataset.page === cible.id;
@@ -592,13 +782,27 @@ JS = r"""
     const h = section && cible.querySelector('[id="' + CSS.escape(section) + '"]');
     h ? h.scrollIntoView() : window.scrollTo(0, 0);
   };
-  const router = () => {
-    const [id, section] = decodeURIComponent(location.hash.slice(1)).split('/');
-    afficher(id, section);
+  const route = () => {
+    const parts = decodeURIComponent(location.hash.slice(1)).split('/').filter(Boolean);
+    return LANGUES.includes(parts[0])
+      ? { id: parts.slice(0, 2).join('/'), section: parts[2] }
+      : { id: parts.length ? langue + '/' + parts[0] : '', section: parts[1] };
   };
+  const router = () => { const r = route(); afficher(r.id, r.section); };
+
+  /* --- bascule de langue : même page, autre version --- */
+  document.querySelectorAll('.langues button').forEach(b => b.addEventListener('click', () => {
+    const suivante = b.dataset.langue;
+    if (suivante === langue) return;
+    const courante = pages.find(p => p.classList.contains('visible'));
+    const section = route().section;
+    majLangue(suivante);
+    location.hash = '#' + suivante + '/' + (courante?.dataset.doc ?? '')
+                  + (section ? '/' + section : '');
+    router();   /* si le hash n'a pas changé (page absente), on rend quand même */
+  }));
 
   /* --- recherche (titre, chemin, sections) ; « / » pour cibler le champ --- */
-  const champ = document.querySelector('.recherche input');
   champ.addEventListener('input', () => {
     const q = champ.value.trim().toLowerCase();
     liens.forEach(a => { a.hidden = !!q && !a.dataset.recherche.includes(q); });
@@ -617,32 +821,33 @@ JS = r"""
   document.addEventListener('click', async e => {
     const b = e.target.closest('.copier');
     if (!b) return;
+    const m = mots();
     try {
       await navigator.clipboard.writeText(b.parentElement.querySelector('code').innerText);
-      b.textContent = 'Copié !'; b.classList.add('ok');
-    } catch { b.textContent = 'Échec'; }
-    setTimeout(() => { b.textContent = 'Copier'; b.classList.remove('ok'); }, 1600);
+      b.textContent = m.copie; b.classList.add('ok');
+    } catch { b.textContent = m.echec; }
+    setTimeout(() => { b.textContent = mots().copier; b.classList.remove('ok'); }, 1600);
   });
 
   /* --- thème : SOMBRE par défaut, bascule mémorisée --- */
   const CLE = 'talos-doc-theme';
   const memo = localStorage.getItem(CLE);
   if (memo) document.documentElement.dataset.theme = memo;
-  const majLibelle = () => {
+  function majTheme() {
     const sombre = (document.documentElement.dataset.theme || 'dark') === 'dark';
+    const m = mots();
     document.querySelectorAll('[data-theme-toggle]').forEach(b => {
       b.textContent = sombre ? '☀' : '☾';
-      b.title = sombre ? 'Passer en clair' : 'Passer en sombre';
+      b.title = sombre ? m.vers_clair : m.vers_sombre;
       b.setAttribute('aria-label', b.title);
     });
-  };
+  }
   document.querySelectorAll('[data-theme-toggle]').forEach(b => b.addEventListener('click', () => {
     const suivant = (document.documentElement.dataset.theme || 'dark') === 'dark' ? 'light' : 'dark';
     document.documentElement.dataset.theme = suivant;
     localStorage.setItem(CLE, suivant);
-    majLibelle();
+    majTheme();
   }));
-  majLibelle();
 
   /* --- menu mobile --- */
   const basculer = ouvrir => {
@@ -655,6 +860,7 @@ JS = r"""
   liens.forEach(a => a.addEventListener('click', () => basculer(false)));
 
   addEventListener('hashchange', router);
+  majLangue(langue);
   router();
 })();
 """
@@ -664,17 +870,71 @@ JS = r"""
 #  Assemblage
 # ===========================================================================
 
-def construire(pages: list[dict], version: str) -> str:
-    md = creer_convertisseur()
-    articles: list[str] = []
-    menu: dict[str, list[str]] = {}
+def selecteur_langue(mots: dict[str, str]) -> str:
+    """Boutons EN/FR. Rendu deux fois (barre latérale et barre mobile)."""
+    boutons = "".join(
+        f'<button type="button" data-langue="{l}" aria-pressed="false">{l.upper()}</button>'
+        for l in LANGUES
+    )
+    return (f'<div class="langues" role="group" '
+            f'aria-label="{html.escape(mots["langue_aria"], quote=True)}">{boutons}</div>')
 
-    for page in pages:
-        r = convertir(md, page)
-        corps, sommaire = r["corps"], r["sommaire"]
-        chemin = page["chemin"]
-        badge = ("" if page["suivi"] else
-                 '<span class="badge" title="Absent de git : dossier local">non commité</span>')
+
+def rendre(docs: list[dict]) -> list[dict]:
+    """Rend chaque document dans chaque langue (une entrée par page HTML)."""
+    md = creer_convertisseur()
+    rendus: list[dict] = []
+    for doc in docs:
+        for langue in LANGUES:
+            chemin = doc["chemins"][langue]
+            page = {
+                "chemin": chemin,
+                "emoji": doc["emoji"],
+                "texte": lire(chemin),
+                "id": f"{langue}/{doc['id']}",
+            }
+            r = convertir(md, page)
+            rendus.append({
+                **r,
+                "id": page["id"],
+                "doc": doc["id"],
+                "langue": langue,
+                "chemin": chemin,
+                "groupe": doc["groupe"][langue],
+                "suivi": doc["suivi"],
+                # un document sans miroir s'affiche en anglais dans le menu français
+                "traduit": doc["chemins"]["en"] != doc["chemins"]["fr"] or langue == "en",
+            })
+    return rendus
+
+
+def construire(rendus: list[dict], version: str, alertes: list[str]) -> str:
+    # index chemin → route, par langue : les liens d'une page française visent
+    # les miroirs français ; le chemin anglais sert de repli (page non traduite).
+    index: dict[str, dict[str, str]] = {l: {} for l in LANGUES}
+    ancres: dict[str, set[str]] = {}
+    for r in rendus:
+        index[r["langue"]][r["chemin"]] = r["id"]
+        ancres[r["id"]] = set(RE_ID_TITRE.findall(r["corps"]))
+    for r in rendus:
+        index[r["langue"]].setdefault(
+            next(x["chemin"] for x in rendus
+                 if x["doc"] == r["doc"] and x["langue"] == "en"), r["id"])
+
+    articles: list[str] = []
+    menus: dict[str, dict[str, list[str]]] = {l: {} for l in LANGUES}
+
+    for r in rendus:
+        mots = LIBELLES[r["langue"]]
+        corps = resoudre(r, index, ancres, alertes)
+        badges = ""
+        if not r["suivi"]:
+            badges += (f'<span class="badge" title="{html.escape(mots["badge_titre"], quote=True)}">'
+                       f'{html.escape(mots["badge"])}</span>')
+        if not r["traduit"]:
+            badges += (f'<span class="badge badge-langue" '
+                       f'title="{html.escape(mots["badge_langue_titre"], quote=True)}">'
+                       f'{html.escape(mots["badge_langue"])}</span>')
 
         # premier encart promu en chapeau sous le titre (le H1 neutralisé laisse
         # des blancs en tête : d'où le lstrip avant de matcher)
@@ -685,40 +945,51 @@ def construire(pages: list[dict], version: str) -> str:
             chapeau, corps = m.group(1), corps[m.end():]
 
         articles.append(
-            f'<article class="page" id="{page["id"]}" '
+            f'<article class="page" id="{r["id"]}" data-doc="{r["doc"]}" '
+            f'data-langue="{r["langue"]}" '
             f'data-titre="{html.escape(r["titre_texte"], quote=True)}">'
-            f'<div class="fil"><span>{html.escape(chemin)}</span>{badge}</div>'
+            f'<div class="fil"><span>{html.escape(r["chemin"])}</span>{badges}</div>'
             f'<h1><span class="emo">{r["emoji"]}</span>{r["titre_html"]}</h1>'
             f'{f"""<div class="sous-titre">{chapeau}</div>""" if chapeau else ""}'
             f'{corps}'
-            f'<div class="pied"><span>Source : <code>{html.escape(chemin)}</code></span>'
-            f'<span>{len(sommaire)} sections</span></div>'
+            f'<div class="pied">'
+            f'<span>{html.escape(mots["source"])} <code>{html.escape(r["chemin"])}</code></span>'
+            f'<span>{len(r["sommaire"])} {html.escape(mots["sections"])}</span></div>'
             "</article>"
         )
 
         recherche = html.escape(" ".join(
-            [r["titre_texte"], chemin, *(s["titre"] for s in sommaire)]).lower(), quote=True)
-        menu.setdefault(page["groupe"], []).append(
-            f'<a href="#{page["id"]}" data-page="{page["id"]}" data-recherche="{recherche}">'
+            [r["titre_texte"], r["chemin"], *(s["titre"] for s in r["sommaire"])]).lower(),
+            quote=True)
+        menus[r["langue"]].setdefault(r["groupe"], []).append(
+            f'<a href="#{r["id"]}" data-page="{r["id"]}" data-recherche="{recherche}">'
             f'<span class="emo">{r["emoji"]}</span>'
-            f'<span class="txt">{html.escape(r["titre_texte"])}{badge}'
-            f'<span class="chemin">{html.escape(chemin)}</span></span></a>'
+            f'<span class="txt">{html.escape(r["titre_texte"])}{badges}'
+            f'<span class="chemin">{html.escape(r["chemin"])}</span></span></a>'
         )
 
-    ordre = [g for g, _, _ in GROUPES] + ["Autres"]
-    nav = "".join(
-        f'<nav class="groupe"><h2>{html.escape(g)}</h2>{"".join(menu[g])}</nav>'
-        for g in ordre if g in menu
-    )
+    arbres = []
+    for langue in LANGUES:
+        ordre = [g[0][langue] for g in GROUPES] + [AUTRES[langue]]
+        nav = "".join(
+            f'<nav class="groupe"><h2>{html.escape(g)}</h2>{"".join(menus[langue][g])}</nav>'
+            for g in ordre if g in menus[langue]
+        )
+        arbres.append(f'<div class="arbre" data-langue="{langue}" hidden>{nav}</div>')
+
+    mots = LIBELLES[LANGUE_DEFAUT]
+    js = (JS.replace("__LANGUES__", json.dumps(list(LANGUES)))
+            .replace("__LIBELLES__", json.dumps(LIBELLES, ensure_ascii=False))
+            .replace("__DEFAUT__", json.dumps(LANGUE_DEFAUT)))
 
     return f"""<!doctype html>
-<html lang="fr">
+<html lang="{LANGUE_DEFAUT}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark light">
 <meta name="generator" content="docs/build.py">
-<meta name="description" content="Documentation du lab Talos Linux sur VirtualBox, piloté par Vagrant.">
+<meta name="description" content="{html.escape(mots['sous_titre'], quote=True)}">
 <title>VagrantLab-Talos · Documentation</title>
 <style>
 {CSS}
@@ -728,10 +999,10 @@ def construire(pages: list[dict], version: str) -> str:
 <body>
 <div class="voile"></div>
 <header class="barre">
-  <button class="bouton-icone" data-menu-toggle aria-label="Ouvrir le menu">☰</button>
+  <button class="bouton-icone" data-menu-toggle aria-label="{html.escape(mots['menu'], quote=True)}">☰</button>
   <strong>VagrantLab-Talos</strong>
-  <button class="bouton-icone" data-theme-toggle aria-label="Passer en clair"
-          style="margin-left:auto">☀</button>
+  {selecteur_langue(mots)}
+  <button class="bouton-icone" data-theme-toggle>☀</button>
 </header>
 <div class="enveloppe">
   <aside class="menu">
@@ -739,17 +1010,18 @@ def construire(pages: list[dict], version: str) -> str:
       <span class="logo">🐧</span>
       <span>VagrantLab-Talos<small>{html.escape(version)}</small></span>
     </div>
+    {selecteur_langue(mots)}
     <div class="recherche">
-      <input type="search" placeholder="Rechercher…   /" aria-label="Rechercher une page">
+      <input type="search" placeholder="{html.escape(mots['recherche'], quote=True)}"
+             aria-label="{html.escape(mots['recherche_aria'], quote=True)}">
     </div>
-    {nav}
+    {"".join(arbres)}
   </aside>
   <main class="contenu">{"".join(articles)}</main>
-  <aside class="sommaire" aria-label="Sommaire de la page"></aside>
+  <aside class="sommaire" aria-label="{html.escape(mots['sommaire'], quote=True)}"></aside>
 </div>
-<button class="bouton-icone theme-flottant" data-theme-toggle
-        aria-label="Passer en clair">☀</button>
-<script>{JS}</script>
+<button class="bouton-icone theme-flottant" data-theme-toggle>☀</button>
+<script>{js}</script>
 </body>
 </html>
 """
@@ -759,25 +1031,41 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Génère la documentation HTML du lab.")
     ap.add_argument("--out", default=str(RACINE / "docs" / "index.html"),
                     help="fichier de sortie (défaut : docs/index.html)")
+    ap.add_argument("--strict", action="store_true",
+                    help="échoue si un lien interne ou une ancre ne résout pas")
     args = ap.parse_args()
 
-    pages = decouvrir()
-    if not pages:
+    docs = decouvrir()
+    if not docs:
         print("Aucun fichier markdown trouvé.", file=sys.stderr)
         return 1
-    for page in pages:  # identifiant de route, stable et lisible
-        page["id"] = re.sub(r"[^a-z0-9]+", "-",
-                            page["chemin"].lower().removesuffix(".md")).strip("-")
+    for doc in docs:  # identifiant de route, stable et lisible
+        doc["id"] = re.sub(r"[^a-z0-9]+", "-",
+                           doc["chemin"].lower().removesuffix(".md")).strip("-")
 
+    alertes: list[str] = []
+    rendus = rendre(docs)
     sortie = Path(args.out)
     sortie.parent.mkdir(parents=True, exist_ok=True)
-    sortie.write_text(construire(pages, git("log", "-1", "--format=%h · %cs") or "local"),
-                      encoding="utf-8")
+    sortie.write_text(
+        construire(rendus, git("log", "-1", "--format=%h · %cs") or "local", alertes),
+        encoding="utf-8")
 
     affiche = sortie.relative_to(RACINE) if sortie.is_relative_to(RACINE) else sortie
-    print(f"✅ {affiche} — {len(pages)} pages, {sortie.stat().st_size // 1024} Ko")
-    for page in pages:
-        print(f"   {page['emoji']} {page['chemin']}{'' if page['suivi'] else '  (non commité)'}")
+    print(f"✅ {affiche} — {len(docs)} documents × {len(LANGUES)} langues "
+          f"= {len(rendus)} pages, {sortie.stat().st_size // 1024} Ko")
+    for doc in docs:
+        etat = "" if doc["suivi"] else "  (non commité)"
+        miroir = doc["chemins"]["fr"]
+        etat += "" if miroir != doc["chemin"] else "  (⚠️ pas de miroir FR)"
+        print(f"   {doc['emoji']} {doc['chemin']:44s} ↔ {miroir}{etat}")
+
+    if alertes:
+        print(f"\n⚠️ {len(alertes)} lien(s) interne(s) non résolu(s) :", file=sys.stderr)
+        for a in sorted(set(alertes)):
+            print(f"   {a}", file=sys.stderr)
+        if args.strict:
+            return 1
     return 0
 
 

@@ -1,7 +1,8 @@
 # Makefile — raccourcis du lab. Rien ici ne touche à un cluster en route.
 #
-#   make docs        régénère la documentation HTML (docs/index.html)
-#   make validate    valide Vagrantfile + scripts + config Talos, SANS cluster
+#   make docs        régénère la documentation HTML bilingue (docs/index.html)
+#   make validate    valide Vagrantfile + scripts + config Talos + liens de la doc,
+#                    SANS cluster
 #
 # `docs` a besoin de `uv` (https://docs.astral.sh/uv/) : les dépendances Python
 # sont déclarées dans docs/build.py (PEP 723) et installées à la volée.
@@ -12,20 +13,25 @@ SHELL := /bin/bash
 
 DOCS_OUT := docs/index.html
 
-.PHONY: help docs docs-open validate validate-shell validate-vagrant validate-talos clean
+.PHONY: help docs docs-open validate validate-shell validate-vagrant validate-talos \
+        validate-docs clean
 
 help: ## Affiche cette aide
 	@grep -hE '^[a-z-]+:.*?##' $(MAKEFILE_LIST) \
 	  | awk 'BEGIN{FS=":.*?## "}{printf "  \033[1m%-16s\033[0m %s\n", $$1, $$2}'
 
-docs: ## Régénère docs/index.html depuis tous les README
+docs: ## Régénère docs/index.html depuis tous les README (EN + miroirs FR)
 	@uv run docs/build.py
 
 docs-open: docs ## Régénère puis ouvre la doc dans le navigateur
 	@xdg-open $(DOCS_OUT) >/dev/null 2>&1 || open $(DOCS_OUT)
 
-validate: validate-shell validate-vagrant validate-talos ## Tout valider (sans cluster)
+validate: validate-shell validate-vagrant validate-talos validate-docs ## Tout valider (sans cluster)
 	@echo "✅ Validation complète OK"
+
+validate-docs: ## Construit la doc dans un fichier jetable et exige des liens valides
+	@out="$$(mktemp -d)"; trap 'rm -rf "$$out"' EXIT; \
+	uv run docs/build.py --strict --out "$$out/index.html" >/dev/null && echo "✅ docs : liens et ancres OK"
 
 validate-shell: ## Vérifie la syntaxe de tous les scripts shell
 	@fail=0; \
