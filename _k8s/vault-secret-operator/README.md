@@ -150,7 +150,16 @@ Deployment alpine (envFrom) ── rolloutRestartTargets ──► RELANCÉ à c
 
 ### Prérequis
 
-- Cluster **CloudNativePG `pg-demo`** (ns `cnpg-demo`) en marche.
+> ⚠️ **Le cluster PostgreSQL doit être UP.** Toute la boucle en dépend : Vault s'y connecte (en
+> admin) pour rotater le mot de passe, et l'app s'y connecte avec les creds. Si `pg-demo` est
+> absent/arrêté, la config Vault (`database/config/…`) échoue, les rotations tombent en erreur
+> et le Secret n'est pas (re)généré. **Vérifier d'abord** :
+> ```bash
+> kubectl -n cnpg-demo get cluster pg-demo    # STATUS = "Cluster in healthy state", 3/3 instances
+> ```
+> Installer / relancer le cluster : voir `../cloudnative-pg/`.
+
+- Cluster **CloudNativePG `pg-demo`** (ns `cnpg-demo`) **en marche** (3/3 healthy).
 - **Accès superuser** activé (Vault s'y connecte en admin `postgres` pour rotater le password) :
   ```bash
   kubectl -n cnpg-demo patch cluster pg-demo --type=merge \
@@ -177,6 +186,32 @@ export VAULT_TOKEN=<root-token>
 # 2. App : ns + SA + VaultAuth + VaultDynamicSecret(static) + SecretTransformation + alpine
 kubectl apply -f _k8s/vault-secret-operator/k8s/pg-dynamic-rotate/pg-dynamic-rotate.yaml
 ```
+
+### Détail — la config côté Vault (`vault/pg-dynamic-rotate.sh`)
+
+Ce que le script écrit dans Vault (chaque objet et son rôle) :
+
+| Objet Vault | Commande (résumé) | Rôle |
+|-------------|-------------------|------|
+| Moteur `database/` | `vault secrets enable database` | Active le moteur de secrets « base de données ». |
+| Connexion `database/config/pg-demo` | `… plugin_name=postgresql-database-plugin allowed_roles=vault-rotate connection_url="…@pg-demo-rw.cnpg-demo…/postgres?sslmode=require" username=postgres password=<super> password_authentication=scram-sha-256` | **Où** Vault se connecte (le cluster PG) et **comment** (admin `postgres`, TLS). `allowed_roles` = les roles autorisés à utiliser cette connexion. |
+| Static role `database/static-roles/vault-rotate` | `… db_name=pg-demo username=vault-rotate rotation_period=3h` | Prend en gestion le **user PG fixe** `vault-rotate` et **rotate son mot de passe** toutes les `rotation_period`. `db_name` = nom de la *connexion* (pas de la base). |
+| Policy `pg-rotate-demo` | `path "database/static-creds/vault-rotate" { capabilities = ["read"] }` | Droit **minimal** : lire uniquement le static-creds de ce role. |
+| Role k8s `auth/kubernetes/role/pg-rotate-demo` | `… bound_service_account_names=pg-rotate bound_service_account_namespaces=pg-rotate-demo audience=vault token_policies=pg-rotate-demo` | **Qui** peut se logger (SA `pg-rotate` du ns `pg-rotate-demo`, audience `vault`) et **quels droits** il obtient (la policy ci-dessus). |
+
+Lecture des creds courants : `vault read database/static-creds/vault-rotate` → `username` (fixe) +
+`password` (courant) + `ttl` (temps restant avant la prochaine rotation).
+
+### Détail — les objets Kubernetes (`k8s/pg-dynamic-rotate/pg-dynamic-rotate.yaml`)
+
+| Objet K8s | Rôle |
+|-----------|------|
+| `Namespace pg-rotate-demo` | Isole la démo. |
+| `ServiceAccount pg-rotate` | Identité du pod présentée à Vault — **doit** matcher `bound_service_account_*` du role Vault. |
+| `VaultAuth pg-rotate` | **Comment** s'authentifier : méthode `kubernetes`, mount `kubernetes`, role `pg-rotate-demo`, `audiences: [vault]`. Utilise la `VaultConnection` « default » de l'opérateur (`http://vault.vault.svc…:8200`). |
+| `SecretTransformation pg-rotate-dsn` | **Reformate** `username`/`password` en variables prêtes à l'emploi : `DATABASE_URL` (DSN complète) + `PGHOST`/`PGPORT`/`PGDATABASE`/`PGUSER`/`PGPASSWORD`. |
+| `VaultDynamicSecret pg-rotate` | **Quoi** synchroniser : `mount: database`, `path: static-creds/vault-rotate`, `allowStaticCreds: true`. Écrit le Secret `pg-rotate-creds` (via la transformation ; `excludes: [".*"]` pour ne garder que les clés templatées) et **relance** le Deployment via `rolloutRestartTargets`. |
+| `Deployment pg-rotate-demo` (alpine) | Consomme le Secret en `envFrom` → la chaîne de connexion est dans ses variables d'env. **Redémarré** à chaque rotation. |
 
 ### Vérifier la rotation → redémarrage
 
