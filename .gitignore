@@ -17,3 +17,8 @@ iso/
 _out/
 kubeconfig
 talosconfig
+
+# Documentation générée : reconstruite par `make docs` en local et par la GitHub
+# Action à chaque push sur main (~500 Ko, inutile de la versionner).
+/docs/index.html
+/_site/

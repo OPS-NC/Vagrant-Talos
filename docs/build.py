@@ -1,0 +1,785 @@
+#!/usr/bin/env -S uv run --quiet --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#   "markdown-it-py[linkify]>=3.0",
+#   "mdit-py-plugins>=0.4",
+#   "Pygments>=2.18",
+# ]
+# ///
+"""
+build.py — génère `docs/index.html` à partir des README du dépôt.
+
+Page unique et autonome : aucun CDN, aucun asset externe, aucun serveur.
+Le markdown est converti au build (markdown-it-py, CommonMark + tables) et
+coloré par Pygments ; le JS embarqué ne gère que navigation, recherche, thème
+et boutons « copier ».
+
+Utilisation :
+    ./docs/build.py                  # uv installe les deps à la volée (PEP 723)
+    uv run docs/build.py --out /tmp/doc.html
+    make docs
+
+AJOUTER UNE PAGE : rien à faire, tout `*.md` du dépôt est découvert
+automatiquement. Seuls le regroupement du menu et l'emoji viennent de
+GROUPES / EMOJIS ci-dessous ; un dossier inconnu tombe dans « Autres ».
+"""
+
+from __future__ import annotations
+
+import argparse
+import html
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+from markdown_it import MarkdownIt
+from markdown_it.token import Token
+from mdit_py_plugins.anchors import anchors_plugin
+from pygments import highlight
+from pygments.formatters import HtmlFormatter
+from pygments.lexers import get_lexer_by_name
+from pygments.util import ClassNotFound
+
+RACINE = Path(__file__).resolve().parent.parent
+
+# Dossiers jamais explorés (dépendances, artefacts, sortie du générateur).
+EXCLUS = {".git", ".vagrant", ".terraform", "node_modules", "docs", "iso", "_out"}
+
+# Pages publiées MÊME si git les ignore. Volontairement VIDE : la page est publiée
+# sur GitHub Pages, où le build ne dispose que des fichiers versionnés. Y forcer un
+# dossier local produirait une page locale différente de la page publiée, et
+# risquerait d'y exposer une configuration privée (domaine réel, clés d'appli).
+# Un addon qui doit apparaître dans la doc doit donc être versionné.
+FORCER: set[str] = set()
+
+# --- Plan du menu -----------------------------------------------------------
+# (titre de section, emoji, chemins ou dossiers dans l'ordre d'affichage)
+GROUPES: list[tuple[str, str, list[str]]] = [
+    ("Le lab",           "🏠", ["README.md", "CLAUDE.md", "talos/UPGRADE.md"]),
+    ("Plateforme",       "📦", ["_k8s/README.md"]),
+    ("Réseau",           "🌐", ["_k8s/cilium", "_k8s/calico", "_k8s/envoy-gateway",
+                                "_k8s/cert-manager"]),
+    ("Stockage",         "💾", ["_k8s/longhorn", "_k8s/local-path-storage", "_k8s/minio-s3"]),
+    ("Secrets",          "🔐", ["_k8s/vault-cluster", "_k8s/vault-secret-operator"]),
+    ("Bases de données", "🗄️", ["_k8s/cloudnative-pg", "_k8s/databasement"]),
+    ("Observabilité",    "👁️", ["_k8s/observability", "_k8s/node-problem-detector"]),
+    ("Sécurité",         "🛡️", ["_k8s/kyverno", "_k8s/trivy-operator"]),
+    ("Démos",            "🧪", ["_k8s/argocd", "_k8s/wordpress-example"]),
+]
+
+EMOJIS: dict[str, str] = {
+    "README.md":                                  "🏠",
+    "CLAUDE.md":                                  "🤖",
+    "talos/UPGRADE.md":                           "⬆️",
+    "_k8s/README.md":                             "📦",
+    "_k8s/cilium/README.md":                      "🐝",
+    "_k8s/calico/README.md":                      "🐆",
+    "_k8s/envoy-gateway/README.md":               "🚪",
+    "_k8s/cert-manager/README.md":                "📜",
+    "_k8s/longhorn/README.md":                    "🐮",
+    "_k8s/local-path-storage/README.md":          "📁",
+    "_k8s/minio-s3/README.md":                    "🪣",
+    "_k8s/minio-s3/cluster/README.md":            "🧺",
+    "_k8s/vault-cluster/README.md":               "🔒",
+    "_k8s/vault-secret-operator/README.md":       "🔑",
+    "_k8s/vault-secret-operator/k8s/README.md":   "☸️",
+    "_k8s/vault-secret-operator/vault/README.md": "⚙️",
+    "_k8s/cloudnative-pg/README.md":              "🐘",
+    "_k8s/databasement/README.md":                "🏦",
+    "_k8s/observability/README.md":               "📈",
+    "_k8s/node-problem-detector/README.md":       "🩺",
+    "_k8s/kyverno/README.md":                     "⚖️",
+    "_k8s/trivy-operator/README.md":              "🔎",
+    "_k8s/argocd/README.md":                      "🐙",
+    "_k8s/wordpress-example/README.md":           "📝",
+}
+
+# Encarts : un marqueur en tête de citation choisit la couleur.
+ENCARTS: list[tuple[str, tuple[str, ...]]] = [
+    ("danger", ("⚠️", "🚨", "❌", "attention", "danger", "jamais", "ne pas", "ne jamais")),
+    ("astuce", ("💡", "✅", "🎯", "astuce", "conseil", "bon à savoir")),
+    ("info",   ("ℹ️", "📌", "📝", "🔍", "nb ", "nb :", "note", "remarque", "réf")),
+]
+
+
+# ===========================================================================
+#  Découverte des pages
+# ===========================================================================
+
+def git(*args: str) -> str:
+    """Appelle git dans le dépôt ; chaîne vide si git est absent ou en erreur."""
+    try:
+        return subprocess.run(["git", "-C", str(RACINE), *args],
+                              capture_output=True, text=True, check=True).stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return ""
+
+
+def ignores(chemins: list[str]) -> set[str]:
+    """Sous-ensemble des chemins que git ignore (ex. le projet local proxmox/).
+
+    On documente le dépôt, pas les dossiers de travail locaux — mais un fichier
+    simplement *untracked* reste publié, avec un badge (cf. databasement/).
+    """
+    if not chemins:
+        return set()
+    try:
+        res = subprocess.run(["git", "-C", str(RACINE), "check-ignore", "--stdin"],
+                             input="\n".join(chemins), capture_output=True, text=True,
+                             check=False)
+        return set(res.stdout.split())      # rc=1 quand rien n'est ignoré : normal
+    except FileNotFoundError:
+        return set()
+
+
+def decouvrir() -> list[dict]:
+    """Liste les pages markdown du dépôt, ordonnées selon GROUPES."""
+    suivis = set(git("ls-files", "*.md").split())
+    trouves = sorted(
+        p.relative_to(RACINE).as_posix()
+        for p in RACINE.rglob("*.md")
+        if not (EXCLUS & set(p.relative_to(RACINE).parts))
+    )
+    exclus = ignores(trouves) - FORCER
+    restants = [c for c in trouves if c not in exclus]
+    pages: list[dict] = []
+
+    def prendre(chemin: str, groupe: str, emoji_defaut: str) -> None:
+        restants.remove(chemin)
+        pages.append({
+            "chemin": chemin,
+            "groupe": groupe,
+            "emoji": EMOJIS.get(chemin, emoji_defaut),
+            "texte": (RACINE / chemin).read_text(encoding="utf-8"),
+            # sans git on ne peut rien affirmer : on ne signale rien
+            "suivi": chemin in suivis or not suivis,
+        })
+
+    for groupe, emoji, entrees in GROUPES:
+        for entree in entrees:
+            if entree.endswith(".md"):
+                if entree in restants:
+                    prendre(entree, groupe, emoji)
+            else:  # un dossier : ses README, le moins profond d'abord
+                for chemin in sorted((c for c in list(restants)
+                                      if c.startswith(entree + "/") and c.endswith("README.md")),
+                                     key=lambda c: (c.count("/"), c)):
+                    prendre(chemin, groupe, emoji)
+
+    for chemin in list(restants):     # rien ne disparaît du menu
+        prendre(chemin, "Autres", "📄")
+    return pages
+
+
+# ===========================================================================
+#  Conversion markdown → HTML
+# ===========================================================================
+
+# Emoji en tête de titre : les README commencent par un emoji (contrat de style),
+# et le générateur en ajoute un. Sans séparation, ils apparaîtraient en double.
+# La répétition tolère les espaces, pour qu'un titre en portant plusieurs
+# (`# 🏠 🐧 VagrantLab-Talos`) les garde tous groupés dans l'en-tête.
+RE_EMOJI_INITIAL = re.compile(
+    r"^((?:[\U0001F000-\U0001FAFF←-⇿⌀-➿⬀-⯿]"
+    r"[︎️‍]*[ \t]*)+)"
+)
+
+
+def separer_emoji(titre: str) -> tuple[str, str]:
+    """Détache le ou les emoji de tête d'un titre : (emoji, reste)."""
+    m = RE_EMOJI_INITIAL.match(titre)
+    return (m.group(1).strip(), titre[m.end():].lstrip()) if m else ("", titre)
+
+
+def sans_markdown(texte: str) -> str:
+    """Texte brut d'un titre (menu, onglet, recherche) : le balisage est retiré."""
+    texte = re.sub(r"`([^`]*)`", r"\1", texte)
+    texte = re.sub(r"\*\*([^*]*)\*\*", r"\1", texte)
+    texte = re.sub(r"\*([^*]*)\*", r"\1", texte)
+    texte = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", texte)
+    return texte.strip()
+
+
+def ancre(titre: str) -> str:
+    """Slug façon GitHub : minuscules, accents gardés, ponctuation et emoji retirés.
+
+    Les titres du dépôt commencent par un emoji (`## 🚑 7. Dépannage`) : sans le
+    `strip("-")` final, le slug hériterait d'un tiret de tête.
+    """
+    slug = "".join(c for c in titre.lower() if c.isalnum() or c in " -_")
+    return re.sub(r"[\s-]+", "-", slug).strip("-_")
+
+
+def creer_convertisseur() -> MarkdownIt:
+    """CommonMark + tables + HTML brut (`<details>`) + ancres sur les titres."""
+    md = (
+        MarkdownIt("commonmark", {"html": True, "linkify": True, "breaks": False})
+        .enable(["table", "strikethrough"])
+        .use(anchors_plugin, max_level=4, permalink=True, permalinkSymbol="#",
+             permalinkSpace=False, slug_func=ancre)
+    )
+    md.add_render_rule("fence", _rendre_fence)
+    return md
+
+
+def _rendre_fence(self, tokens: list[Token], idx: int, options, env) -> str:
+    """Bloc de code : coloration Pygments + bouton copier + étiquette de langage."""
+    jeton = tokens[idx]
+    langage = (jeton.info or "").strip().split()[0].lower() if jeton.info else ""
+    try:
+        corps = highlight(jeton.content, get_lexer_by_name(langage or "text"),
+                          HtmlFormatter(nowrap=True))
+    except ClassNotFound:
+        corps = html.escape(jeton.content, quote=False)
+    etiquette = {"bash": "shell", "sh": "shell", "yml": "yaml", "": "texte",
+                 "text": "texte"}.get(langage, langage)
+    return (
+        f'<figure class="bloc-code" data-langage="{html.escape(etiquette, quote=True)}">'
+        f'<button class="copier" type="button">Copier</button>'
+        f'<pre><code>{corps}</code></pre></figure>'
+    )
+
+
+def genre_encart(texte: str) -> str:
+    """Choisit le style d'un encart d'après le début de son texte."""
+    debut = texte.lstrip().lower()[:48]
+    for nom, marqueurs in ENCARTS:
+        if any(m in debut for m in marqueurs):
+            return nom
+    return "neutre"
+
+
+def preparer(jetons: list[Token]) -> tuple[str | None, list[dict]]:
+    """Annote les jetons (encarts, tableaux scrollables) et relève le sommaire.
+
+    Retourne (titre H1, sommaire) ; le H1 est retiré du corps, il sert d'en-tête.
+    """
+    titre_h1: str | None = None
+    sommaire: list[dict] = []
+
+    for i, jeton in enumerate(jetons):
+        if jeton.type == "blockquote_open":
+            # le premier inline de la citation détermine la couleur de l'encart
+            suite = next((t for t in jetons[i + 1:i + 6] if t.type == "inline"), None)
+            jeton.attrJoin("class", f"encart encart-{genre_encart(suite.content if suite else '')}")
+
+        elif jeton.type == "heading_open":
+            inline = jetons[i + 1]
+            texte = re.sub(r"\s*#\s*$", "", inline.content).strip()
+            if jeton.tag == "h1" and titre_h1 is None:
+                titre_h1 = texte
+                # neutralise le H1 : il est réaffiché dans l'en-tête de page
+                jeton.type, jeton.tag, jeton.hidden = "html_block", "", True
+                jeton.content = ""
+                inline.children, inline.content = [], ""
+                jetons[i + 2].hidden = True
+            elif jeton.tag in ("h2", "h3"):
+                sommaire.append({"niveau": jeton.tag, "titre": texte,
+                                 "ancre": jeton.attrGet("id") or ""})
+
+    return titre_h1, sommaire
+
+
+def convertir(md: MarkdownIt, page: dict) -> dict:
+    """Rend une page et renvoie tout ce dont le gabarit a besoin.
+
+    Le titre est décliné en trois formes : l'emoji (détaché du H1), le titre
+    formaté (le `code` du markdown devient un vrai <code>) et le titre brut
+    (menu, onglet, recherche).
+    """
+    jetons = md.parse(page["texte"])
+    titre_brut, sommaire = preparer(jetons)
+    corps = md.renderer.render(jetons, md.options, {})
+
+    # tableaux : encapsulés pour pouvoir défiler horizontalement sur mobile
+    corps = corps.replace("<table>", '<div class="table-scroll"><table>')
+    corps = corps.replace("</table>", "</table></div>")
+    # les ancres pointent vers la route interne #<page>/<section>
+    corps = re.sub(r'(class="header-anchor" href=")#',
+                   rf"\1#{page['id']}/", corps)
+
+    titre_brut = titre_brut or Path(page["chemin"]).parent.name or page["chemin"]
+    emoji, titre_brut = separer_emoji(titre_brut)
+    return {
+        "corps": corps,
+        "sommaire": sommaire,
+        # l'emoji du README prime ; sinon celui de la table EMOJIS / du groupe
+        "emoji": emoji or page["emoji"],
+        "titre_html": md.renderInline(titre_brut),
+        "titre_texte": sans_markdown(titre_brut),
+    }
+
+
+# ===========================================================================
+#  Feuille de style
+# ===========================================================================
+
+def css_pygments() -> str:
+    """Thèmes de coloration Pygments, alignés sur la logique de la palette.
+
+    Même règle que les variables CSS : le SOMBRE est le défaut, le clair ne
+    s'applique que si le lecteur l'a explicitement choisi. Sans ça, les blocs de
+    code resteraient colorés en thème clair sur une page sombre.
+    """
+    def defs(style: str, selecteur: str) -> str:
+        try:
+            return HtmlFormatter(style=style).get_style_defs(selecteur)
+        except ClassNotFound:
+            return HtmlFormatter().get_style_defs(selecteur)
+
+    sombre = defs("github-dark", ':root:not([data-theme="light"]) .bloc-code pre')
+    clair = defs("friendly", ':root[data-theme="light"] .bloc-code pre')
+    return (
+        f"{sombre}\n{clair}\n"
+        # le fond des blocs vient de nos variables, pas du thème Pygments
+        ".bloc-code pre{background:none!important}\n"
+    )
+
+
+PALETTE_SOMBRE = """
+  --fond:#15161a; --fond-2:#1c1e23; --fond-3:#24272d;
+  --texte:#e9eaec; --texte-2:#a5a9b2; --texte-3:#7a7f88;
+  --bord:#2b2e35; --bord-fort:#3a3e46;
+  --accent:#74a0f7; --accent-doux:#1b2436;
+  --code-fond:#1a1c20;
+  --danger:#f28b80; --danger-fond:#2a1c1b;
+  --astuce:#6bc99a; --astuce-fond:#14231f;
+  --info:#74a0f7;   --info-fond:#171f2e;
+  --ombre:0 1px 2px rgba(0,0,0,.3),0 4px 14px rgba(0,0,0,.24);
+"""
+
+CSS = """
+*,*::before,*::after{box-sizing:border-box}
+:root{
+  --fond:#fdfdfc; --fond-2:#f5f5f3; --fond-3:#ebebe7;
+  --texte:#1b1c1f; --texte-2:#5b5e65; --texte-3:#8a8e95;
+  --bord:#e3e3df; --bord-fort:#cecec8;
+  --accent:#2f6feb; --accent-doux:#eaf1fe;
+  --code-fond:#f8f8f6;
+  --danger:#c4342b; --danger-fond:#fdf1f0;
+  --astuce:#177f50; --astuce-fond:#eff8f3;
+  --info:#2f6feb;   --info-fond:#eff4fe;
+  --ombre:0 1px 2px rgba(20,20,20,.05),0 4px 12px rgba(20,20,20,.04);
+  --mono:ui-monospace,"SF Mono","JetBrains Mono","Cascadia Code",Menlo,Consolas,monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Inter,Roboto,"Helvetica Neue",sans-serif;
+  --menu:290px; --toc:15.5rem; --texte-large:52rem;
+}
+/* SOMBRE PAR DÉFAUT : la palette claire ci-dessus n'est que la base, le sombre
+   s'applique sauf si le lecteur a explicitement choisi le clair via la bascule.
+   On n'écoute donc PAS prefers-color-scheme — c'est un choix assumé. */
+:root:not([data-theme="light"]){__SOMBRE__}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--fond);color:var(--texte);font:16px/1.7 var(--sans);
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline;text-underline-offset:3px}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+
+/* ---------- structure ----------
+   Le sommaire est une VRAIE colonne de grille (et non un élément `fixed` compensé
+   par une marge) : sinon, réserver sa place avec `margin-right` écrase le
+   `margin:0 auto` du contenu et le `margin-left:auto` restant décale tout le texte
+   vers la droite sur les grands écrans. */
+.enveloppe{display:grid;grid-template-columns:var(--menu) minmax(0,1fr);
+  min-height:100vh;align-items:start}
+.menu{position:sticky;top:0;height:100vh;overflow-y:auto;background:var(--fond-2);
+  border-right:1px solid var(--bord);padding:1.4rem 0 3rem;scrollbar-width:thin}
+.contenu{min-width:0;padding:2.4rem clamp(1.2rem,4vw,3.4rem) 6rem;
+  max-width:calc(var(--texte-large) + 6.8rem);margin-inline:auto}
+
+/* ---------- menu ---------- */
+.marque{display:flex;align-items:center;gap:.65rem;padding:0 1.3rem 1.1rem;
+  font-weight:650;letter-spacing:-.01em}
+.marque .logo{font-size:1.5rem;line-height:1}
+.marque small{display:block;font-weight:450;color:var(--texte-3);font-size:.74rem;
+  letter-spacing:0;font-family:var(--mono)}
+.recherche{padding:0 1.1rem 1rem}
+.recherche input{width:100%;padding:.5rem .7rem;border:1px solid var(--bord-fort);
+  border-radius:8px;background:var(--fond);color:var(--texte);font:inherit;font-size:.87rem}
+.groupe > h2{margin:0;padding:.85rem 1.35rem .35rem;font-size:.69rem;font-weight:650;
+  text-transform:uppercase;letter-spacing:.09em;color:var(--texte-3)}
+.menu a{display:flex;gap:.55rem;align-items:baseline;padding:.34rem 1.35rem;
+  color:var(--texte-2);font-size:.89rem;border-left:2px solid transparent}
+.menu a:hover{color:var(--texte);background:var(--fond-3);text-decoration:none}
+.menu a.actif{color:var(--accent);background:var(--accent-doux);
+  border-left-color:var(--accent);font-weight:550}
+.menu a .emo{flex:0 0 1.15rem;font-size:.95rem}
+.menu a .txt{min-width:0}
+.menu a .chemin{display:block;font-size:.7rem;color:var(--texte-3);
+  font-family:var(--mono);word-break:break-all;line-height:1.35}
+.badge{display:inline-block;margin-left:.35rem;padding:0 .34rem;border-radius:4px;
+  background:var(--danger-fond);color:var(--danger);font-size:.63rem;font-weight:650;
+  text-transform:uppercase;letter-spacing:.04em;vertical-align:middle}
+
+/* ---------- en-tête de page ---------- */
+.fil{display:flex;align-items:center;gap:.45rem;flex-wrap:wrap;margin-bottom:.55rem;
+  font:.77rem/1.5 var(--mono);color:var(--texte-3)}
+.page > h1{margin:.1rem 0 .35rem;font-size:clamp(1.7rem,3.4vw,2.3rem);line-height:1.18;
+  letter-spacing:-.022em;font-weight:680}
+.page > h1 .emo{margin-right:.45rem}
+/* `code` dans un titre : gardé en monospace mais sans le cadre du code inline,
+   qui alourdirait un titre de 2rem. */
+.page > h1 code{font-size:.86em;font-weight:640;background:var(--fond-3);
+  border:1px solid var(--bord);border-radius:7px;padding:.06em .3em}
+.page h2 code,.page h3 code,.page h4 code{font-size:.9em;font-weight:inherit}
+.sous-titre{margin:0 0 2.2rem;color:var(--texte-2);font-size:1.02rem;max-width:44rem}
+.sous-titre > p{margin:0 0 .4rem}
+
+/* ---------- contenu ---------- */
+.page h2,.page h3,.page h4{letter-spacing:-.015em;line-height:1.3;scroll-margin-top:1.5rem}
+.page h2{margin:2.9rem 0 .9rem;padding-bottom:.42rem;font-size:1.4rem;font-weight:660;
+  border-bottom:1px solid var(--bord)}
+.page h3{margin:2.1rem 0 .7rem;font-size:1.12rem;font-weight:640}
+.page h4{margin:1.6rem 0 .5rem;font-size:1rem;font-weight:640;color:var(--texte-2)}
+.page p{margin:0 0 1.05rem}
+.page ul,.page ol{margin:0 0 1.1rem;padding-left:1.4rem}
+.page li{margin:.28rem 0}
+.page li > p{margin:.3rem 0}
+.page li::marker{color:var(--texte-3)}
+.page hr{margin:2.6rem 0;border:0;border-top:1px solid var(--bord)}
+.page strong{font-weight:640;color:var(--texte)}
+.page img{max-width:100%;height:auto}
+.header-anchor{margin-left:.4rem;color:var(--texte-3);opacity:0;font-weight:400;
+  text-decoration:none;transition:opacity .12s}
+h2:hover>.header-anchor,h3:hover>.header-anchor,h4:hover>.header-anchor{opacity:1}
+
+/* ---------- code ---------- */
+code{font-family:var(--mono);font-size:.875em}
+:not(pre) > code{background:var(--fond-3);color:var(--texte);padding:.12em .38em;
+  border-radius:5px;border:1px solid var(--bord)}
+.bloc-code{position:relative;margin:0 0 1.25rem;background:var(--code-fond);
+  border:1px solid var(--bord);border-radius:10px;box-shadow:var(--ombre);overflow:hidden}
+.bloc-code::before{content:attr(data-langage);position:absolute;top:0;right:0;
+  padding:.18rem .6rem;font:600 .65rem/1.5 var(--mono);letter-spacing:.06em;
+  text-transform:uppercase;color:var(--texte-3);background:var(--fond-3);
+  border-left:1px solid var(--bord);border-bottom:1px solid var(--bord);
+  border-bottom-left-radius:8px}
+.bloc-code pre{margin:0;padding:1.55rem 1.05rem 1.05rem;overflow-x:auto;
+  font-family:var(--mono);font-size:.845rem;line-height:1.62;tab-size:2}
+.bloc-code code{white-space:pre}
+.copier{position:absolute;top:2.35rem;right:.55rem;z-index:2;padding:.26rem .55rem;
+  border:1px solid var(--bord-fort);border-radius:6px;background:var(--fond);
+  color:var(--texte-2);font:550 .72rem/1 var(--sans);cursor:pointer;opacity:0;
+  transition:opacity .13s,color .13s}
+.bloc-code:hover .copier,.copier:focus-visible{opacity:1}
+.copier:hover{color:var(--accent);border-color:var(--accent)}
+.copier.ok{color:var(--astuce);border-color:var(--astuce)}
+
+/* ---------- encarts (citations) ---------- */
+.encart{margin:0 0 1.25rem;padding:.85rem 1.1rem;border-left:3px solid var(--bord-fort);
+  border-radius:0 8px 8px 0;background:var(--fond-2);color:var(--texte-2)}
+.encart > :last-child{margin-bottom:0}
+.encart .bloc-code{margin:.75rem 0 .35rem;box-shadow:none}
+.encart-danger{border-left-color:var(--danger);background:var(--danger-fond)}
+.encart-astuce{border-left-color:var(--astuce);background:var(--astuce-fond)}
+.encart-info{border-left-color:var(--info);background:var(--info-fond)}
+
+/* ---------- tableaux ---------- */
+.table-scroll{overflow-x:auto;margin:0 0 1.3rem;border:1px solid var(--bord);
+  border-radius:10px;box-shadow:var(--ombre)}
+table{width:100%;border-collapse:collapse;font-size:.895rem}
+th,td{padding:.58rem .85rem;text-align:left;vertical-align:top;
+  border-bottom:1px solid var(--bord)}
+th{background:var(--fond-2);font-weight:640;font-size:.78rem;text-transform:uppercase;
+  letter-spacing:.05em;color:var(--texte-2);white-space:nowrap}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover{background:var(--fond-2)}
+
+/* ---------- details ---------- */
+details{margin:0 0 1.3rem;border:1px solid var(--bord);border-radius:10px;
+  background:var(--fond-2);overflow:hidden}
+details > summary{padding:.75rem 1.05rem;font-weight:600;cursor:pointer;list-style:none;
+  display:flex;align-items:center;gap:.5rem}
+details > summary::-webkit-details-marker{display:none}
+details > summary::before{content:"›";display:inline-block;font-size:1.15rem;
+  color:var(--texte-3);transition:transform .15s}
+details[open] > summary::before{transform:rotate(90deg)}
+details > summary:hover{background:var(--fond-3)}
+details > :not(summary){margin-left:1.05rem;margin-right:1.05rem}
+details > :not(summary):last-child{margin-bottom:1.05rem}
+
+/* ---------- sommaire de droite ---------- */
+.sommaire{display:none;position:sticky;top:2.4rem;max-height:calc(100vh - 5rem);
+  overflow-y:auto;padding:0 1.4rem 2rem 0;font-size:.82rem}
+.sommaire h2{margin:0 0 .5rem;font-size:.69rem;font-weight:650;text-transform:uppercase;
+  letter-spacing:.09em;color:var(--texte-3)}
+.sommaire a{display:block;padding:.18rem 0 .18rem .7rem;color:var(--texte-2);
+  border-left:2px solid var(--bord);line-height:1.45}
+.sommaire a:hover{color:var(--texte);text-decoration:none}
+.sommaire a.actif{color:var(--accent);border-left-color:var(--accent);font-weight:550}
+.sommaire a.n3{padding-left:1.5rem;font-size:.78rem}
+@media (min-width:1500px){
+  .enveloppe{grid-template-columns:var(--menu) minmax(0,1fr) var(--toc)}
+  .sommaire{display:block}
+}
+
+/* ---------- barre mobile ---------- */
+.barre{display:none;position:sticky;top:0;z-index:20;align-items:center;gap:.7rem;
+  padding:.6rem .9rem;background:var(--fond);border-bottom:1px solid var(--bord)}
+.bouton-icone{display:grid;place-items:center;width:2.1rem;height:2.1rem;flex:0 0 auto;
+  border:1px solid var(--bord-fort);border-radius:8px;background:var(--fond);
+  color:var(--texte-2);font-size:1rem;cursor:pointer}
+.bouton-icone:hover{color:var(--accent);border-color:var(--accent)}
+.theme-flottant{position:fixed;bottom:1.1rem;right:1.1rem;z-index:30;box-shadow:var(--ombre)}
+.voile{position:fixed;inset:0;z-index:35;background:rgba(0,0,0,.45);display:none}
+@media (max-width:1000px){
+  .enveloppe{grid-template-columns:1fr}
+  .barre{display:flex}
+  .menu{position:fixed;inset:0 auto 0 0;width:min(86vw,var(--menu));z-index:40;
+    transform:translateX(-100%);transition:transform .2s ease;box-shadow:var(--ombre)}
+  .menu.ouvert{transform:none}
+  .voile.ouvert{display:block}
+  .contenu{padding:1.6rem 1.15rem 5rem}
+  .theme-flottant{display:none}
+}
+@media print{
+  .menu,.sommaire,.barre,.copier,.theme-flottant,.header-anchor,.voile{display:none!important}
+  .enveloppe{grid-template-columns:1fr}
+  .page{display:block!important;page-break-after:always}
+  .bloc-code,.table-scroll{box-shadow:none}
+}
+.page{display:none}
+.page.visible{display:block}
+.pied{margin-top:4rem;padding-top:1.3rem;border-top:1px solid var(--bord);
+  color:var(--texte-3);font-size:.79rem;display:flex;justify-content:space-between;
+  gap:1rem;flex-wrap:wrap}
+""".replace("__SOMBRE__", PALETTE_SOMBRE)
+
+
+JS = r"""
+(() => {
+  const pages = [...document.querySelectorAll('.page')];
+  const liens = [...document.querySelectorAll('.menu a[data-page]')];
+  const menu  = document.querySelector('.menu');
+  const voile = document.querySelector('.voile');
+  const boite = document.querySelector('.sommaire');
+  let observateur = null;
+
+  /* --- sommaire de la page affichée + surlignage à la lecture --- */
+  const construireSommaire = (page) => {
+    const titres = [...page.querySelectorAll('h2[id],h3[id]')];
+    observateur?.disconnect();
+    if (titres.length < 3) { boite.innerHTML = ''; return; }
+    boite.innerHTML = '<h2>Sur cette page</h2>' + titres.map(h => {
+      const libelle = h.textContent.replace(/#$/, '').trim();
+      return `<a href="#${page.id}/${h.id}" data-pour="${h.id}"
+                 class="${h.tagName === 'H3' ? 'n3' : ''}">${libelle}</a>`;
+    }).join('');
+    const ancres = new Map([...boite.querySelectorAll('a')].map(a => [a.dataset.pour, a]));
+    observateur = new IntersectionObserver(entrees => {
+      for (const e of entrees) {
+        if (!e.isIntersecting) continue;
+        ancres.forEach(a => a.classList.remove('actif'));
+        ancres.get(e.target.id)?.classList.add('actif');
+      }
+    }, { rootMargin: '-8% 0px -80% 0px' });
+    titres.forEach(h => observateur.observe(h));
+  };
+
+  /* --- routage : #<page>/<section> --- */
+  const afficher = (id, section) => {
+    const cible = pages.find(p => p.id === id) ?? pages[0];
+    pages.forEach(p => p.classList.toggle('visible', p === cible));
+    liens.forEach(a => {
+      const actif = a.dataset.page === cible.id;
+      a.classList.toggle('actif', actif);
+      actif ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current');
+    });
+    construireSommaire(cible);
+    document.title = cible.dataset.titre + ' · VagrantLab-Talos';
+    const h = section && cible.querySelector('[id="' + CSS.escape(section) + '"]');
+    h ? h.scrollIntoView() : window.scrollTo(0, 0);
+  };
+  const router = () => {
+    const [id, section] = decodeURIComponent(location.hash.slice(1)).split('/');
+    afficher(id, section);
+  };
+
+  /* --- recherche (titre, chemin, sections) ; « / » pour cibler le champ --- */
+  const champ = document.querySelector('.recherche input');
+  champ.addEventListener('input', () => {
+    const q = champ.value.trim().toLowerCase();
+    liens.forEach(a => { a.hidden = !!q && !a.dataset.recherche.includes(q); });
+    document.querySelectorAll('.groupe').forEach(g => {
+      g.hidden = ![...g.querySelectorAll('a')].some(a => !a.hidden);
+    });
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === '/' && document.activeElement !== champ) { e.preventDefault(); champ.focus(); }
+    else if (e.key === 'Escape' && document.activeElement === champ) {
+      champ.value = ''; champ.dispatchEvent(new Event('input')); champ.blur();
+    }
+  });
+
+  /* --- copier un bloc de code --- */
+  document.addEventListener('click', async e => {
+    const b = e.target.closest('.copier');
+    if (!b) return;
+    try {
+      await navigator.clipboard.writeText(b.parentElement.querySelector('code').innerText);
+      b.textContent = 'Copié !'; b.classList.add('ok');
+    } catch { b.textContent = 'Échec'; }
+    setTimeout(() => { b.textContent = 'Copier'; b.classList.remove('ok'); }, 1600);
+  });
+
+  /* --- thème : SOMBRE par défaut, bascule mémorisée --- */
+  const CLE = 'talos-doc-theme';
+  const memo = localStorage.getItem(CLE);
+  if (memo) document.documentElement.dataset.theme = memo;
+  const majLibelle = () => {
+    const sombre = (document.documentElement.dataset.theme || 'dark') === 'dark';
+    document.querySelectorAll('[data-theme-toggle]').forEach(b => {
+      b.textContent = sombre ? '☀' : '☾';
+      b.title = sombre ? 'Passer en clair' : 'Passer en sombre';
+      b.setAttribute('aria-label', b.title);
+    });
+  };
+  document.querySelectorAll('[data-theme-toggle]').forEach(b => b.addEventListener('click', () => {
+    const suivant = (document.documentElement.dataset.theme || 'dark') === 'dark' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = suivant;
+    localStorage.setItem(CLE, suivant);
+    majLibelle();
+  }));
+  majLibelle();
+
+  /* --- menu mobile --- */
+  const basculer = ouvrir => {
+    menu.classList.toggle('ouvert', ouvrir);
+    voile.classList.toggle('ouvert', ouvrir);
+  };
+  document.querySelector('[data-menu-toggle]').addEventListener('click',
+    () => basculer(!menu.classList.contains('ouvert')));
+  voile.addEventListener('click', () => basculer(false));
+  liens.forEach(a => a.addEventListener('click', () => basculer(false)));
+
+  addEventListener('hashchange', router);
+  router();
+})();
+"""
+
+
+# ===========================================================================
+#  Assemblage
+# ===========================================================================
+
+def construire(pages: list[dict], version: str) -> str:
+    md = creer_convertisseur()
+    articles: list[str] = []
+    menu: dict[str, list[str]] = {}
+
+    for page in pages:
+        r = convertir(md, page)
+        corps, sommaire = r["corps"], r["sommaire"]
+        chemin = page["chemin"]
+        badge = ("" if page["suivi"] else
+                 '<span class="badge" title="Absent de git : dossier local">non commité</span>')
+
+        # premier encart promu en chapeau sous le titre (le H1 neutralisé laisse
+        # des blancs en tête : d'où le lstrip avant de matcher)
+        chapeau = ""
+        corps = corps.lstrip()
+        m = re.match(r'<blockquote class="encart[^"]*">(.*?)</blockquote>\s*', corps, re.DOTALL)
+        if m:
+            chapeau, corps = m.group(1), corps[m.end():]
+
+        articles.append(
+            f'<article class="page" id="{page["id"]}" '
+            f'data-titre="{html.escape(r["titre_texte"], quote=True)}">'
+            f'<div class="fil"><span>{html.escape(chemin)}</span>{badge}</div>'
+            f'<h1><span class="emo">{r["emoji"]}</span>{r["titre_html"]}</h1>'
+            f'{f"""<div class="sous-titre">{chapeau}</div>""" if chapeau else ""}'
+            f'{corps}'
+            f'<div class="pied"><span>Source : <code>{html.escape(chemin)}</code></span>'
+            f'<span>{len(sommaire)} sections</span></div>'
+            "</article>"
+        )
+
+        recherche = html.escape(" ".join(
+            [r["titre_texte"], chemin, *(s["titre"] for s in sommaire)]).lower(), quote=True)
+        menu.setdefault(page["groupe"], []).append(
+            f'<a href="#{page["id"]}" data-page="{page["id"]}" data-recherche="{recherche}">'
+            f'<span class="emo">{r["emoji"]}</span>'
+            f'<span class="txt">{html.escape(r["titre_texte"])}{badge}'
+            f'<span class="chemin">{html.escape(chemin)}</span></span></a>'
+        )
+
+    ordre = [g for g, _, _ in GROUPES] + ["Autres"]
+    nav = "".join(
+        f'<nav class="groupe"><h2>{html.escape(g)}</h2>{"".join(menu[g])}</nav>'
+        for g in ordre if g in menu
+    )
+
+    return f"""<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<meta name="generator" content="docs/build.py">
+<meta name="description" content="Documentation du lab Talos Linux sur VirtualBox, piloté par Vagrant.">
+<title>VagrantLab-Talos · Documentation</title>
+<style>
+{CSS}
+{css_pygments()}
+</style>
+</head>
+<body>
+<div class="voile"></div>
+<header class="barre">
+  <button class="bouton-icone" data-menu-toggle aria-label="Ouvrir le menu">☰</button>
+  <strong>VagrantLab-Talos</strong>
+  <button class="bouton-icone" data-theme-toggle aria-label="Passer en clair"
+          style="margin-left:auto">☀</button>
+</header>
+<div class="enveloppe">
+  <aside class="menu">
+    <div class="marque">
+      <span class="logo">🐧</span>
+      <span>VagrantLab-Talos<small>{html.escape(version)}</small></span>
+    </div>
+    <div class="recherche">
+      <input type="search" placeholder="Rechercher…   /" aria-label="Rechercher une page">
+    </div>
+    {nav}
+  </aside>
+  <main class="contenu">{"".join(articles)}</main>
+  <aside class="sommaire" aria-label="Sommaire de la page"></aside>
+</div>
+<button class="bouton-icone theme-flottant" data-theme-toggle
+        aria-label="Passer en clair">☀</button>
+<script>{JS}</script>
+</body>
+</html>
+"""
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="Génère la documentation HTML du lab.")
+    ap.add_argument("--out", default=str(RACINE / "docs" / "index.html"),
+                    help="fichier de sortie (défaut : docs/index.html)")
+    args = ap.parse_args()
+
+    pages = decouvrir()
+    if not pages:
+        print("Aucun fichier markdown trouvé.", file=sys.stderr)
+        return 1
+    for page in pages:  # identifiant de route, stable et lisible
+        page["id"] = re.sub(r"[^a-z0-9]+", "-",
+                            page["chemin"].lower().removesuffix(".md")).strip("-")
+
+    sortie = Path(args.out)
+    sortie.parent.mkdir(parents=True, exist_ok=True)
+    sortie.write_text(construire(pages, git("log", "-1", "--format=%h · %cs") or "local"),
+                      encoding="utf-8")
+
+    affiche = sortie.relative_to(RACINE) if sortie.is_relative_to(RACINE) else sortie
+    print(f"✅ {affiche} — {len(pages)} pages, {sortie.stat().st_size // 1024} Ko")
+    for page in pages:
+        print(f"   {page['emoji']} {page['chemin']}{'' if page['suivi'] else '  (non commité)'}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
