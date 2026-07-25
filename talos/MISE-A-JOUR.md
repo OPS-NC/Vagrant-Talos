@@ -7,7 +7,7 @@
 > Procédure **validée en réel** sur ce lab (v1.13.5 → v1.13.7) : 8 nodes, ~10 min,
 > **zéro interruption de l'API Kubernetes**. Les mesures sont au §7.
 
-Référence au moment du test : Talos **v1.13.7**, Kubernetes **v1.36.2**, `CNI=none` + Cilium,
+Référence au moment du test : Talos **v1.13.7**, Kubernetes **v1.36.2**, `CNI=cilium`,
 3 CP + 5 workers. Adapte les IP à ta topologie (`lab.env`) ; le dépôt livre 3 CP + 3 workers.
 
 > ⚠️ `talosctl` doit être **≥** la version cible. Vérifie avant de commencer :

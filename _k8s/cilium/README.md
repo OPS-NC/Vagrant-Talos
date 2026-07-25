@@ -22,7 +22,7 @@
 
 | Prerequisite | Why | Check |
 |---|---|---|
-| Cluster bootstrapped with **`CNI=none`** (`talos/cluster-up.sh`) | Talos must install no CNI at all: Cilium takes that slot | `kubectl get nodes` → `NotReady` **before** the install, that is expected |
+| Cluster bootstrapped with **`CNI=cilium`** (`talos/cluster-up.sh`, the default — `CNI=none` gives the same machine config) | Talos must install no CNI at all: Cilium takes that slot | `kubectl get nodes` → `NotReady` **before** the install, that is expected |
 | Host-only interface named **`enp0s8`** | source of the ARP announcement **and** of the VXLAN tunnels | `talosctl -n 192.168.56.10 get links` |
 | `kubectl` + `helm`, `KUBECONFIG` set | the script checks the binaries, then `/readyz` | `helm version` |
 

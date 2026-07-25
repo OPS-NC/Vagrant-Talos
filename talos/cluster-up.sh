@@ -36,9 +36,12 @@ OUT="${OUT:-_out}"
 #   worker       i  -> NETWORK.(WK_IP_START + (i-1)*WK_IP_STEP)  => .101, .102, ...
 CP_IP_START="${CP_IP_START:-10}"  ; CP_IP_STEP="${CP_IP_STEP:-10}"
 WK_IP_START="${WK_IP_START:-101}" ; WK_IP_STEP="${WK_IP_STEP:-1}"
-# CNI installé par Talos au bootstrap : "flannel" (défaut, avec le fix host-only)
-# ou "none" (aucun CNI => tu installes Cilium & co toi-même, cf. README §9).
-CNI="${CNI:-flannel}"
+# Intention de CNI (cf. lab.env.example) : "cilium" (défaut du dépôt) et "calico"
+# bootstrapent SANS CNI — c'est _k8s/platform-up.sh qui installe ensuite le chart ;
+# "flannel" est le seul posé par Talos lui-même ; "none" ne pose rien du tout.
+# Ce défaut DOIT rester aligné sur lab.env.example et sur _k8s/platform-up.sh :
+# deux défauts divergents installent deux CNI concurrents (réseau pod cassé).
+CNI="${CNI:-cilium}"
 # Version Talos = ISO (Vagrant) ET image d'installeur épinglée ci-dessous : sans ce
 # pin, la version INSTALLÉE suivait celle du binaire talosctl (skew avec l'ISO).
 TALOS_VERSION="${TALOS_VERSION:-v1.13.7}"

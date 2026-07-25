@@ -17,7 +17,7 @@ cluster configuration goes through `talosctl`.
 ```bash
 vagrant up                      # creates the VMs, they boot into maintenance mode
 ./talos/cluster-up.sh           # config + etcd bootstrap + kubeconfig + health
-./_k8s/platform-up.sh           # application layer (requires CNI=none, see §5)
+./_k8s/platform-up.sh           # application layer (assumes CNI=cilium, the default, see §9)
 ```
 
 | | |
@@ -164,8 +164,11 @@ Variables read by `cluster-up.sh` but missing from the template (all have a defa
 `OUT` (`_out`), `FORCE`.
 
 > 💡 **Create `lab.env` anyway.** Without it, the `Vagrantfile` and `cluster-up.sh` fall back
-> to their internal defaults — both aligned on `v1.13.7`, but you lose the Image Factory
-> installer image (iscsi extensions), and therefore Longhorn.
+> to their internal defaults — both aligned on `v1.13.7` and on `CNI=cilium`, but you lose the
+> Image Factory installer image (iscsi extensions), and therefore Longhorn. Keep the `CNI`
+> value in `lab.env` in sync with what you actually want: `cluster-up.sh` decides what Talos
+> lays down, `platform-up.sh` decides what Helm installs afterwards, and two disagreeing
+> values give you two competing CNIs — a broken pod network.
 
 > ⚠️ **`CP_MEM=2048` is too tight.** As soon as you stack the `_k8s/` addons, 2 GB control
 > planes starve etcd and the cluster collapses under load. Move to `CP_MEM=4096`
@@ -205,7 +208,7 @@ For another topology, edit `lab.env` or override on the spot:
 
 ```bash
 CONTROL_PLANES=1 WORKERS=2 ./talos/cluster-up.sh     # single
-CNI=none         ./talos/cluster-up.sh               # required for the _k8s/ layer
+CNI=flannel      ./talos/cluster-up.sh               # CNI laid down by Talos, no LB IPs
 ```
 
 > ⚠️ **NEVER re-run `cluster-up.sh` on an already-installed cluster.** Its maintenance mode
@@ -246,7 +249,7 @@ talosctl gen config talos-lab https://192.168.56.5:6443 \
   --additional-sans 192.168.56.5,192.168.56.10,192.168.56.20,192.168.56.30 \
   --config-patch               @talos/patch-all.yaml \
   --config-patch-control-plane @talos/patch-cp.yaml \
-  --config-patch-control-plane @talos/cni-flannel.yaml \
+  --config-patch-control-plane "@talos/cni-${CNI:-cilium}.yaml" \
   --output-dir _out
 
 export TALOSCONFIG="$PWD/_out/talosconfig"
@@ -259,9 +262,10 @@ kube-apiserver endpoint is the **VIP** `192.168.56.5`, in single as in HA.
 > without the system extensions — and Longhorn fails later on `iscsiadm: not found`. The
 > value comes from `INSTALLER_IMAGE` (`lab.env`).
 
-> ⚠️ **Match `--config-patch-control-plane` to the CNI you want**: `@talos/cni-flannel.yaml`
-> or `@talos/cni-none.yaml`. Omitting that patch leaves Talos' default CNI in place, without
-> the host-only VXLAN fix (see §9).
+> ⚠️ **The CNI patch is not optional either.** One file per intent —
+> `cni-cilium.yaml` (the default), `cni-calico.yaml`, `cni-flannel.yaml`, `cni-none.yaml` —
+> hence the `${CNI}` above, read from `lab.env` like `cluster-up.sh` does. Omitting the patch
+> leaves Talos' default CNI in place, without the host-only VXLAN fix (see §9).
 
 > ℹ️ The VIP serves **only** kube-apiserver (`:6443`). For the **Talos API**
 > (`-e/--endpoints`, `:50000`) always target **real** node IPs (e.g. `192.168.56.10`), never
