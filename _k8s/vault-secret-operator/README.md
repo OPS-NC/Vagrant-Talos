@@ -121,6 +121,88 @@ kubectl -n nginx-test-vault rollout status deploy/nginx-test-vault          # no
 Ajouter une appli = un sous-dossier `talos-lab/<appli>/…`, une policy scopée à ce sous-dossier,
 un role k8s dédié (SA/ns de l'appli) — voir `vault/talos-lab.sh` comme gabarit.
 
+## Rotation de mot de passe PostgreSQL par Vault (database static role)
+
+Deuxième boucle **concrète et testée** : Vault gère et **fait tourner** le mot de passe d'un
+utilisateur PostgreSQL, et le workload consommateur est **redémarré automatiquement** à chaque
+rotation. Le serveur PG est le cluster CloudNativePG `pg-demo` (cf. `../cloudnative-pg/`).
+
+> **Static role ≠ dynamic role.** Le moteur `database` de Vault sait faire deux choses :
+> - **dynamic role** (`db/creds/<role>`) : Vault **crée** un user éphémère (nom aléatoire) par
+>   lease, révoqué à l'expiration (exemple `k8s/20-dynamic-db.yaml`). Le username change à
+>   chaque fois.
+> - **static role** (`database/static-roles/<role>`) : Vault gère un user **existant et fixe**
+>   (`vault-rotate`) et n'en **rotate que le mot de passe** sur un `rotation_period`. La chaîne
+>   de connexion reste stable, seul le password change. **C'est ce qui est monté ici.**
+
+### Chaîne complète
+
+```
+Vault (admin postgres) ──rotate password──► user PG « vault-rotate »
+        │  database/static-creds/vault-rotate  (username + password courant + ttl)
+        ▼
+VSO (VaultDynamicSecret allowStaticCreds) ──SecretTransformation──► Secret K8s pg-rotate-creds
+        │   DATABASE_URL=postgresql://vault-rotate:<pass>@pg-demo-rw.cnpg-demo…:5432/vault?sslmode=require
+        │   + PGHOST/PGPORT/PGDATABASE/PGUSER/PGPASSWORD
+        ▼
+Deployment alpine (envFrom) ── rolloutRestartTargets ──► RELANCÉ à chaque rotation
+```
+
+### Prérequis
+
+- Cluster **CloudNativePG `pg-demo`** (ns `cnpg-demo`) en marche.
+- **Accès superuser** activé (Vault s'y connecte en admin `postgres` pour rotater le password) :
+  ```bash
+  kubectl -n cnpg-demo patch cluster pg-demo --type=merge \
+    -p '{"spec":{"enableSuperuserAccess":true}}'
+  ```
+- Base `vault` + user `vault-rotate` (LOGIN) créés dans PG (une fois) :
+  ```bash
+  PRIMARY=$(kubectl -n cnpg-demo get pods -l cnpg.io/cluster=pg-demo,cnpg.io/instanceRole=primary -o jsonpath='{.items[0].metadata.name}')
+  kubectl -n cnpg-demo exec "$PRIMARY" -c postgres -- psql -c \
+    "CREATE ROLE \"vault-rotate\" WITH LOGIN PASSWORD 'bootstrap-temp-pw';"      # pass bootstrap, repris par Vault
+  kubectl -n cnpg-demo exec "$PRIMARY" -c postgres -- psql -c \
+    "CREATE DATABASE vault OWNER \"vault-rotate\";"
+  ```
+
+### Mise en route
+
+```bash
+# 1. Config Vault : moteur database + connexion admin + static role + policy + role k8s
+export VAULT_ADDR=http://127.0.0.1:8200      # kubectl -n vault port-forward svc/vault-active 8200:8200
+export VAULT_TOKEN=<root-token>
+# ROTATION_PERIOD réglable (défaut 2m = démo ; monter, ex. 24h, pour un usage réel)
+./_k8s/vault-secret-operator/vault/pg-dynamic-rotate.sh
+
+# 2. App : ns + SA + VaultAuth + VaultDynamicSecret(static) + SecretTransformation + alpine
+kubectl apply -f _k8s/vault-secret-operator/k8s/pg-dynamic-rotate/pg-dynamic-rotate.yaml
+```
+
+### Vérifier la rotation → redémarrage
+
+```bash
+# Creds courants côté Vault (username fixe, password + ttl qui bougent) :
+vault read database/static-creds/vault-rotate
+
+# Le Secret K8s rendu (DSN complète) :
+kubectl -n pg-rotate-demo get secret pg-rotate-creds -o jsonpath='{.data.DATABASE_URL}' | base64 -d; echo
+
+# Preuve du redémarrage : la generation du Deployment s'incrémente à chaque rotation
+kubectl -n pg-rotate-demo get deploy pg-rotate-demo -o jsonpath='{.metadata.generation}'; echo
+kubectl -n pg-rotate-demo get pods -l app=pg-rotate-demo -w    # un nouveau pod ~toutes les 2 min
+
+# Forcer une rotation immédiate (sans attendre la période) :
+vault write -f database/rotate-role/vault-rotate
+```
+
+> ⚠️ **`rotation_period=2m` est agressif** (le pod alpine redémarre toutes les 2 min) : c'est
+> voulu pour *voir* la rotation. Pour un vrai service, relancer `pg-dynamic-rotate.sh` avec
+> `ROTATION_PERIOD=24h` (ou éditer le static role). Chaque rotation = un rollout du consommateur.
+
+> **Sécurité / lab** : Vault se connecte en **superuser `postgres`** (le plus simple). En prod,
+> préférer un role d'admin dédié à privilèges réduits (juste de quoi `ALTER ROLE … PASSWORD`),
+> et envisager `database/rotate-root` pour que Vault rotate aussi son propre mot de passe admin.
+
 ## Appliquer les CRD (dossier `k8s/`)
 
 ```bash
