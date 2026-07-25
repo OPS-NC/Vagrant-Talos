@@ -1,0 +1,137 @@
+# minio-s3.yaml — MinIO (stockage objet compatible S3) en standalone sur le lab Talos.
+#
+# Image OFFICIELLE quay.io/minio/minio — PAS le chart Bitnami (images gratuites figées sur
+# `bitnamilegacy` depuis août 2025). Stockage : 1 PVC local-path (node-local, sans Longhorn).
+# Exposé en HTTPS via main-gateway sur le wildcard :
+#   - API S3   : https://minio.talos.lab.ops.nc          (port 9000)
+#   - Console  : https://minio-console.talos.lab.ops.nc  (port 9001)
+#
+# ⚠️ TAG ÉPINGLÉ VOLONTAIREMENT à RELEASE.2025-04-22T22-12-26Z : c'est la DERNIÈRE release
+#    dont la console embarque l'INTERFACE D'ADMIN COMPLÈTE (users, buckets, policies, lifecycle).
+#    À partir de ~RELEASE.2025-05-24, MinIO a retiré ces fonctions de la console communautaire
+#    (navigateur d'objets seulement). On sacrifie donc « l'image la plus récente » pour garder
+#    l'admin UI demandée. Alternatives (README) : fork openmaxio/console, ou l'édition AIStor.
+#
+# Le Secret `minio-creds` (root user/password) est créé par minio-up.sh (hors de ce manifeste,
+# pour ne pas committer d'identifiants).
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: minio-s3
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-data
+  namespace: minio-s3
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: minio-s3
+  labels: { app: minio }
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate            # RWO local-path : pas deux pods sur le même volume
+  selector:
+    matchLabels: { app: minio }
+  template:
+    metadata:
+      labels: { app: minio }
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: minio
+          image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z   # dernière console admin complète
+          args:
+            - server
+            - /data
+            - --console-address
+            - ":9001"
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom: { secretKeyRef: { name: minio-creds, key: root-user } }
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom: { secretKeyRef: { name: minio-creds, key: root-password } }
+            # Redirection de la console derrière le reverse-proxy (hostname distinct de l'API).
+            - name: MINIO_BROWSER_REDIRECT_URL
+              value: https://minio-console.talos.lab.ops.nc
+          ports:
+            - { name: api,     containerPort: 9000 }
+            - { name: console, containerPort: 9001 }
+          readinessProbe:
+            httpGet: { path: /minio/health/ready, port: api }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /minio/health/live, port: api }
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { memory: 1Gi }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: minio-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: minio-s3
+  labels: { app: minio }
+spec:
+  type: ClusterIP
+  selector: { app: minio }
+  ports:
+    - { name: api,     port: 9000, targetPort: api }
+    - { name: console, port: 9001, targetPort: console }
+---
+# API S3 -> port 9000
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: minio-api
+  namespace: minio-s3
+spec:
+  parentRefs:
+    - name: main-gateway
+      namespace: envoy-gateway-system
+      sectionName: https
+  hostnames:
+    - minio.talos.lab.ops.nc
+  rules:
+    - backendRefs:
+        - name: minio
+          port: 9000
+---
+# Console (navigateur d'objets) -> port 9001
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: minio-console
+  namespace: minio-s3
+spec:
+  parentRefs:
+    - name: main-gateway
+      namespace: envoy-gateway-system
+      sectionName: https
+  hostnames:
+    - minio-console.talos.lab.ops.nc
+  rules:
+    - backendRefs:
+        - name: minio
+          port: 9001
