@@ -8,7 +8,7 @@
 # Générer l'ID de schematic puis la référence d'installeur (jq requis) :
 #   SCHEMATIC_ID=$(curl -sX POST --data-binary @_k8s/longhorn/schematic.yaml \
 #     https://factory.talos.dev/schematics -H "Content-Type: application/yaml" | jq -r .id)
-#   echo "factory.talos.dev/installer/${SCHEMATIC_ID}:v1.13.5"
+#   echo "factory.talos.dev/installer/${SCHEMATIC_ID}:v1.13.7"   # = TALOS_VERSION (lab.env)
 customization:
   systemExtensions:
     officialExtensions:

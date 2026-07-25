@@ -22,8 +22,15 @@ case "$MODE" in
     # Sans token_reviewer_jwt/host/ca_cert, Vault utilise le token de SON pod + le CA/host montés
     # dans le conteneur. disable_iss_validation reste à true (défaut Vault >= 1.9).
     echo "==> [mode in-cluster] config auth/kubernetes (Vault utilise son propre SA délégateur)"
+    # ATTENTION : ce script tourne depuis l'HÔTE (CLI vault), pas dans un pod.
+    # La forme "https://\$KUBERNETES_PORT_443_TCP_ADDR:443" vient de la doc HashiCorp
+    # où elle est exécutée DANS un `kubectl exec … sh -c` : c'est le shell du pod qui
+    # interpole la variable. Ici, Vault recevait et stockait la chaîne LITTÉRALE
+    # (`$KUBERNETES_PORT_443_TCP_ADDR` non résolu) => tout login via auth/kubernetes
+    # échouait en résolution DNS. On utilise donc le nom de service stable, résolu
+    # par le pod Vault lui-même (idem vault/talos-lab.sh).
     vault write auth/kubernetes/config \
-      kubernetes_host="https://\$KUBERNETES_PORT_443_TCP_ADDR:443"
+      kubernetes_host="https://kubernetes.default.svc"
     ;;
   external)
     # Vault hors du cluster : il ne peut pas déduire host/CA/reviewer tout seul.
@@ -48,4 +55,13 @@ case "$MODE" in
   *) echo "MODE inconnu: $MODE (incluster|external)"; exit 1 ;;
 esac
 
-echo "==> auth/kubernetes configuré (mode=$MODE, host=$KUBE_HOST)."
+# Le host effectif dépend du mode : en in-cluster, KUBE_HOST n'est pas utilisé
+# (l'ancien résumé l'affichait quand même, ce qui laissait croire au contraire).
+case "$MODE" in
+  incluster) echo "==> auth/kubernetes configuré (mode=incluster, host=https://kubernetes.default.svc)." ;;
+  external)  echo "==> auth/kubernetes configuré (mode=external, host=$KUBE_HOST)." ;;
+esac
+
+# Vérification : le host réellement enregistré côté Vault.
+vault read -field=kubernetes_host auth/kubernetes/config \
+  | sed 's/^/    host enregistré : /'
