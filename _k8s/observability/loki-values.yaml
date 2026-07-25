@@ -24,7 +24,20 @@ loki:
   storage:
     type: filesystem
   limits_config:
-    retention_period: 72h
+    # Durée de conservation des logs. ATTENTION : cette clé ne fait qu'exprimer la
+    # limite — c'est le COMPACTOR qui supprime réellement (bloc ci-dessous). Sans lui,
+    # `retention_period` est purement déclaratif et le PVC se remplit jusqu'à saturation.
+    retention_period: 24h
+  # Compactor : compacte les index ET applique la rétention. `retention_enabled`
+  # est à false par défaut dans Loki ; sans lui, rien n'est jamais purgé.
+  # `delete_request_store` est requis dès que la rétention est active (stockage des
+  # demandes de suppression) — ici le même filesystem que les chunks.
+  compactor:
+    working_directory: /var/loki/compactor
+    retention_enabled: true
+    delete_request_store: filesystem
+    # Marge entre le marquage d'un chunk et sa suppression effective.
+    retention_delete_delay: 2h
   # Loki tourne en non-root : compatible PodSecurity baseline (défaut Talos).
 
 # Le seul composant actif : le binaire unique, persistant sur Longhorn (1 réplica bloc).

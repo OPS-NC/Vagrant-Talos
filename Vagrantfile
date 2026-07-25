@@ -37,7 +37,9 @@ if File.exist?(lab_env)
   end
 end
 
-TALOS_VERSION  = ENV["TALOS_VERSION"] || "v1.13.5"   # https://github.com/siderolabs/talos/releases
+# Défaut ALIGNÉ sur celui de talos/cluster-up.sh : sans lab.env, les deux fichiers
+# retombaient sur des versions différentes (ISO v1.13.5 / installeur v1.13.7).
+TALOS_VERSION  = ENV["TALOS_VERSION"] || "v1.13.7"   # https://github.com/siderolabs/talos/releases
 
 CONTROL_PLANES = (ENV["CONTROL_PLANES"] || 3).to_i   # 1 = single ; 3 = HA (avec VIP)
 WORKERS        = (ENV["WORKERS"] || 3).to_i          # nombre de workers
