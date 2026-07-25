@@ -34,8 +34,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # astral-sh/setup-uv ne publie plus de tag majeur flottant au-delà de v7 :
+      # on épingle la version exacte (un `@v9` n'existe pas et fait échouer le job).
       - name: Installer uv
-        uses: astral-sh/setup-uv@v9
+        uses: astral-sh/setup-uv@v9.0.0
         with:
           enable-cache: true
 
