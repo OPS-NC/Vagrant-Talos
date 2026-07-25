@@ -171,7 +171,7 @@ Deployment alpine (envFrom) ── rolloutRestartTargets ──► RELANCÉ à c
 # 1. Config Vault : moteur database + connexion admin + static role + policy + role k8s
 export VAULT_ADDR=http://127.0.0.1:8200      # kubectl -n vault port-forward svc/vault-active 8200:8200
 export VAULT_TOKEN=<root-token>
-# ROTATION_PERIOD réglable (défaut 2m = démo ; monter, ex. 24h, pour un usage réel)
+# ROTATION_PERIOD réglable (défaut 3h ; baisser à 2m pour observer la boucle en direct)
 ./_k8s/vault-secret-operator/vault/pg-dynamic-rotate.sh
 
 # 2. App : ns + SA + VaultAuth + VaultDynamicSecret(static) + SecretTransformation + alpine
@@ -189,15 +189,15 @@ kubectl -n pg-rotate-demo get secret pg-rotate-creds -o jsonpath='{.data.DATABAS
 
 # Preuve du redémarrage : la generation du Deployment s'incrémente à chaque rotation
 kubectl -n pg-rotate-demo get deploy pg-rotate-demo -o jsonpath='{.metadata.generation}'; echo
-kubectl -n pg-rotate-demo get pods -l app=pg-rotate-demo -w    # un nouveau pod ~toutes les 2 min
+kubectl -n pg-rotate-demo get pods -l app=pg-rotate-demo -w    # un nouveau pod ~toutes les 3h
 
 # Forcer une rotation immédiate (sans attendre la période) :
 vault write -f database/rotate-role/vault-rotate
 ```
 
-> ⚠️ **`rotation_period=2m` est agressif** (le pod alpine redémarre toutes les 2 min) : c'est
-> voulu pour *voir* la rotation. Pour un vrai service, relancer `pg-dynamic-rotate.sh` avec
-> `ROTATION_PERIOD=24h` (ou éditer le static role). Chaque rotation = un rollout du consommateur.
+> ⚠️ **Chaque rotation = un rollout du consommateur** (le pod alpine redémarre). Défaut `3h`.
+> Pour *voir* la boucle en direct, relancer `pg-dynamic-rotate.sh` avec `ROTATION_PERIOD=2m`
+> (ou éditer le static role) ; remonter ensuite pour ne pas faire tourner le pod en continu.
 
 > **Sécurité / lab** : Vault se connecte en **superuser `postgres`** (le plus simple). En prod,
 > préférer un role d'admin dédié à privilèges réduits (juste de quoi `ALTER ROLE … PASSWORD`),
