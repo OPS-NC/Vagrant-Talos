@@ -1,7 +1,3 @@
-<!-- i18n -->
-**English** · [Français](CLAUDE.fr.md)
-<!-- /i18n -->
-
 # 🤖 CLAUDE.md
 
 **Talos Linux on VirtualBox** lab, driven by Vagrant. Talos has neither SSH nor a shell:
@@ -113,10 +109,10 @@ that is the guard to run after renaming a heading or adding a page.
 - The default gateway through NAT `10.0.2.2` is **intentional** (Internet access). What must be
   host-only is the node's identity (kubelet nodeIP / etcd / VIP), not the default route.
 - **Bilingual docs**: `docs/build.py` pairs pages per directory through `MIROIRS`
-  (`README.md` ↔ `LISEZ-MOI.md`, `CLAUDE.md` ↔ `CLAUDE.fr.md`, `UPGRADE.md` ↔
-  `MISE-A-JOUR.md`). A page with no mirror does not fail the build: it shows up **in English
-  inside the French menu**, with an `EN` badge. That badge is the symptom of a forgotten
-  mirror.
+  (`README.md` ↔ `LISEZ-MOI.md`, `UPGRADE.md` ↔ `MISE-A-JOUR.md`). A page with no mirror does
+  not fail the build: it shows up **in English inside the French menu**, with an `EN` badge.
+  That badge is the symptom of a forgotten mirror — except for the pages listed in
+  `SANS_MIROIR` (this file), which are English-only on purpose and carry no badge.
 - **FR anchors ≠ EN anchors**: slugs derive from headings, so translating a heading breaks
   every link that targeted it. `*.md` links are rewritten into internal routes at build time;
   `make docs` lists whatever no longer resolves. Two anchors are **contractual**, because many
@@ -138,10 +134,11 @@ that is the guard to run after renaming a heading or adding a page.
 
 ## 📝 Conventions
 
-- **Bilingual docs, English first**: `README.md`, `CLAUDE.md` and `talos/UPGRADE.md` are in
-  **English**; their French mirror lives in the same directory — `LISEZ-MOI.md`,
-  `CLAUDE.fr.md`, `talos/MISE-A-JOUR.md`. Both versions change in the **same commit**: an
-  English page whose mirror did not follow is a documentation bug.
+- **Bilingual docs, English first**: `README.md` and `talos/UPGRADE.md` are in **English**;
+  their French mirror lives in the same directory — `LISEZ-MOI.md`, `talos/MISE-A-JOUR.md`.
+  Both versions change in the **same commit**: an English page whose mirror did not follow is
+  a documentation bug. **This file is the exception**: it is English-only (it addresses
+  coding agents, and there is no French mirror to keep in sync).
 - **Commit messages in English**, conventional (`fix(...)`, `feat(...)`, `docs: ...`). Branch
   from `main`, then PR (squash).
 - **Code comments in French** (scripts, `Vagrantfile`, YAML, `docs/build.py`): that is the
@@ -163,7 +160,7 @@ this checklist on every addition:
 | `talos/UPGRADE.md` | if the component requires a system extension or constrains a version |
 | README of the **neighbouring** addons | the cross-references: the one we depend on, the ones depending on us |
 | `docs/build.py` | the page emoji in `EMOJIS` and its placement in `GROUPES` |
-| **the FR mirror of every page touched** | `LISEZ-MOI.md` (and `CLAUDE.fr.md`, `talos/MISE-A-JOUR.md`): same structure, same content, **same commit** as the English version |
+| **the FR mirror of every page touched** | `LISEZ-MOI.md` (and `talos/MISE-A-JOUR.md`): same structure, same content, **same commit** as the English version. `CLAUDE.md` has no mirror |
 
 Then `make docs` to regenerate the page, and `make validate` before committing.
 - "Test" topology: edit **`lab.env`** (gitignored, therefore never committed). The repo default
