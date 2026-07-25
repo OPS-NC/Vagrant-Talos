@@ -12,7 +12,7 @@
 # ⚠️ CNPG ≤ 1.30 : l'in-tree `barmanObjectStore` marche mais est DÉPRÉCIÉ (retrait prévu en
 #    1.31). Migration future : Barman Cloud Plugin (CNPG-I). Voir README.
 #
-# Prérequis : addon minio-s3 déployé + cluster pg-demo UP. À lancer depuis la racine du dépôt.
+# Prérequis : addon minio-s3/cluster déployé + cluster pg-demo UP. À lancer depuis la racine du dépôt.
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -29,8 +29,8 @@ MC="$(command -v mc || true)"
 if [ -z "$MC" ]; then MC="$(mktemp -d)/mc"; curl -fsSL -o "$MC" https://dl.min.io/client/mc/release/linux-amd64/mc && chmod +x "$MC"; fi
 
 log "MinIO : bucket cnpg-backups + utilisateur dédié cnpg-backup"
-ROOTPW="$(kubectl -n minio-s3 get secret minio-creds -o jsonpath='{.data.root-password}' | base64 -d)"
-kubectl -n minio-s3 port-forward svc/minio 19000:9000 >/dev/null 2>&1 &
+ROOTPW="$(kubectl -n minio-cluster get secret minio-creds -o jsonpath='{.data.root-password}' | base64 -d)"
+kubectl -n minio-cluster port-forward svc/minio 19000:9000 >/dev/null 2>&1 &
 PF=$!; trap 'kill $PF 2>/dev/null || true' EXIT
 until curl -s -o /dev/null http://127.0.0.1:19000/minio/health/ready 2>/dev/null; do sleep 1; done
 "$MC" alias set _lab http://127.0.0.1:19000 admin "$ROOTPW" >/dev/null
@@ -59,7 +59,7 @@ log "Patch du Cluster pg-demo : barmanObjectStore -> MinIO (active l'archivage W
 kubectl -n cnpg-demo patch cluster pg-demo --type=merge -p '{
   "spec":{"backup":{"retentionPolicy":"7d","barmanObjectStore":{
     "destinationPath":"s3://cnpg-backups/",
-    "endpointURL":"http://minio.minio-s3.svc.cluster.local:9000",
+    "endpointURL":"http://minio.minio-cluster.svc.cluster.local:9000",
     "s3Credentials":{"accessKeyId":{"name":"cnpg-backup-s3","key":"ACCESS_KEY_ID"},
                      "secretAccessKey":{"name":"cnpg-backup-s3","key":"SECRET_ACCESS_KEY"}},
     "wal":{"compression":"gzip"},"data":{"compression":"gzip"}}}}}'

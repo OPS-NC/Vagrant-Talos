@@ -11,7 +11,7 @@
 # ⚠️ Backup LOGIQUE (pg_dump) — n'utilise PAS les CRD de backup CloudNativePG (Barman) : le but
 #    est justement de sauvegarder AVEC les creds Vault. Voir README pour l'alternative CNPG-native.
 #
-# Prérequis : addon minio-s3 déployé, rotation Vault en place (pg-rotate-creds présent),
+# Prérequis : addon minio-s3/cluster déployé, rotation Vault en place (pg-rotate-creds présent),
 # cluster pg-demo UP. À lancer depuis la racine du dépôt.
 set -euo pipefail
 
@@ -33,8 +33,8 @@ if [ -z "$MC" ]; then
 fi
 
 log "MinIO : bucket pg-backups + utilisateur dédié pg-backup"
-ROOTPW="$(kubectl -n minio-s3 get secret minio-creds -o jsonpath='{.data.root-password}' | base64 -d)"
-kubectl -n minio-s3 port-forward svc/minio 19000:9000 >/dev/null 2>&1 &
+ROOTPW="$(kubectl -n minio-cluster get secret minio-creds -o jsonpath='{.data.root-password}' | base64 -d)"
+kubectl -n minio-cluster port-forward svc/minio 19000:9000 >/dev/null 2>&1 &
 PF=$!; trap 'kill $PF 2>/dev/null || true' EXIT
 until curl -s -o /dev/null http://127.0.0.1:19000/minio/health/ready 2>/dev/null; do sleep 1; done
 "$MC" alias set _lab http://127.0.0.1:19000 admin "$ROOTPW" >/dev/null
@@ -58,7 +58,7 @@ kill $PF 2>/dev/null || true; trap - EXIT
 
 log "Secret K8s minio-backup-creds (ns pg-rotate-demo)"
 kubectl -n pg-rotate-demo create secret generic minio-backup-creds \
-  --from-literal=MINIO_ENDPOINT="http://minio.minio-s3.svc.cluster.local:9000" \
+  --from-literal=MINIO_ENDPOINT="http://minio.minio-cluster.svc.cluster.local:9000" \
   --from-literal=MINIO_ACCESS_KEY="pg-backup" \
   --from-literal=MINIO_SECRET_KEY="$SK" \
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null

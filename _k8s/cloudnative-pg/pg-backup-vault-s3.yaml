@@ -8,7 +8,7 @@
 # Namespace : pg-rotate-demo (là où VSO écrit `pg-rotate-creds`). Le Secret MinIO
 # `minio-backup-creds` (endpoint + access/secret key) est créé par pg-backup-up.sh.
 #
-# Prérequis : CloudNativePG `pg-demo` UP + rotation Vault en place + addon minio-s3.
+# Prérequis : CloudNativePG `pg-demo` UP + rotation Vault en place + addon minio-s3/cluster.
 ---
 apiVersion: batch/v1
 kind: CronJob
