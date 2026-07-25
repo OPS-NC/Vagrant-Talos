@@ -169,8 +169,54 @@ kubectl -n pg-rotate-demo logs job/pg-backup-now
 utilise les identifiants **internes de CNPG**, pas ceux de Vault. Les deux approches sont
 complémentaires. Voir la doc CNPG « Backup ».
 
+## Backup NATIF CloudNativePG (CRD → MinIO, avec PITR)
+
+L'autre approche, **gérée par l'opérateur via les CRD** : un backup **physique** (base backup
++ **archivage WAL continu**) de **toute l'instance** `pg-demo` — donc la base **`app`** est
+incluse — poussé dans MinIO par **barman-cloud**. Permet la **restauration à un instant T**
+(PITR), ce que le `pg_dump` ne fait pas.
+
+```
+Cluster pg-demo  ── spec.backup.barmanObjectStore ──►  bucket MinIO cnpg-backups/pg-demo/
+   ├─ base/<timestamp>/data.tar.gz   (base backup, déclenché par Backup/ScheduledBackup)
+   └─ wals/.../*.gz                  (archivage WAL CONTINU  => PITR)
+ScheduledBackup pg-demo-hourly  ── "0 0 * * * *" (horaire) ──► nouveaux base backups
+```
+
+### pg_dump-via-Vault  vs  natif-CNPG (les deux coexistent dans ce lab)
+
+| | `pg_dump`-via-Vault (`pg-backup-vault-s3.yaml`) | **Natif CNPG** (`pg-app-backup-cnpg.yaml`) |
+|---|---|---|
+| Passe par les CRD CNPG | ❌ non (CronJob standard) | ✅ oui (`Backup`/`ScheduledBackup`) |
+| Type | Logique (`pg_dump`) | **Physique** (base backup + WAL) |
+| Portée | 1 base (`vault`) | Toute l'instance (dont `app`) |
+| Identifiants | **Vault** (`vault-rotate`, rotés) | Internes CNPG + clés S3 MinIO |
+| PITR (restauration à T) | ❌ non | ✅ oui |
+
+### Mise en route
+
+```bash
+# bucket/user MinIO dédiés + Secret S3 + patch barmanObjectStore + ScheduledBackup + 1 backup
+./_k8s/cloudnative-pg/pg-app-backup-cnpg-up.sh
+
+# Vérifier
+kubectl -n cnpg-demo get backups                       # phase=completed, method=barmanObjectStore
+kubectl -n cnpg-demo get cluster pg-demo \
+  -o jsonpath='{.status.firstRecoverabilityPoint}{"\n"}'   # point de départ PITR (non vide)
+mc ls -r <alias>/cnpg-backups/pg-demo/                 # base/… + wals/…
+```
+
+> ⚠️ **Dépréciation.** Sur CNPG **1.30** l'in-tree `barmanObjectStore` fonctionne mais est
+> **déprécié** (retrait annoncé en **1.31.0**). Migration : le **Barman Cloud Plugin** (CNPG-I,
+> objet `ObjectStore` + `plugin` sur le Cluster). Le principe (base + WAL → S3/MinIO, PITR) est
+> identique ; seule la déclaration change.
+
+> **Restauration (PITR)** : on crée un NOUVEAU Cluster avec `spec.bootstrap.recovery` pointant
+> sur le même `barmanObjectStore` (+ `recoveryTarget` pour un instant T). Voir doc CNPG « Recovery ».
+
 ## Sources
 
 - [CloudNativePG — Documentation](https://cloudnative-pg.io/documentation/current/)
 - [CloudNativePG — Cluster (API)](https://cloudnative-pg.io/documentation/current/cloudnative-pg.v1/)
 - [CloudNativePG — Backup sur objet S3](https://cloudnative-pg.io/documentation/current/backup/)
+- [CloudNativePG — Barman Cloud Plugin (successeur de l'in-tree)](https://github.com/cloudnative-pg/plugin-barman-cloud)
