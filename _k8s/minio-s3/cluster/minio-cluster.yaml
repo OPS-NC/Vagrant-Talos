@@ -9,8 +9,8 @@
 # 1 drive/pod, il faut donc 4 pods = 4 nœuds. (3 nœuds n'est possible qu'avec ≥2 drives/nœud.)
 #
 # Namespace dédié `minio-cluster` (coexiste avec le MinIO standalone de ../). Exposé sur :
-#   - API S3   : https://minio-cluster.talos.lab.ops.nc          (9000)
-#   - Console  : https://minio-cluster-console.talos.lab.ops.nc  (9001, admin — image pigsty)
+#   - API S3   : https://minio-cluster.talos.lab.example.io          (9000)
+#   - Console  : https://minio-cluster-console.talos.lab.example.io  (9001, admin — image pigsty)
 #
 # Le Secret `minio-creds` (root user/password) est créé par minio-cluster-up.sh (hors manifeste).
 ---
@@ -73,7 +73,7 @@ spec:
             - name: MINIO_ROOT_PASSWORD
               valueFrom: { secretKeyRef: { name: minio-creds, key: root-password } }
             - name: MINIO_BROWSER_REDIRECT_URL
-              value: https://minio-cluster-console.talos.lab.ops.nc
+              value: https://minio-cluster-console.talos.lab.example.io
           ports:
             - { name: api, containerPort: 9000 }
             - { name: console, containerPort: 9001 }
@@ -125,7 +125,7 @@ metadata:
 spec:
   parentRefs:
     - { name: main-gateway, namespace: envoy-gateway-system, sectionName: https }
-  hostnames: [minio-cluster.talos.lab.ops.nc]
+  hostnames: [minio-cluster.talos.lab.example.io]
   rules:
     - backendRefs: [{ name: minio, port: 9000 }]
 ---
@@ -137,6 +137,6 @@ metadata:
 spec:
   parentRefs:
     - { name: main-gateway, namespace: envoy-gateway-system, sectionName: https }
-  hostnames: [minio-cluster-console.talos.lab.ops.nc]
+  hostnames: [minio-cluster-console.talos.lab.example.io]
   rules:
     - backendRefs: [{ name: minio, port: 9001 }]

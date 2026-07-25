@@ -3,7 +3,7 @@
 # (un sous-dossier par appli) + policy/role de l'appli de démo "nginx-test-vault".
 #
 # Idempotent : relançable sans casse. À lancer depuis l'hôte avec le CLI vault :
-#   export VAULT_ADDR=https://vault.talos.lab.ops.nc
+#   export VAULT_ADDR=https://vault.talos.lab.example.io
 #   export VAULT_TOKEN=<root-token>
 #   ./_k8s/vault-secret-operator/vault/talos-lab.sh
 #
@@ -11,7 +11,7 @@
 #  in-cluster : Vault valide les tokens de SA via son propre SA délégateur.)
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-: "${VAULT_ADDR:?export VAULT_ADDR (ex: https://vault.talos.lab.ops.nc)}"
+: "${VAULT_ADDR:?export VAULT_ADDR (ex: https://vault.talos.lab.example.io)}"
 : "${VAULT_TOKEN:?export VAULT_TOKEN (root token, cf. vault-cluster/)}"
 
 echo "==> 1. Auth Kubernetes"

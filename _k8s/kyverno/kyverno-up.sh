@@ -7,7 +7,7 @@
 #   1. Kyverno            contrôleurs (admission/background/cleanup/reports) via Helm
 #   2. Policies           ClusterPolicy pédagogiques (validate Audit + mutate + generate)
 #   3. Policy Reporter    agrégation des PolicyReport + UI web
-#   4. HTTPRoute          expose l'UI sous kyverno.talos.lab.ops.nc (main-gateway)
+#   4. HTTPRoute          expose l'UI sous kyverno.$LAB_DOMAIN (main-gateway)
 #
 # Idempotent : `helm upgrade --install` + `kubectl apply`. Relançable sans casse.
 # À lancer depuis la racine du dépôt : ./_k8s/kyverno/kyverno-up.sh
@@ -21,6 +21,12 @@ HERE="_k8s/kyverno"
 # --- Versions épinglées (overridables par variable d'env) -------------------
 KYVERNO_VERSION="${KYVERNO_VERSION:-3.8.2}"            # app v1.18.2
 POLICY_REPORTER_VERSION="${POLICY_REPORTER_VERSION:-3.8.1}"
+
+# --- Domaine : défaut versionné neutre, surchargeable par LAB_DOMAIN (lab.env ou env) ---
+# `sed -n s///p` (jamais `grep` : sans match il renvoie 1 et tue le script sous `pipefail`).
+# `|| true` : sans lab.env du tout, `sed` sort en 2 — ce qui tuerait aussi le script.
+LAB_DOMAIN="${LAB_DOMAIN:-$(sed -n 's/^[[:space:]]*LAB_DOMAIN=//p' "${REPO_DIR}/lab.env" 2>/dev/null | head -n1 | tr -d " \"'" || true)}"
+LAB_DOMAIN="${LAB_DOMAIN:-talos.lab.example.io}"
 
 # --- Pré-requis -------------------------------------------------------------
 for bin in kubectl helm; do
@@ -52,12 +58,12 @@ helm upgrade --install policy-reporter policy-reporter/policy-reporter -n kyvern
   --values "${HERE}/policy-reporter-values.yaml"
 kubectl -n kyverno rollout status deploy/policy-reporter-ui --timeout=180s
 
-log "[4/4] HTTPRoute (kyverno.talos.lab.ops.nc)"
-kubectl apply -f "${HERE}/httproute.yaml"
+log "[4/4] HTTPRoute (kyverno.${LAB_DOMAIN})"
+sed "s/talos\.lab\.example\.io/${LAB_DOMAIN}/g" "${HERE}/httproute.yaml" | kubectl apply -f -
 
 # ============================================================================
 log "Kyverno installé."
 echo "  Policies    : $(kubectl get clusterpolicy --no-headers 2>/dev/null | wc -l) ClusterPolicy (validate en Audit)"
 echo "  Rapports    : kubectl get policyreport -A   /   kubectl get clusterpolicyreport"
-echo "  UI          : https://kyverno.talos.lab.ops.nc  (via main-gateway, cert wildcard)"
-echo "  Test        : curl --resolve kyverno.talos.lab.ops.nc:443:192.168.56.200 https://kyverno.talos.lab.ops.nc/"
+echo "  UI          : https://kyverno.${LAB_DOMAIN}  (via main-gateway, cert wildcard)"
+echo "  Test        : curl --resolve kyverno.${LAB_DOMAIN}:443:192.168.56.200 https://kyverno.${LAB_DOMAIN}/"

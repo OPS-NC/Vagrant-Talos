@@ -33,7 +33,7 @@ metadata:
   namespace: envoy-gateway-system      # Gateway + cert wildcard hors du ns default
   annotations:
     # cert-manager émet et renouvelle le wildcard TLS tout seul (DNS-01 Cloudflare).
-    # Le Certificate + le Secret wildcard-talos-lab-ops-nc-tls sont créés dans CE namespace.
+    # Le Certificate + le Secret wildcard-talos-lab-example-io-tls sont créés dans CE namespace.
     cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
   gatewayClassName: envoy
@@ -47,12 +47,14 @@ spec:
     - name: https
       protocol: HTTPS
       port: 443
-      hostname: "*.talos.lab.ops.nc"
+      # Domaine NEUTRE (dépôt public) : platform-up.sh le remplace par LAB_DOMAIN (lab.env),
+      # et le nom du Secret TLS ci-dessous suit (wildcard-<domaine-en-tirets>-tls).
+      hostname: "*.talos.lab.example.io"
       tls:
         mode: Terminate
         certificateRefs:
           - kind: Secret
-            name: wildcard-talos-lab-ops-nc-tls   # rempli automatiquement par cert-manager
+            name: wildcard-talos-lab-example-io-tls   # rempli automatiquement par cert-manager
       allowedRoutes:
         namespaces:
           from: All

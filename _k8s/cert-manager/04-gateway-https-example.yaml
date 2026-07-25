@@ -5,11 +5,16 @@
 #
 # Mécanique (nécessite cert-manager installé avec config.enableGatewayAPI=true) :
 #   1. cert-manager voit l'annotation + l'écouteur TLS avec un certificateRefs.
-#   2. Il crée un Certificate pour *.talos.lab.ops.nc (dnsNames déduits du `hostname`).
-#   3. Il le résout en DNS-01 Cloudflare et remplit le Secret `wildcard-talos-lab-ops-nc-tls`.
+#   2. Il crée un Certificate pour *.talos.lab.example.io (dnsNames déduits du `hostname`).
+#   3. Il le résout en DNS-01 Cloudflare et remplit le Secret `wildcard-talos-lab-example-io-tls`.
 #   4. Envoy sert ce cert sur :443.
 #
 # Le Secret et le Certificate sont créés dans le namespace du Gateway (ici `envoy-gateway-system`).
+#
+# Domaine NEUTRE (dépôt public) : `talos.lab.example.io`. Le vrai Gateway du lab
+# (`../envoy-gateway/Envoy-Proxy.yml`) reçoit `LAB_DOMAIN` via platform-up.sh ; ce fichier-ci
+# est un EXEMPLE non appliqué — si tu t'en sers, substitue toi-même le hostname ET le nom du
+# Secret (`wildcard-<domaine-en-tirets>-tls`).
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
@@ -30,12 +35,12 @@ spec:
     - name: https
       protocol: HTTPS
       port: 443
-      hostname: "*.talos.lab.ops.nc"
+      hostname: "*.talos.lab.example.io"
       tls:
         mode: Terminate
         certificateRefs:
           - kind: Secret
-            name: wildcard-talos-lab-ops-nc-tls     # rempli automatiquement par cert-manager
+            name: wildcard-talos-lab-example-io-tls     # rempli automatiquement par cert-manager
       allowedRoutes:
         namespaces:
           from: All

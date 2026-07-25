@@ -4,9 +4,18 @@
 # Idempotent : ré-exécutable sans casse (les "already in use" sont ignorées).
 #
 # Prérequis : VAULT_ADDR + VAULT_TOKEN (token admin) exportés, ou lancer dans un pod Vault.
-#   export VAULT_ADDR=https://vault.talos.lab.ops.nc      # ou http://127.0.0.1:8200 en port-forward
+#   export VAULT_ADDR=https://vault.talos.lab.example.io      # ou http://127.0.0.1:8200 en port-forward
 #   export VAULT_TOKEN=<root-ou-admin>
 set -euo pipefail
+
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+
+# --- Domaine : défaut versionné neutre, surchargeable par LAB_DOMAIN (lab.env ou env) ---
+# Sert de `common_name` à la CA racine PKI et d'`allowed_domains` au role `demo`.
+# `sed -n s///p` (jamais `grep` : sans match il renvoie 1 et tue le script sous `pipefail`).
+# `|| true` : sans lab.env du tout, `sed` sort en 2 — ce qui tuerait aussi le script.
+LAB_DOMAIN="${LAB_DOMAIN:-$(sed -n 's/^[[:space:]]*LAB_DOMAIN=//p' "${REPO_DIR}/lab.env" 2>/dev/null | head -n1 | tr -d " \"'" || true)}"
+LAB_DOMAIN="${LAB_DOMAIN:-talos.lab.example.io}"
 
 enable() { vault secrets enable "$@" 2>/dev/null || echo "  (déjà activé : $*)"; }
 
@@ -33,13 +42,13 @@ enable -path=pki pki
 vault secrets tune -max-lease-ttl=87600h pki
 # CA racine de démo (en prod : CA intermédiaire signée par une racine hors-ligne).
 vault write -field=certificate pki/root/generate/internal \
-  common_name="talos.lab.ops.nc" ttl=87600h >/dev/null || echo "  (CA racine déjà générée)"
+  common_name="${LAB_DOMAIN}" ttl=87600h >/dev/null || echo "  (CA racine déjà générée)"
 vault write pki/config/urls \
   issuing_certificates="${VAULT_ADDR}/v1/pki/ca" \
   crl_distribution_points="${VAULT_ADDR}/v1/pki/crl"
 # Role PKI "demo" : borne les domaines et la durée. Le VaultPKISecret émet via ce role.
 vault write pki/roles/demo \
-  allowed_domains="talos.lab.ops.nc" allow_subdomains=true \
+  allowed_domains="${LAB_DOMAIN}" allow_subdomains=true \
   max_ttl=72h key_type=rsa key_bits=2048
 
 echo "==> [transit] transit/ (chiffrement du cache client VSO)"

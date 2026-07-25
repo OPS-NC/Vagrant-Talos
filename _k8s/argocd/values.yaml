@@ -1,14 +1,14 @@
 # values.yaml — Argo CD pour le lab Talos (chart argo/argo-cd).
 #
 # Principe d'expo : le TLS est terminé par **Envoy Gateway** (cert wildcard
-# `*.talos.lab.ops.nc` fourni par cert-manager). argocd-server tourne donc EN CLAIR
+# `*.talos.lab.example.io` fourni par cert-manager). argocd-server tourne donc EN CLAIR
 # (`server.insecure=true`) : Envoy fait le HTTPS devant, HTTP derrière. Sans ça,
 # argocd-server ferait sa propre redirection 307 http->https => boucle infinie
 # derrière un proxy qui termine déjà le TLS.
 
 global:
   # Domaine externe : sert d'URL de base ET d'hôte pour la route/UI.
-  domain: argo.talos.lab.ops.nc
+  domain: argo.talos.lab.example.io
 
 configs:
   params:
@@ -16,7 +16,7 @@ configs:
     server.insecure: true
   cm:
     # URL publique (liens générés, callbacks). Déduite de global.domain, explicitée ici.
-    url: https://argo.talos.lab.ops.nc
+    url: https://argo.talos.lab.example.io
 
 # Lab mono-utilisateur : pas de SSO → Dex coupé (un pod de moins sur des nodes à 2 Go).
 # L'auth se fait avec l'admin local (mot de passe initial dans un Secret, cf. README).

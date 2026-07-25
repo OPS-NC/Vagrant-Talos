@@ -12,6 +12,12 @@ cd "$REPO_DIR"
 export KUBECONFIG="${KUBECONFIG:-${REPO_DIR}/kubeconfig}"
 HERE="_k8s/minio-s3/cluster"
 
+# --- Domaine : défaut versionné neutre, surchargeable par LAB_DOMAIN (lab.env ou env) ---
+# `sed -n s///p` (jamais `grep` : sans match il renvoie 1 et tue le script sous `pipefail`).
+# `|| true` : sans lab.env du tout, `sed` sort en 2 — ce qui tuerait aussi le script.
+LAB_DOMAIN="${LAB_DOMAIN:-$(sed -n 's/^[[:space:]]*LAB_DOMAIN=//p' "${REPO_DIR}/lab.env" 2>/dev/null | head -n1 | tr -d " \"'" || true)}"
+LAB_DOMAIN="${LAB_DOMAIN:-talos.lab.example.io}"
+
 command -v kubectl >/dev/null 2>&1 || { echo "ERREUR : 'kubectl' introuvable." >&2; exit 1; }
 kubectl get --raw='/readyz' >/dev/null 2>&1 || { echo "ERREUR : apiserver injoignable." >&2; exit 1; }
 kubectl get storageclass local-path >/dev/null 2>&1 || { echo "ERREUR : StorageClass 'local-path' absente (cf. _k8s/local-path-storage/)." >&2; exit 1; }
@@ -36,12 +42,13 @@ else
 fi
 
 log "MinIO distribué (StatefulSet 4 nœuds) + Services + HTTPRoutes"
-kubectl apply -f "${HERE}/minio-cluster.yaml"
+# Le manifeste porte les hostnames des HTTPRoutes + MINIO_BROWSER_REDIRECT_URL.
+sed "s/talos\.lab\.example\.io/${LAB_DOMAIN}/g" "${HERE}/minio-cluster.yaml" | kubectl apply -f -
 kubectl -n minio-cluster rollout status statefulset/minio --timeout=300s
 
 log "MinIO cluster installé."
-echo "  API S3   : https://minio-cluster.talos.lab.ops.nc"
-echo "  Console  : https://minio-cluster-console.talos.lab.ops.nc"
+echo "  API S3   : https://minio-cluster.${LAB_DOMAIN}"
+echo "  Console  : https://minio-cluster-console.${LAB_DOMAIN}"
 echo "  User     : $(kubectl -n minio-cluster get secret minio-creds -o jsonpath='{.data.root-user}' | base64 -d)"
 echo "  Password : $(kubectl -n minio-cluster get secret minio-creds -o jsonpath='{.data.root-password}' | base64 -d)"
 echo "  Erasure  : mc admin info <alias>   (4 drives online, tolère ~2 nœuds down)"
