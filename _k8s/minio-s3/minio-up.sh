@@ -40,7 +40,7 @@ kubectl -n minio-s3 rollout status deploy/minio --timeout=180s
 # ============================================================================
 log "MinIO installé."
 echo "  API S3   : https://minio.talos.lab.ops.nc"
-echo "  Console  : https://minio-console.talos.lab.ops.nc  (admin complète — image épinglée 2025-04-22)"
+echo "  Console  : https://minio-console.talos.lab.ops.nc  (admin complète — fork pgsty/minio)"
 echo "  User     : $(kubectl -n minio-s3 get secret minio-creds -o jsonpath='{.data.root-user}' | base64 -d)"
 echo "  Password : $(kubectl -n minio-s3 get secret minio-creds -o jsonpath='{.data.root-password}' | base64 -d)"
 echo "  Test S3  : mc alias set lab https://minio.talos.lab.ops.nc <user> <pass> --insecure   # cert staging"
