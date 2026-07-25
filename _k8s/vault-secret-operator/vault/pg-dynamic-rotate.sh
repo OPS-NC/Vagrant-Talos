@@ -22,9 +22,9 @@ set -euo pipefail
 : "${VAULT_TOKEN:?export VAULT_TOKEN (root/admin)}"
 export KUBECONFIG="${KUBECONFIG:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/kubeconfig}"
 
-# Réglable : fréquence de rotation. 2m = démo observable. Monter (ex. 24h) pour un usage réel :
-# chaque rotation relance le pod consommateur (rolloutRestartTargets).
-ROTATION_PERIOD="${ROTATION_PERIOD:-2m}"
+# Réglable : fréquence de rotation. Chaque rotation relance le pod consommateur
+# (rolloutRestartTargets). Baisser (ex. 2m) pour observer la boucle en direct.
+ROTATION_PERIOD="${ROTATION_PERIOD:-3h}"
 
 # --- Mot de passe admin (postgres) depuis le Secret CNPG -----------------------
 SUPW="$(kubectl -n cnpg-demo get secret pg-demo-superuser -o jsonpath='{.data.password}' | base64 -d)"
