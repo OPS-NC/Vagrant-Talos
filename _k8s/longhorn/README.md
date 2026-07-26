@@ -21,6 +21,7 @@ Files in this directory:
 
 | File | Purpose |
 |---|---|
+| `longhorn-up.sh` | **the install**: checks the extensions, applies the `rshared` mount, chart + both StorageClasses + `HTTPRoute` |
 | `schematic.yaml` | **Image Factory** schematic → Talos installer with `iscsi-tools` + `util-linux-tools` |
 | `patch-longhorn.yaml` | Machine config patch: `kubelet.extraMounts` for `/var/lib/longhorn` as `rshared` |
 | `values.yaml` | Helm values: `defaultDataPath`, `defaultReplicaCount: 3`, `persistence.defaultClass: true` |
@@ -35,22 +36,37 @@ put in place BEFORE `helm install` — on top of the usual lab prerequisites:
 | Prerequisite | Why | Verify |
 |---|---|---|
 | `iscsi-tools` + `util-linux-tools` extensions in the **installer** (`INSTALLER_IMAGE` in `lab.env`) | Talos never adds an extension live: they are *baked* into the installer image. Without them, `iscsiadm not found` | `talosctl -n 192.168.56.101 get extensions` |
-| **`rshared` kubelet mount** on `/var/lib/longhorn` (`patch-longhorn.yaml`) — **apply it by hand** | The Talos kubelet is containerized; `longhorn-manager` requires **bidirectional** mount propagation | `talosctl -n 192.168.56.101 get mc -o yaml \| grep -A6 extraMounts` |
-| `helm` in `PATH` | the install goes through the official chart (no `longhorn-up.sh` here) | `helm version` |
+| **`rshared` kubelet mount** on `/var/lib/longhorn` (`patch-longhorn.yaml`) — **applied by `longhorn-up.sh`** | The Talos kubelet is containerized; `longhorn-manager` requires **bidirectional** mount propagation | `talosctl -n 192.168.56.101 get mc -o yaml \| grep -A6 extraMounts` |
+| `helm` + `talosctl` in `PATH` | the chart, and the machine-config patch above | `helm version` · `talosctl version` |
 | Namespace `longhorn-system` with PodSecurity `privileged` | Longhorn pods are privileged (iSCSI, hostPath) | `kubectl get ns longhorn-system --show-labels` |
 | `../envoy-gateway/` + `../cert-manager/` (optional) | only to expose the UI over HTTPS | `kubectl get gateway -n envoy-gateway-system` |
 
 > ⚠️ **`cluster-up.sh` does NOT apply `patch-longhorn.yaml`.** It only passes
 > `talos/patch-all.yaml`, `talos/patch-cp.yaml` and `talos/cni-${CNI}.yaml` to `gen config`
 > (see `talos/cluster-up.sh`, step 1). Only the **image** comes from `lab.env`
-> (`INSTALLER_IMAGE` → `--install-image`). So the kubelet mount is **always** a manual step:
-> on a freshly built cluster, `get mc` shows **no** `extraMounts` at all.
+> (`INSTALLER_IMAGE` → `--install-image`). On a freshly built cluster, `get mc` therefore shows
+> **no** `extraMounts` at all — this is why `longhorn-up.sh` applies the patch itself, to the
+> workers, before the chart.
 
 ## ⚡ Install
 
 Pinned version: chart **Longhorn 1.12.0**. Talos: the version comes from `TALOS_VERSION` in
 `lab.env` (**v1.13.7** in `lab.env.example`) — the image factory refs below must carry **that**
 version, not another one.
+
+```bash
+./_k8s/longhorn/longhorn-up.sh
+```
+
+Idempotent: re-runnable without breaking anything (`helm upgrade --install`, and the machine
+config patch is only applied where it is missing). It covers steps **2 to 4** below, reads
+`WORKERS`/`NETWORK` from `lab.env` to find the workers, and aligns the block replica count with
+the number of workers (`REPLICAS=…` to force it). `LONGHORN_VERSION=…` overrides the chart
+version.
+
+> ⚠️ **Step 1 is the only one that cannot be automated**: the installer image is chosen
+> **before the cluster exists**, since an extension is baked into it. `longhorn-up.sh` only
+> *checks* that `iscsi-tools` is there and refuses to install anything if it is not.
 
 ### 1. Installer with the extensions (Image Factory)
 
@@ -77,7 +93,7 @@ This is **where classic vs longhorn is decided**: an empty `INSTALLER_IMAGE` ⇒
 falls back to `ghcr.io/siderolabs/installer:${TALOS_VERSION}` (no extensions). The boot ISO does
 not change: extensions are pulled from the **installer** at disk-install time.
 
-### 2. Kubelet mount (`rshared`) on the workers
+### 2. Kubelet mount (`rshared`) on the workers — *automated by `longhorn-up.sh`*
 
 Control planes are tainted `node-role.kubernetes.io/control-plane:NoSchedule`: only the
 **workers** need the mount.
@@ -115,7 +131,7 @@ talosctl -n 192.168.56.101 upgrade \
 talosctl -n 192.168.56.101 patch mc --patch @_k8s/longhorn/patch-longhorn.yaml
 ```
 
-### 3. Namespace + Pod Security
+### 3. Namespace + Pod Security — *automated by `longhorn-up.sh`*
 
 ```bash
 kubectl create namespace longhorn-system --dry-run=client -o yaml | kubectl apply -f -
@@ -125,7 +141,7 @@ kubectl label namespace longhorn-system \
   pod-security.kubernetes.io/warn=privileged --overwrite
 ```
 
-### 4. Helm chart + baseline StorageClass
+### 4. Helm chart + baseline StorageClass — *automated by `longhorn-up.sh`*
 
 ```bash
 helm repo add longhorn https://charts.longhorn.io && helm repo update
@@ -195,12 +211,15 @@ kubectl delete pvc test-longhorn
 
 ## 🌐 Access
 
+`longhorn-up.sh` already applied the `HTTPRoute` (its step `[5/5]`). To re-apply it alone:
+
 ```bash
 kubectl apply -f _k8s/longhorn/httproute.yaml
 ```
 
-> 🌐 **Domain**: the manifest carries the neutral domain `talos.lab.example.io` (public repo) and
-> does not go through a `*-up.sh` script: edit the hostname, or substitute your domain on the fly:
+> 🌐 **Domain**: the manifest carries the neutral domain `talos.lab.example.io` (public repo).
+> `longhorn-up.sh` substitutes `LAB_DOMAIN` on the fly; applying the file by hand, as above,
+> keeps the neutral domain. Substitute it yourself:
 >
 > ```bash
 > sed 's/talos\.lab\.example\.io/talos.lab.my-domain.tld/g' \
@@ -214,8 +233,9 @@ kubectl apply -f _k8s/longhorn/httproute.yaml
 | Longhorn UI (HTTPS via `main-gateway`) | `https://longhorn.talos.lab.example.io` | **none** |
 | Without exposing it | `kubectl -n longhorn-system port-forward svc/longhorn-frontend 8080:80` | — |
 
-The wildcard cert `*.talos.lab.example.io` is already carried by the `https` listener
-(cert-manager): nothing to issue.
+The wildcard cert `*.talos.lab.example.io` is already carried by the `https` listener: nothing
+to issue here, whichever TLS mode the lab runs (self-signed by default, or cert-manager — the
+Secret has the same name either way, see [`../self-signed/README.md`](../self-signed/README.md)).
 
 > ⚠️ **The Longhorn UI has no authentication whatsoever.** Exposed like this, it is reachable by
 > anyone who can reach the VIP (over Tailscale) — and it lets them delete volumes. To protect it:
@@ -223,9 +243,10 @@ The wildcard cert `*.talos.lab.example.io` is already carried by the `https` lis
 
 ## ⚠️ Pitfalls
 
-- **The kubelet mount is never automatic**: `cluster-up.sh` ignores `patch-longhorn.yaml` (see
-  Prerequisites). Symptom: `longhorn-manager` failing on mount propagation even though the
-  extensions are there.
+- **The kubelet mount does not come from the cluster bootstrap**: `cluster-up.sh` ignores
+  `patch-longhorn.yaml` (see Prerequisites) — `longhorn-up.sh` is what applies it. Installing
+  the chart by hand, without that patch, gives a `longhorn-manager` failing on mount
+  propagation even though the extensions are there.
 - **Two default StorageClasses** if `../local-path-storage/` is installed too: `values.yaml`
   sets `persistence.defaultClass: true` (⇒ `longhorn`) and `local-path-storage.yaml` annotates
   `local-path` with `is-default-class: "true"`. A PVC without `storageClassName` then becomes

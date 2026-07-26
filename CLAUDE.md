@@ -124,8 +124,9 @@ that is the guard to run after renaming a heading or adding a page.
 - **Dashboard `KUBERNETES: n/a`**: normal in maintenance mode (the `KubeletSpec` resource only
   exists after `apply-config`). Nothing to fix.
 - **`_k8s/longhorn/patch-longhorn.yaml` is NOT applied by `cluster-up.sh`** (which only passes
-  `patch-all`, `patch-cp` and `cni-*`): the rshared mount of `/var/lib/longhorn` is a separate
-  step, see `_k8s/longhorn/README.md`.
+  `patch-all`, `patch-cp` and `cni-*`): the rshared mount of `/var/lib/longhorn` is applied by
+  `_k8s/longhorn/longhorn-up.sh`, to the workers, right before the chart. A freshly bootstrapped
+  cluster therefore has **no** `extraMounts` — see `_k8s/longhorn/README.md`.
 - The default gateway through NAT `10.0.2.2` is **intentional** (Internet access). What must be
   host-only is the node's identity (kubelet nodeIP / etcd / VIP), not the default route.
 - **Bilingual docs**: `docs/build.py` pairs pages per directory through `MIROIRS`
