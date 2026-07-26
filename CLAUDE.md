@@ -89,6 +89,15 @@ that is the guard to run after renaming a heading or adding a page.
   manual `gen config` MUST include `--config-patch-control-plane @talos/cni-<CNI>.yaml` **and**
   `--install-image "$INSTALLER_IMAGE"` — without it the *classic* installer is laid down,
   without the iscsi extensions, and Longhorn fails later on `iscsiadm: not found`.
+- **ACME: `staging` is the default, and `prod` has a weekly quota**. `LAB_ACME_ISSUER`
+  (`staging|prod`, default `staging`) drives the `cert-manager.io/cluster-issuer` annotation —
+  the versioned `Envoy-Proxy.yml` carries `letsencrypt-staging`, and `platform-up.sh` rewrites
+  it. Do NOT switch the repo default back to `prod`: the wildcard lives **only in etcd**, so
+  every `vagrant destroy` burns one of the **5 certificates/week per identifier set** Let's
+  Encrypt production allows. Already hit on 2026-07-26: 5/5 consumed, `429 rateLimited`, no TLS
+  for 18 h — while the destroyed cert was valid for another 3 months. Before a destroy on a
+  `prod` lab: `kubectl -n envoy-gateway-system get secret <wildcard>-tls -o yaml >
+  _out/wildcard-tls.backup.yaml` (private key inside — `_out/` is gitignored).
 - **Only Cilium gives an IP to `LoadBalancer` Services** in this lab (L2/ARP announcement).
   Calico can only do it over BGP (no peer router on a host-only network) ⇒ MetalLB required,
   and `loadBalancerClass: io.cilium/l2-announcer` in `Envoy-Proxy.yml` has to go — which is

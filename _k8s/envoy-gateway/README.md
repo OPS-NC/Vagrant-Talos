@@ -77,8 +77,10 @@ It is the `EnvoyProxy`'s Service that triggers the Cilium L2 announcement → he
 | `http` | 80 | *(none — any hostname)* | — |
 | `https` | 443 | `*.talos.lab.example.io` | `Terminate`, `certificateRefs: wildcard-talos-lab-example-io-tls` |
 
-The `cert-manager.io/cluster-issuer: letsencrypt-prod` annotation on the Gateway is enough for
-cert-manager to create the `Certificate`, solve the DNS-01 challenge and fill the Secret. The
+The `cert-manager.io/cluster-issuer` annotation on the Gateway is enough for cert-manager to
+create the `Certificate`, solve the DNS-01 challenge and fill the Secret. The versioned
+manifest carries `letsencrypt-staging`; `platform-up.sh` rewrites it from `LAB_ACME_ISSUER`
+(`staging` by default, `prod` on demand — mind the **5 certificates/week** production cap). The
 mechanism is detailed in [`../cert-manager/README.md`](../cert-manager/README.md).
 
 ### Attaching an application

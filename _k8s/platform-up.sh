@@ -16,7 +16,8 @@
 #
 # Domaine : les manifestes versionnés portent le domaine NEUTRE `talos.lab.example.io`
 # (dépôt public). Il est remplacé à la volée par `LAB_DOMAIN` (env ou lab.env) — idem
-# `LAB_DNS_ZONE` (zone du solveur DNS-01) et `LAB_ACME_EMAIL` (compte Let's Encrypt).
+# `LAB_DNS_ZONE` (zone du solveur DNS-01), `LAB_ACME_EMAIL` (compte Let's Encrypt) et
+# `LAB_ACME_ISSUER` (staging par défaut / prod sur demande).
 #
 # Idempotent : `helm upgrade --install` + `kubectl apply`. Relançable sans casse.
 # À lancer depuis la racine du dépôt : ./_k8s/platform-up.sh
@@ -57,6 +58,21 @@ LAB_DNS_ZONE="${LAB_DNS_ZONE:-$(printf '%s\n' "$LAB_DOMAIN" | awk -F. '{ print (
 # E-mail du compte ACME (Let's Encrypt refuse certains domaines d'exemple).
 LAB_ACME_EMAIL="${LAB_ACME_EMAIL:-$(lire_lab_env LAB_ACME_EMAIL)}"
 LAB_ACME_EMAIL="${LAB_ACME_EMAIL:-admin@${LAB_DNS_ZONE}}"
+
+# --- Émetteur ACME : staging par défaut, production sur demande --------------
+# Le wildcard ne vit QUE dans etcd : `vagrant destroy` le détruit, et le rebuild en
+# redemande un neuf. Or Let's Encrypt PRODUCTION plafonne à 5 certificats par semaine
+# pour un même jeu d'identifiants (`*.<LAB_DOMAIN>`) — un lab jetable épuise ce quota en
+# 5 rebuilds, puis se retrouve sans TLS pendant des heures (erreur 429, cf. README).
+# Le staging a un quota ~30 000/semaine : c'est le bon défaut pour un lab. On ne passe en
+# production que si on en a explicitement besoin (cert trusté par le navigateur).
+LAB_ACME_ISSUER="${LAB_ACME_ISSUER:-$(lire_lab_env LAB_ACME_ISSUER)}"
+LAB_ACME_ISSUER="${LAB_ACME_ISSUER:-staging}"
+case "$LAB_ACME_ISSUER" in
+  staging|prod) ;;
+  *) echo "ERREUR : LAB_ACME_ISSUER='${LAB_ACME_ISSUER}' inconnu (staging|prod)." >&2 ; exit 1 ;;
+esac
+ACME_ISSUER="letsencrypt-${LAB_ACME_ISSUER}"
 
 # --- CNI : qui pose le réseau, et est-ce qu'on aura une IP LoadBalancer ? -----
 # La variable exprime une INTENTION (cf. lab.env.example) :
@@ -115,10 +131,12 @@ log "[2/4] Envoy Gateway ${ENVOY_GW_VERSION} + main-gateway"
 helm upgrade --install eg oci://docker.io/envoyproxy/gateway-helm \
   --version "${ENVOY_GW_VERSION}" -n envoy-gateway-system --create-namespace
 kubectl -n envoy-gateway-system rollout status deploy/envoy-gateway --timeout=180s
-# Rend le manifeste : hostname de l'écouteur https + nom du Secret TLS depuis LAB_DOMAIN.
+# Rend le manifeste : hostname de l'écouteur https + nom du Secret TLS depuis LAB_DOMAIN,
+# et l'émetteur ACME depuis LAB_ACME_ISSUER (le manifeste versionné porte `staging`).
 rendre_envoy_proxy() {
   sed -e "s/talos\.lab\.example\.io/${LAB_DOMAIN}/g" \
       -e "s/talos-lab-example-io/${LAB_DOMAIN_DASH}/g" \
+      -e "s|\(cert-manager\.io/cluster-issuer:\)[[:space:]]*letsencrypt-[a-z]*|\1 ${ACME_ISSUER}|" \
       _k8s/envoy-gateway/Envoy-Proxy.yml
 }
 ip_gateway() {
@@ -201,7 +219,12 @@ echo "  CNI          : ${CNI}$([ "$LB_L2" = 1 ] && echo ' (annonce L2 des IP Loa
 echo "  Nodes        : $(kubectl get nodes --no-headers | grep -c ' Ready ')/$(kubectl get nodes --no-headers | wc -l) Ready"
 echo "  Gateway      : $(kubectl -n envoy-gateway-system get gateway main-gateway -o jsonpath='{.status.addresses[0].value}' 2>/dev/null)"
 echo "  Cert wildcard: $(kubectl -n envoy-gateway-system get certificate "${WILDCARD_TLS}" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo '?') (Ready) [${WILDCARD_TLS}]"
+echo "  Émetteur ACME: ${ACME_ISSUER}$([ "$LAB_ACME_ISSUER" = "staging" ] && echo '  (cert NON trusté : avertissement navigateur attendu)' || echo '  (cert trusté — quota 5/semaine !)')"
 echo "  Domaine      : *.${LAB_DOMAIN}  (zone DNS ${LAB_DNS_ZONE})"
+if [ "$LAB_ACME_ISSUER" = "staging" ]; then
+  echo "                 Pour un cert trusté : LAB_ACME_ISSUER=prod dans lab.env, puis"
+  echo "                 kubectl -n envoy-gateway-system delete secret ${WILDCARD_TLS}"
+fi
 echo
 echo "  Addons à installer ensuite (chacun son dossier + up.sh) :"
 echo "    Argo CD  : ./_k8s/argocd/argocd-up.sh          (GitOps, argo.${LAB_DOMAIN})"

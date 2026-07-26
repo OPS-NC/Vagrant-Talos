@@ -153,6 +153,7 @@ cp lab.env.example lab.env
 | `LAB_DOMAIN` | `talos.lab.example.io` | UI domain (`*.<domain>`: wildcard TLS + `HTTPRoute`) |
 | `LAB_DNS_ZONE` | *(empty → last 2 labels)* | DNS zone of the ACME DNS-01 solver |
 | `LAB_ACME_EMAIL` | *(empty → `admin@<zone>`)* | Let's Encrypt account (expiry notices) |
+| `LAB_ACME_ISSUER` | `staging` | ACME issuer: `staging` (untrusted, huge quota) or `prod` (trusted, **5 certs/week**) |
 | `CLOUDFLARE_API_TOKEN` | *(empty)* | cert-manager DNS-01 (`_k8s/`) |
 | `NETWORK` | `192.168.56` | host-only network |
 | `CP_IP_START` / `CP_IP_STEP` | `10` / `10` | → `.10`, `.20`, `.30` |
@@ -416,6 +417,7 @@ Then in `lab.env` (gitignored — **never** in `lab.env.example`):
 LAB_DOMAIN=talos.lab.example.io        # your domain
 LAB_DNS_ZONE=example.io                # the Cloudflare zone (derived if empty)
 LAB_ACME_EMAIL=you@example.io          # Let's Encrypt expiry notices
+LAB_ACME_ISSUER=staging                # staging (default) | prod — see the warning below
 CLOUDFLARE_API_TOKEN=<your-token>
 ```
 
@@ -433,9 +435,27 @@ kubectl -n envoy-gateway-system describe challenge 2>/dev/null | tail -20
 > right to change the DNS of every domain you own. The two permissions above are enough:
 > `Zone:Read` to find the zone, `DNS:Edit` to create the challenge record.
 
-> 💡 Start with `letsencrypt-staging` (`_k8s/cert-manager/02-clusterissuer-staging.yaml`) to
-> shake out the rough edges: production quotas are quickly exhausted when the config is wrong.
-> The certificate will be invalid in the browser, that is expected (`curl -k`).
+> 💡 **`LAB_ACME_ISSUER=staging` is the default**, on purpose. The certificate will be invalid
+> in the browser — that is expected (`curl -k`).
+
+> ⚠️ **Switching to `prod` costs you a quota slot on every rebuild.** The wildcard lives
+> **only in etcd**: `vagrant destroy` destroys it, and the next `platform-up.sh` asks Let's
+> Encrypt for a brand new one. Production allows **5 certificates per week for the same
+> `*.<LAB_DOMAIN>`** — so the 6th rebuild in a week fails with a `429 rateLimited` and the lab
+> stays **without TLS** until the 168 h window slides:
+>
+> ```
+> 429 urn:ietf:params:acme:error:rateLimited: too many certificates (5) already
+> issued for this exact set of identifiers in the last 168h0m0s
+> ```
+>
+> Use `prod` when the lab is stable, not while you are iterating on it. To spend a slot only
+> when needed, back the wildcard up **before** destroying and restore it afterwards:
+>
+> ```bash
+> kubectl -n envoy-gateway-system get secret wildcard-<your-domain-in-dashes>-tls \
+>   -o yaml > _out/wildcard-tls.backup.yaml     # contains the private key: _out/ is gitignored
+> ```
 
 ---
 

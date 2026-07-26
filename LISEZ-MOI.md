@@ -153,6 +153,7 @@ cp lab.env.example lab.env
 | `LAB_DOMAIN` | `talos.lab.example.io` | domaine des UI (`*.<domaine>` : wildcard TLS + `HTTPRoute`) |
 | `LAB_DNS_ZONE` | *(vide → 2 derniers labels)* | zone DNS du solveur ACME DNS-01 |
 | `LAB_ACME_EMAIL` | *(vide → `admin@<zone>`)* | compte Let's Encrypt (avis d'expiration) |
+| `LAB_ACME_ISSUER` | `staging` | émetteur ACME : `staging` (non trusté, quota énorme) ou `prod` (trusté, **5 certs/semaine**) |
 | `CLOUDFLARE_API_TOKEN` | *(vide)* | DNS-01 de cert-manager (`_k8s/`) |
 | `NETWORK` | `192.168.56` | réseau host-only |
 | `CP_IP_START` / `CP_IP_STEP` | `10` / `10` | → `.10`, `.20`, `.30` |
@@ -417,6 +418,7 @@ Puis dans `lab.env` (gitignoré — **jamais** dans `lab.env.example`) :
 LAB_DOMAIN=talos.lab.example.io        # ton domaine
 LAB_DNS_ZONE=example.io                # la zone Cloudflare (déduite si vide)
 LAB_ACME_EMAIL=toi@example.io          # avis d'expiration Let's Encrypt
+LAB_ACME_ISSUER=staging                # staging (défaut) | prod — voir l'avertissement plus bas
 CLOUDFLARE_API_TOKEN=<ton-token>
 ```
 
@@ -433,9 +435,28 @@ kubectl -n envoy-gateway-system describe challenge 2>/dev/null | tail -20
 > droit de modifier le DNS de tous tes domaines. Les deux permissions ci-dessus suffisent :
 > `Zone:Read` pour trouver la zone, `DNS:Edit` pour poser l'enregistrement de challenge.
 
-> 💡 Commence par `letsencrypt-staging` (`_k8s/cert-manager/02-clusterissuer-staging.yaml`)
-> pour dégrossir : les quotas de production sont vite atteints en cas d'erreur de config.
-> Le certificat sera invalide dans le navigateur, c'est normal (`curl -k`).
+> 💡 **`LAB_ACME_ISSUER=staging` est le défaut**, volontairement. Le certificat sera invalide
+> dans le navigateur, c'est normal (`curl -k`).
+
+> ⚠️ **Passer en `prod` coûte un slot de quota à chaque rebuild.** Le wildcard vit
+> **uniquement dans etcd** : `vagrant destroy` le détruit, et le `platform-up.sh` suivant en
+> redemande un neuf à Let's Encrypt. La production plafonne à **5 certificats par semaine pour
+> un même `*.<LAB_DOMAIN>`** — le 6e rebuild de la semaine échoue donc en `429 rateLimited` et
+> le lab reste **sans TLS** jusqu'à ce que la fenêtre de 168 h glisse :
+>
+> ```
+> 429 urn:ietf:params:acme:error:rateLimited: too many certificates (5) already
+> issued for this exact set of identifiers in the last 168h0m0s
+> ```
+>
+> Utilise `prod` quand le lab est stable, pas pendant que tu itères dessus. Pour ne dépenser un
+> slot que quand c'est nécessaire, sauvegarde le wildcard **avant** de détruire, puis
+> restaure-le :
+>
+> ```bash
+> kubectl -n envoy-gateway-system get secret wildcard-<ton-domaine-en-tirets>-tls \
+>   -o yaml > _out/wildcard-tls.backup.yaml     # contient la clé privée : _out/ est gitignoré
+> ```
 
 ---
 

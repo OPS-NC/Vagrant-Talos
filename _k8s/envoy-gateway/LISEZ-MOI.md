@@ -76,9 +76,12 @@ C'est le Service de l'`EnvoyProxy` qui déclenche l'annonce L2 Cilium → d'où 
 | `http` | 80 | *(aucun — tout hostname)* | — |
 | `https` | 443 | `*.talos.lab.example.io` | `Terminate`, `certificateRefs: wildcard-talos-lab-example-io-tls` |
 
-L'annotation `cert-manager.io/cluster-issuer: letsencrypt-prod` sur le Gateway suffit à ce que
-cert-manager crée le `Certificate`, résolve le challenge DNS-01 et remplisse le Secret. Le
-mécanisme est détaillé dans [`../cert-manager/LISEZ-MOI.md`](../cert-manager/LISEZ-MOI.md).
+L'annotation `cert-manager.io/cluster-issuer` sur le Gateway suffit à ce que cert-manager crée
+le `Certificate`, résolve le challenge DNS-01 et remplisse le Secret. Le manifeste versionné
+porte `letsencrypt-staging` ; `platform-up.sh` la réécrit depuis `LAB_ACME_ISSUER` (`staging`
+par défaut, `prod` sur demande — attention au plafond de **5 certificats/semaine** en
+production). Le mécanisme est détaillé dans
+[`../cert-manager/LISEZ-MOI.md`](../cert-manager/LISEZ-MOI.md).
 
 ### Brancher une application
 

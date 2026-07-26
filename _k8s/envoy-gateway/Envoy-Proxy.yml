@@ -34,7 +34,13 @@ metadata:
   annotations:
     # cert-manager émet et renouvelle le wildcard TLS tout seul (DNS-01 Cloudflare).
     # Le Certificate + le Secret wildcard-talos-lab-example-io-tls sont créés dans CE namespace.
-    cert-manager.io/cluster-issuer: letsencrypt-prod
+    #
+    # Défaut STAGING volontaire : Let's Encrypt production plafonne à 5 certificats par
+    # semaine et par jeu d'identifiants, or le wildcard ne vit que dans etcd — chaque
+    # `vagrant destroy` en brûle donc un. Au 6e rebuild d'une même semaine, plus de TLS
+    # pendant des heures. platform-up.sh remplace cette valeur par `letsencrypt-prod`
+    # quand LAB_ACME_ISSUER=prod (cf. lab.env.example).
+    cert-manager.io/cluster-issuer: letsencrypt-staging
 spec:
   gatewayClassName: envoy
   listeners:
