@@ -22,11 +22,15 @@ and `platform-up.sh` then stops on `no node Ready`.
 
 ## 🚧 Working rules (non-negotiable)
 
-- **NEVER install or change anything on a running cluster.** "Install X" means *implement and
-  document X on the git repo side*: manifests, `*-up.sh`, README. Never `kubectl
-  apply/create/delete/patch/edit`, never `helm install/upgrade`, never `talosctl apply-config`
-  against the existing lab. Reading is allowed (`kubectl get`, `talosctl read`, `helm show
-  values`, `helm template`) to back up your claims — it is even recommended.
+- **"Install X" is still a repo change first.** The deliverable is the reproducible path —
+  manifests, `*-up.sh`, README — never a hand-rolled `kubectl apply` that leaves no trace in
+  git. Deploying to the lab afterwards is fine and expected: run the `*-up.sh` you just wrote,
+  which is also how you find out whether it actually works. What is NOT fine is a cluster
+  carrying state no script can rebuild.
+- **Ask before anything destructive.** `vagrant destroy`, `talosctl reset`/`upgrade`,
+  regenerating `_out/`, deleting a PVC or a namespace holding data: these are one-way on a lab
+  that takes ~15 min to rebuild. Reading is always free (`kubectl get`, `talosctl read`, `helm
+  show values`, `helm template`) — use it to back up your claims rather than guessing.
 - **One feature = one merged PR.** Branch from `main`, conventional commit, PR, squash merge
   (1 commit on `main`). No big catch-all commit mixing several topics: split by feature, even
   if that means several PRs back to back.
