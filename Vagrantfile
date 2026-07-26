@@ -3,57 +3,57 @@
 #
 # VagrantLab-Talos
 # ----------------
-# Monte un cluster Talos Linux sur VirtualBox.
+# Brings up a Talos Linux cluster on VirtualBox.
 #
-# La TOPOLOGIE (nb de nodes, réseau, adressage) vit dans `lab.env` (gitignoré),
-# source unique partagée avec talos/cluster-up.sh. Partir du modèle :
+# The TOPOLOGY (node count, network, addressing) lives in `lab.env` (gitignored),
+# the single source shared with talos/cluster-up.sh. Start from the template:
 #     cp lab.env.example lab.env
 #
-# Particularités Talos :
-#   - Talos n'a PAS de SSH : tout se pilote avec `talosctl` depuis l'hôte.
-#     => on enregistre un "dummy communicator" pour que `vagrant up`
-#        n'attende pas une connexion SSH qui n'arrivera jamais.
-#   - Talos n'a pas de box Vagrant officielle : on part d'une box VIDE
-#     (pace/empty) que l'on fait booter sur l'ISO `metal-amd64.iso`.
-#   - Vagrant ne peut pas configurer l'IP dans le guest (pas de SSH) :
-#     les IP sont fixées de façon déterministe via des réservations DHCP
-#     par adresse MAC sur le réseau host-only (voir trigger `before :up`).
+# Talos specifics:
+#   - Talos has NO SSH: everything is driven with `talosctl` from the host.
+#     => we register a "dummy communicator" so that `vagrant up` does not
+#        wait for an SSH connection that will never come.
+#   - Talos has no official Vagrant box: we start from an EMPTY box
+#     (pace/empty) and boot it off the `metal-amd64.iso` ISO.
+#   - Vagrant cannot configure the IP inside the guest (no SSH): IPs are
+#     pinned deterministically through per-MAC DHCP reservations on the
+#     host-only network (see the `before :up` trigger).
 #
-# Workflow complet : voir README.md
+# Full workflow: see README.md
 
 require 'shellwords'
 
 ##############################################################################
-# Paramètres du lab — chargés depuis lab.env (source unique, cf. cluster-up.sh).
-# Une variable d'environnement réelle l'emporte (ex. `WORKERS=6 vagrant up`).
+# Lab parameters — loaded from lab.env (single source, see cluster-up.sh).
+# A real environment variable wins (e.g. `WORKERS=6 vagrant up`).
 ##############################################################################
 
 lab_env = File.join(__dir__, "lab.env")
 if File.exist?(lab_env)
   File.foreach(lab_env) do |line|
-    next if line =~ /\A\s*(#|$)/           # ignore commentaires et lignes vides
+    next if line =~ /\A\s*(#|$)/           # skip comments and blank lines
     key, val = line.strip.split("=", 2)
-    ENV[key] ||= val if key && val         # ||= : une vraie var d'env reste prioritaire
+    ENV[key] ||= val if key && val         # ||= : a real env var stays authoritative
   end
 end
 
-# Défaut ALIGNÉ sur celui de talos/cluster-up.sh : sans lab.env, les deux fichiers
-# retombaient sur des versions différentes (ISO v1.13.5 / installeur v1.13.7).
+# Default ALIGNED with the one in talos/cluster-up.sh: without lab.env, the two files
+# used to fall back to different versions (ISO v1.13.5 / installer v1.13.7).
 TALOS_VERSION  = ENV["TALOS_VERSION"] || "v1.13.7"   # https://github.com/siderolabs/talos/releases
 
-CONTROL_PLANES = (ENV["CONTROL_PLANES"] || 3).to_i   # 1 = single ; 3 = HA (avec VIP)
-WORKERS        = (ENV["WORKERS"] || 3).to_i          # nombre de workers
+CONTROL_PLANES = (ENV["CONTROL_PLANES"] || 3).to_i   # 1 = single node; 3 = HA (with VIP)
+WORKERS        = (ENV["WORKERS"] || 3).to_i          # number of workers
 
-# Ressources par rôle — pilotées depuis lab.env (une vraie var d'env l'emporte).
+# Resources per role — driven from lab.env (a real env var wins).
 CP_MEM  = (ENV["CP_MEM"] || 4096).to_i ; CP_CPU = (ENV["CP_CPU"] || 2).to_i  # control plane
 WK_MEM  = (ENV["WK_MEM"] || 2048).to_i ; WK_CPU = (ENV["WK_CPU"] || 2).to_i  # worker
 
-NETWORK      = ENV["NETWORK"] || "192.168.56"    # réseau host-only
-VIP          = ENV["VIP"] || "#{NETWORK}.5"      # VIP de l'API Kubernetes (HA)
-HOST_IP      = "#{NETWORK}.1"                     # passerelle host-only
-DISK_SIZE_MB = 20480                             # disque d'installation par node (20 Go)
+NETWORK      = ENV["NETWORK"] || "192.168.56"    # host-only network
+VIP          = ENV["VIP"] || "#{NETWORK}.5"      # Kubernetes API VIP (HA)
+HOST_IP      = "#{NETWORK}.1"                     # host-only gateway
+DISK_SIZE_MB = 20480                             # install disk per node (20 GB)
 
-# Schéma d'adressage host-only (défini dans lab.env) :
+# Host-only addressing scheme (defined in lab.env):
 #   control plane i -> NETWORK.(CP_IP_START + (i-1)*CP_IP_STEP)  => .10, .20, .30, ...
 #   worker       i  -> NETWORK.(WK_IP_START + (i-1)*WK_IP_STEP)  => .101, .102, .103, ...
 CP_IP_START = (ENV["CP_IP_START"] || 10).to_i  ; CP_IP_STEP = (ENV["CP_IP_STEP"] || 10).to_i
@@ -63,10 +63,10 @@ ISO_PATH   = File.join(__dir__, "iso", "metal-amd64.iso")
 DISKS_DIR  = File.join(__dir__, ".vagrant", "talos-disks")
 
 ##############################################################################
-# Construction de la liste des nodes
-#   CP    : talos-cp1=.10, talos-cp2=.20, ...   (voir CP_IP_START / CP_IP_STEP)
-#   Worker: talos-w1=.101, talos-w2=.102, ...   (voir WK_IP_START / WK_IP_STEP)
-#   Le nom de VM = le hostname Talos. La MAC reste indexée par `idx` (unique).
+# Building the node list
+#   CP    : talos-cp1=.10, talos-cp2=.20, ...   (see CP_IP_START / CP_IP_STEP)
+#   Worker: talos-w1=.101, talos-w2=.102, ...   (see WK_IP_START / WK_IP_STEP)
+#   The VM name IS the Talos hostname. The MAC stays indexed by `idx` (unique).
 ##############################################################################
 
 servers = []
@@ -84,20 +84,20 @@ end
                mem: WK_MEM, cpu: WK_CPU }
 end
 
-# Garde-fou : .100 = serveur DHCP host-only PAR DÉFAUT de VirtualBox (réservé) ;
-# .1/.2/.5 = passerelle / serveur DHCP / VIP. Un node ne doit jamais tomber
-# dessus (dépend du schéma d'adressage ci-dessus : p.ex. 10 CP => .100).
+# Guard rail: .100 = VirtualBox's DEFAULT host-only DHCP server (reserved);
+# .1/.2/.5 = gateway / DHCP server / VIP. A node must never land on one of
+# them (depends on the addressing scheme above: e.g. 10 CPs => .100).
 reserved_ips = ["#{NETWORK}.1", "#{NETWORK}.2", "#{NETWORK}.5", "#{NETWORK}.100"]
 servers.each do |s|
   if reserved_ips.include?(s[:ip])
-    raise "VagrantLab-Talos : l'IP #{s[:ip]} (#{s[:name]}) est réservée " \
-          "(#{reserved_ips.join(', ')}). Réduis CONTROL_PLANES/WORKERS."
+    raise "VagrantLab-Talos: IP #{s[:ip]} (#{s[:name]}) is reserved " \
+          "(#{reserved_ips.join(', ')}). Lower CONTROL_PLANES/WORKERS."
   end
 end
 
 ##############################################################################
-# "dummy communicator" : rend `ready?` toujours vrai pour que Vagrant
-# ne reste pas bloqué à attendre SSH (Talos n'expose pas SSH).
+# "dummy communicator": makes `ready?` always true so that Vagrant does not
+# hang waiting for SSH (Talos exposes no SSH).
 ##############################################################################
 
 module VagrantPlugins
@@ -111,7 +111,7 @@ module VagrantPlugins
       def initialize(machine) ; @machine = machine ; end
       def ready? ; true ; end
       def wait_for_ready(_timeout) ; true ; end
-      # No-op : Talos n'expose pas de shell, ces appels ne doivent rien faire.
+      # No-op: Talos exposes no shell, these calls must do nothing.
       def test(*)    ; false ; end
       def execute(*) ; 0     ; end
       def sudo(*)    ; 0     ; end
@@ -121,11 +121,11 @@ module VagrantPlugins
     end
   end
 
-  # "dummy guest" : Vagrant cherche à détecter l'OS invité (action synced_folders
-  # appelle guest.capability? -> detect!) ; sur Talos la détection échoue et lève
-  # GuestNotDetected (fatal). On enregistre un invité bidon `detect? => true` SANS
-  # aucune capability : capability? renvoie false partout => aucune commande n'est
-  # jamais exécutée dans le guest. À coupler avec `config.vm.guest = :dummy`.
+  # "dummy guest": Vagrant tries to detect the guest OS (the synced_folders action
+  # calls guest.capability? -> detect!); on Talos detection fails and raises
+  # GuestNotDetected (fatal). We register a bogus guest with `detect? => true` and NO
+  # capability at all: capability? returns false everywhere => no command is ever
+  # executed in the guest. To be paired with `config.vm.guest = :dummy`.
   module DummyGuest
     class Plugin < Vagrant.plugin("2")
       name "dummy_guest"
@@ -139,13 +139,13 @@ module VagrantPlugins
 end
 
 ##############################################################################
-# Construit la commande shell qui configure le DHCP host-only avec des
-# réservations déterministes (MAC -> IP). Idempotente.
+# Builds the shell command that configures the host-only DHCP with
+# deterministic reservations (MAC -> IP). Idempotent.
 ##############################################################################
 
-# Vagrant 2.4.x exécute un host trigger `run.inline` via Shellwords.split + exec
-# direct (PAS de shell) : un script multiligne casse ("executable 'set' not found").
-# On enveloppe donc le script dans `bash -c <script échappé>`.
+# Vagrant 2.4.x runs a host trigger `run.inline` through Shellwords.split + a direct
+# exec (NO shell): a multi-line script breaks ("executable 'set' not found").
+# So we wrap the script in `bash -c <escaped script>`.
 def host_inline(script)
   { inline: "bash -c #{Shellwords.escape(script)}" }
 end
@@ -159,38 +159,38 @@ def hostonly_dhcp_cmd(servers)
 
   <<~SH
     set -e
-    # Trouve l'interface host-only du sous-réseau #{NETWORK}.0/24 (créée par Vagrant)
+    # Find the host-only interface of subnet #{NETWORK}.0/24 (created by Vagrant)
     IF=$(VBoxManage list hostonlyifs | awk '/^Name:/{n=$2} /^IPAddress:/{ if($2 ~ /^#{NETWORK.gsub('.', '\\.')}\\./) print n }' | head -n1)
     if [ -z "$IF" ]; then
       IF=$(VBoxManage hostonlyif create 2>/dev/null | sed -n "s/.*'\\(vboxnet[0-9]*\\)'.*/\\1/p")
       VBoxManage hostonlyif ipconfig "$IF" --ip #{HOST_IP} --netmask 255.255.255.0
     fi
-    # (Ré)active un serveur DHCP. Toutes les VMs ont une IP RÉSERVÉE par MAC ;
-    # le pool dynamique (.251-.254, jamais un multiple de 10) ne sert qu'à
-    # satisfaire VBoxManage et n'entre jamais en collision avec les nodes.
+    # (Re)enable a DHCP server. Every VM has an IP RESERVED by MAC; the dynamic
+    # pool (.251-.254, never a multiple of 10) is only there to satisfy
+    # VBoxManage and never collides with the nodes.
     VBoxManage dhcpserver add    --ifname "$IF" --ip #{NETWORK}.2 --netmask 255.255.255.0 \
       --lowerip #{NETWORK}.251 --upperip #{NETWORK}.254 --enable >/dev/null 2>&1 \
       || VBoxManage dhcpserver modify --ifname "$IF" --ip #{NETWORK}.2 --netmask 255.255.255.0 \
            --lowerip #{NETWORK}.251 --upperip #{NETWORK}.254 --enable >/dev/null 2>&1 || true
 #{reservations}
-    # Purge les baux AVANT le boot des nodes : VBox honore un vieux bail déjà
-    # « acked » (p.ex. .101 hérité du DHCP par défaut de vboxnet0) AVANT
-    # d'appliquer la réservation MAC->IP. On efface donc les baux et on redémarre
-    # le dhcpd tant qu'il tourne à vide, pour que chaque node obtienne son IP
-    # réservée dès son 1er DHCP DISCOVER (cf. trigger `before :up`).
+    # Purge the leases BEFORE the nodes boot: VBox honours an already "acked" old
+    # lease (e.g. .101 inherited from vboxnet0's default DHCP) BEFORE applying the
+    # MAC->IP reservation. So we wipe the leases and restart the dhcpd while it is
+    # still idle, so that every node gets its reserved IP on its very first DHCP
+    # DISCOVER (see the `before :up` trigger).
     CFG="${VBOX_USER_HOME:-$HOME/.config/VirtualBox}"
     rm -f "$CFG/HostInterfaceNetworking-$IF-Dhcpd.leases" \
           "$CFG/HostInterfaceNetworking-$IF-Dhcpd.leases-prev"
     VBoxManage dhcpserver restart --network "HostInterfaceNetworking-$IF" >/dev/null 2>&1 || true
-    echo "[talos] DHCP host-only prêt sur $IF -> #{servers.map { |s| "#{s[:name]}=#{s[:ip]}" }.join(' ')}"
+    echo "[talos] host-only DHCP ready on $IF -> #{servers.map { |s| "#{s[:name]}=#{s[:ip]}" }.join(' ')}"
   SH
 end
 
-# Purge les baux DHCP du réseau host-only. VBoxManage honore un bail déjà
-# « acked » AVANT les réservations MAC->IP : un bail périmé (p.ex. .101 de
-# l'ancien DHCP par défaut de vboxnet0) écrase la réservation et le node
-# n'obtient pas son IP fixe. On supprime donc le fichier de baux à la
-# destruction pour qu'un `up` ultérieur reparte sur des réservations propres.
+# Purges the host-only network's DHCP leases. VBoxManage honours an already
+# "acked" lease BEFORE the MAC->IP reservations: a stale lease (e.g. .101 from
+# vboxnet0's old default DHCP) overrides the reservation and the node does not
+# get its fixed IP. So we delete the lease file on destroy, so that a later
+# `up` restarts from clean reservations.
 def hostonly_purge_leases_cmd
   <<~SH
     set -e
@@ -200,7 +200,7 @@ def hostonly_purge_leases_cmd
     rm -f "$CFG/HostInterfaceNetworking-$IF-Dhcpd.leases" \
           "$CFG/HostInterfaceNetworking-$IF-Dhcpd.leases-prev"
     VBoxManage dhcpserver restart --network "HostInterfaceNetworking-$IF" >/dev/null 2>&1 || true
-    echo "[talos] Baux DHCP périmés purgés pour $IF"
+    echo "[talos] stale DHCP leases purged for $IF"
   SH
 end
 
@@ -209,55 +209,55 @@ end
 ##############################################################################
 
 Vagrant.configure("2") do |config|
-  # La box pace/empty déclare `config.vagrant.plugins = ["vagrant-dummy-communicator"]`
-  # dans son _Vagrantfile, ce qui force l'install d'un gem (prompt => échec sans TTY).
-  # On définit notre propre communicator "dummy" inline (cf. plus haut) : pas besoin
-  # du gem. On écrase donc la déclaration de la box (merge = last-wins).
+  # The pace/empty box declares `config.vagrant.plugins = ["vagrant-dummy-communicator"]`
+  # in its own _Vagrantfile, which forces a gem install (prompt => failure without a TTY).
+  # We define our own inline "dummy" communicator (see above): no gem needed. So we
+  # override the box's declaration (merge = last-wins).
   config.vagrant.plugins = []
 
-  config.vm.box           = "pace/empty"   # box VIDE (aucun OS) : on boote sur l'ISO
-  config.vm.guest         = :dummy         # évite la détection d'OS invité (Talos)
+  config.vm.box           = "pace/empty"   # EMPTY box (no OS): we boot off the ISO
+  config.vm.guest         = :dummy         # avoids guest OS detection (Talos)
   config.vm.box_check_update = false
-  config.vm.boot_timeout  = 1              # inutile d'attendre : pas de SSH
+  config.vm.boot_timeout  = 1              # no point waiting: no SSH
   config.ssh.insert_key   = false
   config.vm.synced_folder ".", "/vagrant", disabled: true
 
-  # Désactive vagrant-vbguest si présent (pas de guest additions sur Talos)
+  # Disable vagrant-vbguest if present (no guest additions on Talos)
   if Vagrant.has_plugin?("vagrant-vbguest")
     config.vbguest.auto_update = false
     config.vbguest.no_install  = true
     config.vbguest.no_remote   = true
   end
 
-  # Télécharge l'ISO Talos une seule fois, avant le 1er `up`.
+  # Download the Talos ISO once, before the first `up`.
   config.trigger.before :up do |t|
     t.name = "Talos ISO #{TALOS_VERSION}"
     t.run  = host_inline(<<~SH)
       set -e
       mkdir -p "#{File.dirname(ISO_PATH)}" "#{DISKS_DIR}"
       if [ ! -f "#{ISO_PATH}" ]; then
-        echo "[talos] Téléchargement de metal-amd64.iso (#{TALOS_VERSION})..."
+        echo "[talos] Downloading metal-amd64.iso (#{TALOS_VERSION})..."
         curl -fL --progress-bar -o "#{ISO_PATH}" \
           "https://github.com/siderolabs/talos/releases/download/#{TALOS_VERSION}/metal-amd64.iso"
       fi
     SH
   end
 
-  # (Ré)active le DHCP host-only AVANT le boot des VMs : réservations MAC->IP
-  # posées ET baux périmés purgés pendant que le dhcpd tourne à vide. C'est LE
-  # point clé : le node doit voir sa réservation .10/.20/.30 dès son 1er DHCP
-  # DISCOVER (au boot). Posées `after :up`, elles arrivaient trop tard et un vieux
-  # bail .101 gagnait. Trigger global => idempotent, rejoué avant chaque node
-  # (robuste aussi pour `vagrant up <node>` seul ou `vagrant reload`).
+  # (Re)enable the host-only DHCP BEFORE the VMs boot: MAC->IP reservations laid down
+  # AND stale leases purged while the dhcpd is still idle. This is THE key point: the
+  # node must see its .10/.20/.30 reservation on its very first DHCP DISCOVER (at boot).
+  # Laid down `after :up`, they arrived too late and an old .101 lease won. Global
+  # trigger => idempotent, replayed before each node (also robust for a lone
+  # `vagrant up <node>` or a `vagrant reload`).
   config.trigger.before :up do |t|
-    t.name = "DHCP host-only (réservations + purge baux)"
+    t.name = "host-only DHCP (reservations + lease purge)"
     t.run  = host_inline(hostonly_dhcp_cmd(servers))
   end
 
-  # Purge les baux DHCP périmés après destruction (cf. hostonly_purge_leases_cmd).
-  # Déclencheur global => rejoué pour chaque node détruit ; `rm -f` est idempotent.
+  # Purge stale DHCP leases after a destroy (see hostonly_purge_leases_cmd).
+  # Global trigger => replayed for each destroyed node; `rm -f` is idempotent.
   config.trigger.after :destroy do |t|
-    t.name = "Purge baux DHCP host-only"
+    t.name = "Purge host-only DHCP leases"
     t.run  = host_inline(hostonly_purge_leases_cmd)
   end
 
@@ -267,8 +267,8 @@ Vagrant.configure("2") do |config|
     config.vm.define s[:name] do |node|
       node.vm.communicator = "dummy"
 
-      # NIC2 = réseau host-only (l'IP réelle est attribuée par réservation DHCP).
-      # auto_config:false car Vagrant ne peut pas écrire dans le guest Talos.
+      # NIC2 = host-only network (the real IP is assigned by DHCP reservation).
+      # auto_config:false because Vagrant cannot write inside the Talos guest.
       node.vm.network "private_network",
         ip: s[:ip], mac: s[:mac], auto_config: false, nic_type: "virtio"
 
@@ -279,38 +279,38 @@ Vagrant.configure("2") do |config|
         vb.gui          = false
         vb.linked_clone = true
 
-        # BIOS : boot ISO/disque déterministe (la box pace/empty est en UEFI)
+        # BIOS: deterministic ISO/disk boot (the pace/empty box is UEFI)
         vb.customize ["modifyvm", :id, "--firmware", "bios"]
 
-        # Storage : configuré UNE SEULE FOIS, à la création de la VM.
-        # `vb.customize` (pre-boot) est rejoué à chaque `vagrant up` ; or
-        # `storagectl --remove/--add` n'est pas idempotent (échoue au 2e passage).
-        # Sentinelle = présence du disque : s'il existe, la VM est déjà provisionnée.
+        # Storage: configured ONLY ONCE, when the VM is created.
+        # `vb.customize` (pre-boot) is replayed on every `vagrant up`, yet
+        # `storagectl --remove/--add` is not idempotent (fails on the 2nd pass).
+        # Sentinel = the disk being present: if it exists, the VM is already provisioned.
         unless File.exist?(disk_path)
-          # Remplace le contrôleur SAS de la box par du SATA/AHCI (driver Talos sûr)
+          # Replace the box's SAS controller with SATA/AHCI (a safe Talos driver)
           vb.customize ["storagectl", :id, "--name", "SAS", "--remove"]
           vb.customize ["storagectl", :id, "--name", "SATA",
                         "--add", "sata", "--controller", "IntelAhci", "--portcount", "2"]
 
-          # Disque d'installation Talos (=> /dev/sda)
+          # Talos install disk (=> /dev/sda)
           vb.customize ["createmedium", "disk", "--filename", disk_path,
                         "--size", DISK_SIZE_MB.to_s, "--format", "VDI"]
           vb.customize ["storageattach", :id, "--storagectl", "SATA",
                         "--port", "0", "--device", "0", "--type", "hdd", "--medium", disk_path]
 
-          # ISO Talos en lecteur DVD
+          # Talos ISO in the DVD drive
           vb.customize ["storageattach", :id, "--storagectl", "SATA",
                         "--port", "1", "--device", "0", "--type", "dvddrive", "--medium", ISO_PATH]
         end
 
-        # Boot : disque d'abord (après install), DVD en secours (1er boot)
+        # Boot: disk first (after install), DVD as a fallback (first boot)
         vb.customize ["modifyvm", :id, "--boot1", "disk", "--boot2", "dvd",
                       "--boot3", "none", "--boot4", "none"]
       end
 
-      # Nettoyage du disque dédié au destroy.
+      # Clean up the dedicated disk on destroy.
       node.trigger.after :destroy do |t|
-        t.name = "Nettoyage disque #{s[:name]}"
+        t.name = "Disk cleanup #{s[:name]}"
         t.run  = host_inline(<<~SH)
           VBoxManage closemedium disk "#{disk_path}" --delete >/dev/null 2>&1 || true
           rm -f "#{disk_path}"
