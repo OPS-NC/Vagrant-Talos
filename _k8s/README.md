@@ -21,7 +21,7 @@ CNI=cilium ./talos/cluster-up.sh
 ./_k8s/platform-up.sh
 
 # 3. The addons, opt-in
-./_k8s/longhorn/…            # see longhorn/README.md (manual Helm install)
+./_k8s/longhorn/longhorn-up.sh      # block storage (StorageClass longhorn)
 ./_k8s/argocd/argocd-up.sh
 ```
 
@@ -153,7 +153,7 @@ rest in any order.
 
 | Directory | Purpose | Install | StorageClass provided |
 |---|---|---|---|
-| [`longhorn/`](longhorn/README.md) | distributed block storage; **Talos prerequisites** (iscsi extensions, rshared mount) | manual Helm | `longhorn`, `longhorn-r1` |
+| [`longhorn/`](longhorn/README.md) | distributed block storage; **Talos prerequisites** (iscsi extensions, rshared mount) | `longhorn-up.sh` | `longhorn`, `longhorn-r1` |
 | [`local-path-storage/`](local-path-storage/README.md) | dynamic local storage (hostPath), without Longhorn | `local-path-up.sh` | `local-path` |
 | [`minio-s3/`](minio-s3/README.md) | S3 object storage + console, **1 node** | `minio-up.sh` | — (consumes `local-path`) |
 | [`minio-s3/cluster/`](minio-s3/cluster/README.md) | **distributed** MinIO, 4 nodes, EC:2 erasure coding — the backup target | `minio-cluster-up.sh` | — (consumes `local-path`) |

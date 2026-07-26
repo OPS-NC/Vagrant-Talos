@@ -22,7 +22,7 @@ CNI=cilium ./talos/cluster-up.sh
 ./_k8s/platform-up.sh
 
 # 3. Les addons, à la carte
-./_k8s/longhorn/…            # cf. longhorn/LISEZ-MOI.md (install Helm manuelle)
+./_k8s/longhorn/longhorn-up.sh      # stockage bloc (StorageClass longhorn)
 ./_k8s/argocd/argocd-up.sh
 ```
 
@@ -155,7 +155,7 @@ reste dans n'importe quel ordre.
 
 | Dossier | Rôle | Installation | StorageClass fournie |
 |---|---|---|---|
-| [`longhorn/`](longhorn/LISEZ-MOI.md) | stockage bloc distribué ; **prérequis Talos** (extensions iscsi, montage rshared) | Helm manuelle | `longhorn`, `longhorn-r1` |
+| [`longhorn/`](longhorn/LISEZ-MOI.md) | stockage bloc distribué ; **prérequis Talos** (extensions iscsi, montage rshared) | `longhorn-up.sh` | `longhorn`, `longhorn-r1` |
 | [`local-path-storage/`](local-path-storage/LISEZ-MOI.md) | stockage local dynamique (hostPath), sans Longhorn | `local-path-up.sh` | `local-path` |
 | [`minio-s3/`](minio-s3/LISEZ-MOI.md) | stockage objet S3 + console, **1 nœud** | `minio-up.sh` | — (consomme `local-path`) |
 | [`minio-s3/cluster/`](minio-s3/cluster/LISEZ-MOI.md) | MinIO **distribué** 4 nœuds, erasure coding EC:2 — cible des backups | `minio-cluster-up.sh` | — (consomme `local-path`) |
