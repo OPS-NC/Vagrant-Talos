@@ -1,0 +1,90 @@
+# Validation du dépôt à chaque PR — SANS jamais monter de cluster.
+#
+# Les trois jobs appellent les mêmes cibles `make` que celles documentées pour l'usage
+# local (`make validate`) : la définition d'un test vit dans le Makefile, jamais en double
+# ici. Un test qui passe en CI et échoue sur le poste (ou l'inverse) est un test cassé.
+#
+# Ce qui n'est PAS ici, et pourquoi :
+#   - `make validate-talos`  : demande le binaire talosctl (à ajouter le jour où on veut
+#                              couvrir la génération de config) ;
+#   - `make validate-docs`   : déjà couvert par le workflow `docs`.
+name: ci
+
+on:
+  pull_request: {}
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+# Lecture seule : rien ici ne publie quoi que ce soit.
+permissions:
+  contents: read
+
+# Une PR poussée trois fois de suite n'a pas besoin de trois validations : on annule les
+# exécutions périmées de la même branche.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shell:
+    name: Syntaxe des scripts shell
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # `bash -n` sur tous les *.sh suivis par git (cf. Makefile). Pas d'installation :
+      # bash est là, et la liste vient de `git ls-files`, donc le checkout suffit.
+      - name: make validate-shell
+        run: make validate-shell
+
+  yaml:
+    name: Syntaxe des YAML
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Même épinglage que le workflow `docs` : setup-uv n'a pas de tag majeur flottant
+      # au-delà de v7, un `@v9` n'existe pas et ferait échouer le job.
+      - name: Installer uv
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+
+      # uv fournit PyYAML à la volée (cf. YAML_PY dans le Makefile) : rien à installer
+      # au niveau système, et la même commande tourne en local.
+      - name: make validate-yaml
+        run: make validate-yaml
+
+  vagrant:
+    name: Vagrantfile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Vagrant n'est plus fourni par les images ubuntu-24.04 des runners : on l'installe
+      # depuis le dépôt APT HashiCorp, et seulement s'il manque (au cas où une future
+      # image le remette).
+      - name: Installer Vagrant
+        run: |
+          if command -v vagrant >/dev/null 2>&1; then
+            echo "Vagrant déjà présent : $(vagrant --version)"
+            exit 0
+          fi
+          wget -qO- https://apt.releases.hashicorp.com/gpg \
+            | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] \
+          https://apt.releases.hashicorp.com $(lsb_release -cs) main" \
+            | sudo tee /etc/apt/sources.list.d/hashicorp.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq vagrant
+          vagrant --version
+
+      # --ignore-provider : le runner n'a pas VirtualBox, et sans ce drapeau la validation
+      # échoue sur le provider avant même de lire le Vagrantfile. En local le flag est
+      # omis, ce qui valide EN PLUS la config provider.
+      - name: make validate-vagrant
+        run: make validate-vagrant VAGRANT_VALIDATE_FLAGS=--ignore-provider
+        env:
+          # Pas de télémétrie ni de check de version depuis un runner jetable.
+          VAGRANT_NO_COLOR: "1"
+          CHECKPOINT_DISABLE: "1"
