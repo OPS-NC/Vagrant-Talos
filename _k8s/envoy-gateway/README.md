@@ -70,11 +70,36 @@ kubectl apply -f _k8s/envoy-gateway/Envoy-Proxy.yml
 
 | Object | Role |
 |---|---|
-| `EnvoyProxy` **`cilium-l2`** | configures the Envoy infrastructure: `type: LoadBalancer` Service with `loadBalancerClass: io.cilium/l2-announcer` → the IP comes from the **Cilium pool** |
+| `EnvoyProxy` **`cilium-l2`** | configures the Envoy infrastructure: `type: LoadBalancer` Service with `loadBalancerClass: io.cilium/l2-announcer` → the IP comes from the **Cilium pool**; and `envoyDeployment.replicas: 2` for the data plane |
 | `GatewayClass` **`envoy`** | class managed by `gateway.envoyproxy.io/gatewayclass-controller`, pointing at the `EnvoyProxy` above |
 | `Gateway` **`main-gateway`** (ns `envoy-gateway-system`) | the entry point: **`http:80`** and **`https:443`** listeners, `allowedRoutes.namespaces.from: All` |
 
 It is the `EnvoyProxy`'s Service that triggers the Cilium L2 announcement → hence the `.200` VIP.
+
+### Data plane: 2 replicas
+
+Do not confuse the two Deployments in `envoy-gateway-system`:
+
+| Deployment | Role | Losing it |
+|---|---|---|
+| `envoy-gateway` | the **controller**: watches Gateways/HTTPRoutes and configures the proxies | no traffic impact, config just stops being reconciled |
+| `envoy-…-main-gateway-…` | the **data plane**: the pods that actually carry the traffic | **every UI in the lab is down** |
+
+That second one is the single path for every UI (one LoadBalancer IP, `.200`), so
+`Envoy-Proxy.yml` pins it at **`replicas: 2`**: the Service keeps a ready endpoint while a pod
+is being rescheduled, a node reboots, or [`../chaos-kube/`](../chaos-kube/README.md) draws it
+in its hourly lottery. Both pods share the same IP — nothing to change in DNS or in any
+`HTTPRoute`.
+
+```bash
+kubectl -n envoy-gateway-system get deploy \
+  -l gateway.envoyproxy.io/owning-gateway-name=main-gateway    # expect 2/2
+```
+
+> ℹ️ Nothing pins the two pods to **different** nodes: the scheduler spreads them on its own,
+> but that is not a guarantee. For a hard guarantee, add a `podAntiAffinity` under
+> `envoyDeployment.pod.affinity` — with a `required` rule, keep it under the number of workers
+> or the surplus pods stay `Pending`.
 
 ### The two listeners (already wired, nothing to add)
 

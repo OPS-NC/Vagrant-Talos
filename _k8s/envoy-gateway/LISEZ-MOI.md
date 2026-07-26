@@ -71,11 +71,36 @@ kubectl apply -f _k8s/envoy-gateway/Envoy-Proxy.yml
 
 | Objet | Rôle |
 |---|---|
-| `EnvoyProxy` **`cilium-l2`** | paramètre l'infra Envoy : Service `type: LoadBalancer` avec `loadBalancerClass: io.cilium/l2-announcer` → l'IP vient du **pool Cilium** |
+| `EnvoyProxy` **`cilium-l2`** | paramètre l'infra Envoy : Service `type: LoadBalancer` avec `loadBalancerClass: io.cilium/l2-announcer` → l'IP vient du **pool Cilium** ; et `envoyDeployment.replicas: 2` pour le plan de données |
 | `GatewayClass` **`envoy`** | classe gérée par `gateway.envoyproxy.io/gatewayclass-controller`, pointant l'`EnvoyProxy` ci-dessus |
 | `Gateway` **`main-gateway`** (ns `envoy-gateway-system`) | le point d'entrée : écouteurs **`http:80`** et **`https:443`**, `allowedRoutes.namespaces.from: All` |
 
 C'est le Service de l'`EnvoyProxy` qui déclenche l'annonce L2 Cilium → d'où le VIP `.200`.
+
+### Plan de données : 2 réplicas
+
+Ne pas confondre les deux Deployments de `envoy-gateway-system` :
+
+| Deployment | Rôle | Le perdre |
+|---|---|---|
+| `envoy-gateway` | le **contrôleur** : observe Gateways/HTTPRoutes et configure les proxys | aucun impact trafic, la config cesse juste d'être réconciliée |
+| `envoy-…-main-gateway-…` | le **plan de données** : les pods qui portent réellement le trafic | **toutes les UI du lab tombent** |
+
+Ce second Deployment est le passage unique de toutes les UI (une seule IP LoadBalancer, `.200`),
+d'où le **`replicas: 2`** figé dans `Envoy-Proxy.yml` : le Service garde un endpoint prêt pendant
+qu'un pod est reprogrammé, qu'un node redémarre, ou que [`../chaos-kube/`](../chaos-kube/LISEZ-MOI.md)
+le tire dans sa loterie horaire. Les deux pods partagent la même IP — rien à changer côté DNS ni
+dans les `HTTPRoute`.
+
+```bash
+kubectl -n envoy-gateway-system get deploy \
+  -l gateway.envoyproxy.io/owning-gateway-name=main-gateway    # attendu 2/2
+```
+
+> ℹ️ Rien n'épingle les deux pods sur des nodes **différents** : le scheduler les répartit de
+> lui-même, mais ce n'est pas une garantie. Pour une garantie dure, ajouter un `podAntiAffinity`
+> sous `envoyDeployment.pod.affinity` — avec une règle `required`, rester sous le nombre de
+> workers sinon les pods en trop restent `Pending`.
 
 ### Les deux écouteurs (déjà câblés, rien à ajouter)
 
