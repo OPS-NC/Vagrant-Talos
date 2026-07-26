@@ -135,6 +135,12 @@ that is the guard to run after renaming a heading or adding a page.
   background wrapper built that way reports success no matter what failed. Check the `EXIT=`
   line inside the log, or use `${PIPESTATUS[0]}` — a shell that swallows failures is worse than
   no check at all.
+- **chaoskube is dry-run by default, and `_k8s/chaos-kube/` deletes a pod every hour.** Without
+  `--no-dry-run` the chart only logs `would kill …` — check `dryRun=false` in the pod logs, never
+  the manifest. Going back to dry-run requires REMOVING the `no-dry-run` key: the chart renders
+  `--<key>` for any falsy value, so `--set …no-dry-run=null` keeps the flag (hence the
+  `mktemp`+`sed` in `chaoskube-up.sh`). And it seals `vault-cluster`: `vault` is not in the
+  exclusion list, so every Vault pod it kills comes back sealed.
 - **Hostname**: per-node, therefore outside the shared patches. Set at `apply-config` time
   through a `HostnameConfig` document (`auto: "off"` + `hostname`). Vagrant VM name == Talos
   hostname.

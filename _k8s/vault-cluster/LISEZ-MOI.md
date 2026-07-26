@@ -179,6 +179,11 @@ publiquement reconnu** : avertissement navigateur attendu, ou `curl -k`. Mets
   avant de mettre quoi que ce soit dedans.
 - **Descellement manuel, à chaque reboot.** Pas d'auto-unseal dans ce lab (cf. §🔐). Un pod qui
   redémarre est un pod inutilisable jusqu'à ce que 3 clés lui soient présentées.
+- **[`../chaos-kube/`](../chaos-kube/LISEZ-MOI.md) scelle ce cluster, par construction.** chaoskube
+  supprime un pod au hasard toutes les heures et le namespace `vault` n'est **pas** exclu : le Raft
+  survit à la perte, mais le pod revient scellé. En quelques heures les 3 finissent scellés et Vault
+  tombe. Soit relancer `vault-up.sh` pour desceller, soit ajouter `,!vault` à
+  `chaoskube.args.namespaces`.
 - **Mettre `VAULT_ADDR` / `VAULT_TOKEN` / `VAULT_UNSEAL_KEY_*` dans `lab.env` ne fait RIEN.**
   Aucun script du dépôt ne lit ces clés depuis `lab.env` — le seul champ pioché dans ce fichier est
   `CLOUDFLARE_API_TOKEN`, par `grep` explicite dans `../platform-up.sh` (ligne 30). Les scripts de

@@ -177,6 +177,10 @@ trusted cert — mind the **5 certificates/week** cap.
   before you put anything in there.
 - **Manual unsealing, after every reboot.** No auto-unseal in this lab (see §🔐). A pod that
   restarts is an unusable pod until 3 keys have been presented to it.
+- **[`../chaos-kube/`](../chaos-kube/README.md) seals this cluster, by design.** chaoskube deletes
+  a random pod every hour and the `vault` namespace is **not** excluded: Raft survives the loss,
+  but the pod comes back sealed. Over a few hours all 3 end up sealed and Vault is down. Either
+  re-run `vault-up.sh` to unseal, or add `,!vault` to `chaoskube.args.namespaces`.
 - **Putting `VAULT_ADDR` / `VAULT_TOKEN` / `VAULT_UNSEAL_KEY_*` in `lab.env` does NOTHING.** No
   script in the repo reads those keys from `lab.env` — the only field picked out of that file is
   `CLOUDFLARE_API_TOKEN`, by an explicit `grep` in `../platform-up.sh` (line 30). The scripts in

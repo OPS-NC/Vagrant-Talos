@@ -24,6 +24,7 @@ CNI=cilium ./talos/cluster-up.sh
 ./_k8s/longhorn/longhorn-up.sh      # block storage (StorageClass longhorn)
 ./_k8s/vault-cluster/vault-up.sh    # Vault HA — needs longhorn-up.sh first
 ./_k8s/argocd/argocd-up.sh
+./_k8s/chaos-kube/chaoskube-up.sh    # optional: chaos, deletes 1 pod/hour
 ```
 
 > ⚠️ **`CNI=cilium` is the only "everything on" choice.** This layer needs a `LoadBalancer`
@@ -178,6 +179,7 @@ rest in any order.
 |---|---|---|---|
 | [`observability/`](observability/README.md) | kube-prometheus-stack `87.19.0` + Loki `7.1.0` + Alloy `1.11.0`; `grafana` / `prometheus` / `alertmanager` UIs | `observability-up.sh` | SC `longhorn-r1`; CP ≥ 4 GB |
 | [`node-problem-detector/`](node-problem-detector/README.md) | node health (kernel, runtime) `2.3.14`, tuned for Talos | `node-problem-detector-up.sh` | — |
+| [`chaos-kube/`](chaos-kube/README.md) | chaos engineering: chaoskube `0.39.0` deletes **1 random pod/hour**, except `kube-system` + `longhorn-system` | `chaoskube-up.sh` | — ; **seals `vault-cluster`** |
 
 ### 🛡️ Security
 
