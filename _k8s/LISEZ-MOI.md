@@ -181,7 +181,7 @@ reste dans n'importe quel ordre.
 |---|---|---|---|
 | [`observability/`](observability/LISEZ-MOI.md) | kube-prometheus-stack `87.19.0` + Loki `7.1.0` + Alloy `1.11.0` ; UI `grafana` / `prometheus` / `alertmanager` | `observability-up.sh` | SC `longhorn-r1` ; CP ≥ 4 Go |
 | [`node-problem-detector/`](node-problem-detector/LISEZ-MOI.md) | santé des nodes (kernel, runtime) `2.3.14`, adapté Talos | `node-problem-detector-up.sh` | — |
-| [`chaos-kube/`](chaos-kube/LISEZ-MOI.md) | chaos engineering : chaoskube `0.39.0` supprime **1 pod au hasard/heure**, sauf `kube-system` + `longhorn-system` | `chaoskube-up.sh` | — ; **scelle `vault-cluster`** |
+| [`chaos-kube/`](chaos-kube/LISEZ-MOI.md) | chaos engineering : chaoskube `0.39.0` supprime **1 pod au hasard/heure**, sauf `kube-system`, `longhorn-system`, `vault`, `cnpg-demo` | `chaoskube-up.sh` | — |
 
 ### 🛡️ Sécurité
 

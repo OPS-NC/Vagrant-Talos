@@ -4,8 +4,8 @@
 
 # 🐒 `chaos-kube/` — chaos engineering (chaoskube 0.39) sur Talos
 
-> Supprime **un pod au hasard par heure**, partout sauf `kube-system` et
-> `longhorn-system`. Le but n'est pas de casser : c'est de prouver que ce que fait tourner le
+> Supprime **un pod au hasard par heure**, partout sauf `kube-system`,
+> `longhorn-system`, `vault` et `cnpg-demo`. Le but n'est pas de casser : c'est de prouver que ce que fait tourner le
 > lab revient **tout seul**. Ce qui ne revient pas n'a jamais été vraiment hautement
 > disponible.
 
@@ -19,7 +19,7 @@ supprime. Ce seul comportement répond à des questions qu'aucun `kubectl get` n
 | Cette charge est-elle vraiment pilotée ? | un pod nu (sans Deployment/StatefulSet) **ne revient jamais** |
 | L'appli tolère-t-elle la perte d'un réplica ? | un Deployment à 1 réplica = coupure visible |
 | Les PVC se rattachent-ils ? | un volume `longhorn` RWO doit suivre le pod sur son nouveau node |
-| La HA est-elle réelle ou sur le papier ? | `../vault-cluster/` survit à 1 pod, mais revient **scellé** |
+| La HA est-elle réelle ou sur le papier ? | `../vault-cluster/` survit à la perte d'1 pod — mais revient **scellé**, d'où son exclusion |
 
 Fichiers du dossier :
 
@@ -66,7 +66,7 @@ Toute la configuration tient en quatre flags, issus de `values.yaml` :
 
 ```
 --interval=1h
---namespaces=!kube-system,!longhorn-system
+--namespaces=!kube-system,!longhorn-system,!vault,!cnpg-demo
 --no-dry-run
 --timezone=Pacific/Noumea
 ```
@@ -74,16 +74,23 @@ Toute la configuration tient en quatre flags, issus de `values.yaml` :
 ### La syntaxe d'exclusion
 
 `--namespaces` prend une liste façon sélecteur où `!ns` veut dire *exclure*, séparée par des
-virgules. Les deux exclusions de ce lab ne sont pas arbitraires :
+virgules. Les quatre exclusions de ce lab ne sont pas arbitraires :
 
 - **`kube-system`** — avec un seul control plane, tuer `kube-apiserver`, `etcd`, `coredns` ou
   l'agent Cilium fait tomber le *cluster*, pas une application. Il n'y a aucune HA à tester là.
 - **`longhorn-system`** — le CSI porte les volumes de tout le reste. Tuer un `instance-manager`
   arrache des volumes encore montés ailleurs ; les dégâts tombent sur des innocents plutôt que
   sur le pod testé.
+- **`vault`** — le Raft survit à la perte d'un pod, mais le pod revient **scellé** et ce lab n'a
+  pas d'auto-unseal. En quelques heures les 3 sont scellés et Vault tombe : ça ne teste plus la
+  résilience, ça devient une corvée (`../vault-cluster/vault-up.sh`, à chaque fois).
+- **`cnpg-demo`** — le cluster Postgres de démo (`Cluster/pg-demo`, cf.
+  `../cloudnative-pg/cluster-demo.yaml`). C'est bien le namespace du **cluster**, pas celui de
+  l'opérateur : `cnpg-system` reste du gibier, tuer l'opérateur ne coupe aucun chemin de donnée.
 
-Tout le reste est du gibier, y compris `envoy-gateway-system` (le contrôleur redémarre, le plan
-de données continue de servir) et `vault` (cf. Pièges).
+Tout le reste est une cible, y compris `envoy-gateway-system` — depuis #62 le plan de données
+tourne à 2 réplicas, donc un kill n'y coûte rien (le contrôleur redémarre, l'autre envoy
+continue de servir).
 
 ### Le dry-run est le défaut amont
 
@@ -111,8 +118,9 @@ kubectl get events -A --field-selector reason=Killing --sort-by=.lastTimestamp
 ```
 
 Attendu au démarrage : `dryRun=false interval=1h0m0s`, puis
-`namespaces="!kube-system,!longhorn-system"`, puis un premier `terminating pod` — chaoskube tue
-une fois au démarrage, puis toutes les heures.
+`namespaces="!cnpg-demo,!kube-system,!longhorn-system,!vault"` — chaoskube les trie, l'ordre ne
+correspondra donc pas à `values.yaml` — puis un premier `terminating pod` : il tue une fois au
+démarrage, puis toutes les heures.
 
 ## 🌐 Accès
 
@@ -134,14 +142,14 @@ kubectl -n chaos-kube scale deploy/chaoskube --replicas=0
 
 ## ⚠️ Pièges
 
-- **`../vault-cluster/` revient SCELLÉ.** Vault survit à la perte d'un pod (Raft, 3 réplicas),
-  mais le pod redémarré est scellé et reste `0/1` — ce lab n'a pas d'auto-unseal. Laissé tourner
-  quelques heures, chaoskube scelle les trois et Vault tombe. Le redesceller : relancer
-  `../vault-cluster/vault-up.sh`, ou exclure le namespace :
-  ```yaml
-  # _k8s/chaos-kube/values.yaml
-  namespaces: "!kube-system,!longhorn-system,!vault"
-  ```
+- **Retirer `vault` de l'exclusion le scelle.** Il est exclu par défaut pour cette raison :
+  Vault survit à la perte d'un pod (Raft, 3 réplicas), mais le pod redémarré est scellé et reste
+  `0/1` — pas d'auto-unseal ici. Enlève `!vault` de la liste et en quelques heures les trois sont
+  scellés et Vault tombe ; s'en sortir demande de relancer `../vault-cluster/vault-up.sh` après
+  chaque kill.
+- **Exclure un namespace qui n'existe pas ne pose aucun problème.** `cnpg-demo` n'apparaît
+  qu'une fois `../cloudnative-pg/` installé ; chaoskube ne filtre que sur un nom et ne se plaint
+  jamais. L'exclusion peut donc être posée avant l'addon — c'est exactement le cas ici.
 - **Le dry-run est le défaut amont** — la première façon de croire que le chaos tourne alors que
   rien n'est supprimé. Vérifier `dryRun=false` dans les logs, pas dans le manifeste.
 - **Un pod nu ne revient jamais.** chaoskube supprime des pods, il ne regarde pas qui les

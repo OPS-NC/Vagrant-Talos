@@ -179,7 +179,7 @@ rest in any order.
 |---|---|---|---|
 | [`observability/`](observability/README.md) | kube-prometheus-stack `87.19.0` + Loki `7.1.0` + Alloy `1.11.0`; `grafana` / `prometheus` / `alertmanager` UIs | `observability-up.sh` | SC `longhorn-r1`; CP ≥ 4 GB |
 | [`node-problem-detector/`](node-problem-detector/README.md) | node health (kernel, runtime) `2.3.14`, tuned for Talos | `node-problem-detector-up.sh` | — |
-| [`chaos-kube/`](chaos-kube/README.md) | chaos engineering: chaoskube `0.39.0` deletes **1 random pod/hour**, except `kube-system` + `longhorn-system` | `chaoskube-up.sh` | — ; **seals `vault-cluster`** |
+| [`chaos-kube/`](chaos-kube/README.md) | chaos engineering: chaoskube `0.39.0` deletes **1 random pod/hour**, except `kube-system`, `longhorn-system`, `vault`, `cnpg-demo` | `chaoskube-up.sh` | — |
 
 ### 🛡️ Security
 

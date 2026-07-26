@@ -139,8 +139,10 @@ that is the guard to run after renaming a heading or adding a page.
   `--no-dry-run` the chart only logs `would kill …` — check `dryRun=false` in the pod logs, never
   the manifest. Going back to dry-run requires REMOVING the `no-dry-run` key: the chart renders
   `--<key>` for any falsy value, so `--set …no-dry-run=null` keeps the flag (hence the
-  `mktemp`+`sed` in `chaoskube-up.sh`). And it seals `vault-cluster`: `vault` is not in the
-  exclusion list, so every Vault pod it kills comes back sealed.
+  `mktemp`+`sed` in `chaoskube-up.sh`). Exclusion list: `kube-system`, `longhorn-system`,
+  `vault`, `cnpg-demo` — `vault` is in there because a killed Vault pod comes back SEALED (no
+  auto-unseal), and `cnpg-demo` is the demo Postgres *cluster* namespace, not the operator's
+  (`cnpg-system`, still a target). Excluding a namespace that does not exist yet is harmless.
 - **Hostname**: per-node, therefore outside the shared patches. Set at `apply-config` time
   through a `HostnameConfig` document (`auto: "off"` + `hostname`). Vagrant VM name == Talos
   hostname.
