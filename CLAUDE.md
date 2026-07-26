@@ -150,8 +150,10 @@ that is the guard to run after renaming a heading or adding a page.
   coding agents, and there is no French mirror to keep in sync).
 - **Commit messages in English**, conventional (`fix(...)`, `feat(...)`, `docs: ...`). Branch
   from `main`, then PR (squash).
-- **Code comments in French** (scripts, `Vagrantfile`, YAML, `docs/build.py`): that is the
-  repo's working language, leave it alone.
+- **Code comments in French** (scripts, YAML, `docs/build.py`): that is the repo's working
+  language, leave it alone. **Exceptions, in English**: `Vagrantfile` and `lab.env.example`
+  — they are the first two files a newcomer opens, so they follow the English-first
+  documentation rule.
 
 ### ⚠️ Adding a component = propagating it EVERYWHERE
 
