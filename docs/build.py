@@ -77,6 +77,12 @@ SANS_MIROIR = {"CLAUDE.md"}
 LANGUES = ("en", "fr")
 LANGUE_DEFAUT = "en"
 
+# Dépôt public du projet, épinglé ici plutôt que dans le gabarit HTML : c'est la
+# seule URL externe de la page, et le lecteur d'une copie hors ligne doit pouvoir
+# retrouver la source. Le pictogramme est un SVG INLINE (cf. lien_depot) : la page
+# est auto-contenue, donc pas de badge shields.io ni d'icône servie par un CDN.
+DEPOT_URL = "https://github.com/OPS-NC/Vagrant-Talos"
+
 # Bannière « English · Français » posée en tête de chaque fichier pour les
 # lecteurs de GitHub. La page HTML a son propre sélecteur : on la retire.
 RE_BANNIERE = re.compile(r"<!--\s*i18n\s*-->.*?<!--\s*/i18n\s*-->\s*", re.DOTALL)
@@ -100,6 +106,7 @@ LIBELLES: dict[str, dict[str, str]] = {
         "badge_titre":     "Not in git: local directory",
         "badge_langue":    "EN",
         "badge_langue_titre": "Not translated yet — English page shown",
+        "depot":           "GitHub repository",
         "sous_titre":      "Talos Linux lab on VirtualBox, driven by Vagrant.",
     },
     "fr": {
@@ -119,6 +126,7 @@ LIBELLES: dict[str, dict[str, str]] = {
         "badge_titre":     "Absent de git : dossier local",
         "badge_langue":    "EN",
         "badge_langue_titre": "Pas encore traduit — page anglaise affichée",
+        "depot":           "Dépôt GitHub",
         "sous_titre":      "Lab Talos Linux sur VirtualBox, piloté par Vagrant.",
     },
 }
@@ -543,11 +551,23 @@ a:hover{text-decoration:underline;text-underline-offset:3px}
   max-width:calc(var(--texte-large) + 6.8rem);margin-inline:auto}
 
 /* ---------- menu ---------- */
-.marque{display:flex;align-items:center;gap:.65rem;padding:0 1.3rem 1.1rem;
-  font-weight:650;letter-spacing:-.01em}
+/* Marque en COLONNE : le badge dépôt sur sa propre ligne. Posé en bout de la
+   ligne de titre, il la rétrécissait assez pour couper « VagrantLab-Talos » et
+   l'horodatage en deux (menu à 290px). */
+.marque{display:flex;flex-direction:column;align-items:flex-start;gap:.6rem;
+  padding:0 1.3rem 1.1rem;font-weight:650;letter-spacing:-.01em}
+.marque-titre{display:flex;align-items:center;gap:.65rem}
 .marque .logo{font-size:1.5rem;line-height:1}
 .marque small{display:block;font-weight:450;color:var(--texte-3);font-size:.74rem;
   letter-spacing:0;font-family:var(--mono)}
+/* Badge dépôt, en haut du menu de gauche sous le titre.
+   `currentColor` sur le SVG => il suit le thème clair/sombre. */
+.marque .depot{display:inline-flex;align-items:center;gap:.3rem;
+  padding:.2rem .45rem;border:1px solid var(--bord-fort);border-radius:6px;
+  color:var(--texte-2);font-size:.72rem;font-weight:600;letter-spacing:0}
+.marque .depot:hover{color:var(--texte);background:var(--fond-3);
+  border-color:var(--texte-3);text-decoration:none}
+.marque .depot svg{flex:0 0 14px;width:14px;height:14px;fill:currentColor}
 .recherche{padding:0 1.1rem 1rem}
 .recherche input{width:100%;padding:.5rem .7rem;border:1px solid var(--bord-fort);
   border-radius:8px;background:var(--fond);color:var(--texte);font:inherit;font-size:.87rem}
@@ -747,6 +767,9 @@ JS = r"""
     champ.setAttribute('aria-label', m.recherche_aria);
     document.querySelectorAll('[data-menu-toggle]').forEach(b => b.setAttribute('aria-label', m.menu));
     document.querySelectorAll('.langues').forEach(g => g.setAttribute('aria-label', m.langue_aria));
+    document.querySelectorAll('[data-depot]').forEach(a => {
+      a.setAttribute('aria-label', m.depot); a.setAttribute('title', m.depot);
+    });
     document.querySelectorAll('.copier').forEach(b => { b.textContent = m.copier; });
     majTheme();
     if (boite.firstElementChild) boite.firstElementChild.textContent = m.sommaire;
@@ -890,6 +913,33 @@ def selecteur_langue(mots: dict[str, str]) -> str:
             f'aria-label="{html.escape(mots["langue_aria"], quote=True)}">{boutons}</div>')
 
 
+# Marque officielle GitHub (viewBox 16x16, tracé unique). Inline car la page doit
+# rester auto-contenue : aucune requête réseau au chargement.
+SVG_GITHUB = (
+    '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 0C3.58 0 '
+    '0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01'
+    '.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 '
+    '1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87'
+    '.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36'
+    '.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 '
+    '3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55'
+    '.38A8.012 8.012 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>'
+)
+
+
+def lien_depot(mots: dict[str, str]) -> str:
+    """Badge « GitHub » de la ligne de marque, en haut du menu de gauche.
+
+    Le libellé visible reste « GitHub » dans les deux langues (c'est un nom
+    propre) ; seul l'intitulé accessible est traduit, et le JS le remet à jour
+    au changement de langue (cf. majLangue).
+    """
+    intitule = html.escape(mots["depot"], quote=True)
+    return (f'<a class="depot" href="{DEPOT_URL}" target="_blank" rel="noopener noreferrer"'
+            f' data-depot title="{intitule}" aria-label="{intitule}">{SVG_GITHUB}'
+            f'<span>GitHub</span></a>')
+
+
 def rendre(docs: list[dict]) -> list[dict]:
     """Rend chaque document dans chaque langue (une entrée par page HTML)."""
     md = creer_convertisseur()
@@ -1019,8 +1069,11 @@ def construire(rendus: list[dict], version: str, alertes: list[str]) -> str:
 <div class="enveloppe">
   <aside class="menu">
     <div class="marque">
-      <span class="logo">🐧</span>
-      <span>VagrantLab-Talos<small>{html.escape(version)}</small></span>
+      <div class="marque-titre">
+        <span class="logo">🐧</span>
+        <span>VagrantLab-Talos<small>{html.escape(version)}</small></span>
+      </div>
+      {lien_depot(mots)}
     </div>
     {selecteur_langue(mots)}
     <div class="recherche">
