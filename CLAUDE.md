@@ -38,9 +38,15 @@ and `platform-up.sh` then stops on `no node Ready`.
 ## ✅ Validating a change WITHOUT touching a cluster (do this every time)
 
 ```bash
-make validate      # bash -n on every script + vagrant validate + throwaway config gen
+make validate      # bash -n on every script + YAML parse + vagrant validate + config gen
 make docs          # regenerates docs/index.html from every README (needs uv)
 ```
+
+`make validate-yaml` alone parses every git-tracked `*.yaml`/`*.yml` (PyYAML pulled in by `uv`,
+so nothing to install). The `ci` workflow re-runs `validate-shell`, `validate-yaml` and
+`validate-vagrant` on every PR **through the same make targets** — never duplicate a check's
+definition in the workflow. A runner has no VirtualBox, hence
+`make validate-vagrant VAGRANT_VALIDATE_FLAGS=--ignore-provider` there.
 
 `make validate-talos` generates the config in an `mktemp -d`, then feeds it to `talosctl
 validate --mode metal`: neither `_out/` nor the cluster is touched. To test a patch against an

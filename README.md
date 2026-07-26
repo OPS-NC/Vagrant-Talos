@@ -757,6 +757,12 @@ make help           # lists the targets
 `talosctl validate --mode metal`: no risk for `_out/` nor for the cluster.
 `make validate-docs` builds the docs into a throwaway directory and fails if a `*.md` link or
 a cross-page anchor no longer resolves.
+`make validate-yaml` parses every `*.yaml` / `*.yml` tracked by git.
+
+**On every pull request**, the `ci` workflow re-runs three of these on a runner — shell syntax,
+YAML, and the `Vagrantfile` — by calling the very same `make` targets, so a check cannot pass
+in CI and fail on your machine. `vagrant validate` runs there with `--ignore-provider`, since a
+runner has no VirtualBox.
 
 > ⚠️ **NEVER** run `FORCE=1 ./talos/cluster-up.sh` "just to test": it regenerates the secrets
 > and breaks a running cluster.
