@@ -21,8 +21,10 @@ metadata:
   name: main-gateway
   namespace: envoy-gateway-system
   annotations:
-    # letsencrypt-staging pour tester, puis letsencrypt-prod pour un cert trusté
-    cert-manager.io/cluster-issuer: letsencrypt-prod
+    # letsencrypt-staging (défaut du lab) pour itérer, letsencrypt-prod pour un cert trusté.
+    # ⚠️ prod = 5 certificats/semaine max pour un même wildcard, et chaque `vagrant destroy`
+    # en brûle un (le wildcard ne vit que dans etcd). Cf. LAB_ACME_ISSUER dans lab.env.example.
+    cert-manager.io/cluster-issuer: letsencrypt-staging
 spec:
   gatewayClassName: envoy
   listeners:

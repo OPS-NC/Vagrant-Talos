@@ -90,7 +90,7 @@ kubectl apply -f _k8s/cert-manager/02-clusterissuer-staging.yaml \
 
 ```
 Gateway main-gateway
-  ├─ annotation cert-manager.io/cluster-issuer: letsencrypt-prod
+  ├─ annotation cert-manager.io/cluster-issuer: letsencrypt-staging   (LAB_ACME_ISSUER)
   └─ listener https (hostname *.talos.lab.example.io, certificateRefs: wildcard-talos-lab-example-io-tls)
         │
         ▼  cert-manager (config.enableGatewayAPI=true) observe le Gateway
@@ -105,7 +105,7 @@ Le `Certificate` **et** le Secret naissent dans le namespace du Gateway
 la durée de vie).
 
 > 💡 **Sans l'intégration Gateway API**, le résultat s'obtient à la main : écrire un
-> `Certificate` (`dnsNames: ["*.talos.lab.example.io"]`, `issuerRef: letsencrypt-prod`,
+> `Certificate` (`dnsNames: ["*.talos.lab.example.io"]`, `issuerRef: letsencrypt-staging`,
 > `secretName: wildcard-talos-lab-example-io-tls`) et laisser l'écouteur le référencer. Même
 > résultat, c'est juste toi qui crées l'objet au lieu de cert-manager.
 
@@ -161,12 +161,15 @@ curl -sS -o /dev/null -w '%{http_code} verify=%{ssl_verify_result}\n' \
 - **`Certificate` jamais créé malgré l'annotation** → cert-manager ne tourne pas avec
   `config.enableGatewayAPI=true`, ou il a démarré **avant** les CRD Gateway API :
   `kubectl -n cert-manager rollout restart deploy/cert-manager`.
-- **Navigateur qui refuse le certificat** → tu es resté sur `letsencrypt-staging`. Repasse
-  l'annotation du Gateway sur `letsencrypt-prod`, puis supprime le Secret pour forcer une
-  réémission.
-- **Quota Let's Encrypt atteint** (~5 certificats identiques/semaine en prod) → rester en
-  **staging** tant que la chaîne DNS-01 n'est pas validée. C'est tout l'intérêt d'avoir les deux
-  émetteurs.
+- **Navigateur qui refuse le certificat** → tu es sur `letsencrypt-staging`, qui est le
+  **défaut**. Mets `LAB_ACME_ISSUER=prod` dans `lab.env`, relance `platform-up.sh`, puis
+  supprime le Secret pour forcer une réémission :
+  `kubectl -n envoy-gateway-system delete secret wildcard-<domaine-en-tirets>-tls`.
+- **`429 rateLimited` en prod** → le plafond de **5 certificats par semaine et par jeu
+  d'identifiants** est atteint. Rien à corriger, rien à retenter : le message porte l'heure de
+  `retry after` et la fenêtre de 168 h est glissante. À noter que **chaque `vagrant destroy` en
+  brûle un**, puisque le wildcard ne vit que dans etcd. Repasse en `LAB_ACME_ISSUER=staging` en
+  attendant, ou sauvegarde le Secret avant de détruire (cf. [`../../LISEZ-MOI.md`](../../LISEZ-MOI.md) §5).
 
 ## ⚠️ Pièges
 

@@ -113,7 +113,9 @@ Aucun fichier versionné n'est réécrit : `git status` reste propre.
 
 > ℹ️ Deux variables optionnelles complètent le tableau (cf. `lab.env.example`) :
 > `LAB_DNS_ZONE` (zone du solveur DNS-01 ; défaut = les 2 derniers labels de `LAB_DOMAIN`)
-> et `LAB_ACME_EMAIL` (compte Let's Encrypt ; défaut `admin@<zone>`).
+> et `LAB_ACME_EMAIL` (compte Let's Encrypt ; défaut `admin@<zone>`). `LAB_ACME_ISSUER` choisit
+> l'émetteur ACME — `staging` (défaut, cert non trusté) ou `prod` (trusté, mais plafonné à
+> **5 certificats par semaine** pour un même wildcard, et chaque `vagrant destroy` en brûle un).
 
 ## 🧱 Plateforme de base — `platform-up.sh`
 

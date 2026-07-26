@@ -132,10 +132,11 @@ curl -sS -o /dev/null -w '%{http_code}\n' \
 | API from the host, without DNS | `kubectl -n vault port-forward svc/vault-active 8200:8200` → `http://127.0.0.1:8200` |
 
 The `HTTPRoute` points at the **`vault-active`** service (the leader only): no 307 redirect
-emitted by a standby. The certificate is the **Let's Encrypt `prod` wildcard** carried by the
-`https` listener of `main-gateway` (annotation `cert-manager.io/cluster-issuer: letsencrypt-prod`,
-see `../envoy-gateway/Envoy-Proxy.yml`) — so a **publicly trusted** cert, with no browser
-exception to accept.
+emitted by a standby. The certificate is the wildcard carried by the `https` listener of
+`main-gateway` (annotation `cert-manager.io/cluster-issuer`, see
+`../envoy-gateway/Envoy-Proxy.yml`). With the default `LAB_ACME_ISSUER=staging` it is **not
+publicly trusted**: expect a browser warning, or use `curl -k`. Set `LAB_ACME_ISSUER=prod` for a
+trusted cert — mind the **5 certificates/week** cap.
 
 > ⚠️ **The UI is only reachable once Vault is unsealed.** `vault-active` has no endpoint until a
 > leader is elected: the route then answers **503**. After a cluster reboot you must **unseal

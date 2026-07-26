@@ -92,7 +92,7 @@ kubectl apply -f _k8s/cert-manager/02-clusterissuer-staging.yaml \
 
 ```
 Gateway main-gateway
-  ├─ annotation cert-manager.io/cluster-issuer: letsencrypt-prod
+  ├─ annotation cert-manager.io/cluster-issuer: letsencrypt-staging   (LAB_ACME_ISSUER)
   └─ listener https (hostname *.talos.lab.example.io, certificateRefs: wildcard-talos-lab-example-io-tls)
         │
         ▼  cert-manager (config.enableGatewayAPI=true) watches the Gateway
@@ -106,7 +106,7 @@ The `Certificate` **and** the Secret are born in the Gateway's namespace
 (`envoy-gateway-system`), not in `cert-manager`. Renewal is automatic (at ~2/3 of the lifetime).
 
 > 💡 **Without the Gateway API integration**, you get the same result by hand: write a
-> `Certificate` (`dnsNames: ["*.talos.lab.example.io"]`, `issuerRef: letsencrypt-prod`,
+> `Certificate` (`dnsNames: ["*.talos.lab.example.io"]`, `issuerRef: letsencrypt-staging`,
 > `secretName: wildcard-talos-lab-example-io-tls`) and let the listener reference it. Same
 > outcome, you just create the object instead of cert-manager.
 
@@ -162,10 +162,15 @@ curl -sS -o /dev/null -w '%{http_code} verify=%{ssl_verify_result}\n' \
 - **`Certificate` never created despite the annotation** → cert-manager is not running with
   `config.enableGatewayAPI=true`, or it started **before** the Gateway API CRDs:
   `kubectl -n cert-manager rollout restart deploy/cert-manager`.
-- **Browser refusing the certificate** → you are still on `letsencrypt-staging`. Switch the
-  Gateway annotation back to `letsencrypt-prod`, then delete the Secret to force a reissue.
-- **Let's Encrypt quota reached** (~5 identical certificates/week in prod) → stay on **staging**
-  until the DNS-01 chain is validated. That is exactly why both issuers are there.
+- **Browser refusing the certificate** → you are on `letsencrypt-staging`, which is the
+  **default**. Set `LAB_ACME_ISSUER=prod` in `lab.env`, re-run `platform-up.sh`, then delete the
+  Secret to force a reissue:
+  `kubectl -n envoy-gateway-system delete secret wildcard-<domain-in-dashes>-tls`.
+- **`429 rateLimited` in prod** → the **5 certificates per week per identifier set** cap is
+  reached. Nothing to fix, nothing to retry: the message carries the `retry after` timestamp and
+  the window is 168 h sliding. Note that **every `vagrant destroy` burns a slot**, because the
+  wildcard only lives in etcd. Go back to `LAB_ACME_ISSUER=staging` while you wait, or back the
+  Secret up before destroying (see [`../../README.md`](../../README.md) §5).
 
 ## ⚠️ Pitfalls
 
