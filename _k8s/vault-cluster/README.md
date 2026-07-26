@@ -40,8 +40,21 @@ See `../longhorn/`, `../envoy-gateway/`, `../cert-manager/`.
 
 ## ⚡ Install
 
-No `*-up.sh` here: the install fits in a single `helm upgrade --install`, and the next step
-(init + unseal) is **not** scriptable without handling unseal keys.
+```bash
+./_k8s/vault-cluster/vault-up.sh
+```
+
+Installs the chart, **initializes** Vault, **unseals** the 3 pods and applies the `HTTPRoute`.
+Idempotent: it only initializes if Vault is not already initialized, and only unseals the pods
+that are actually sealed — so it is also **the command to re-run after a reboot**, which always
+brings the pods back sealed (§🔐). `VAULT_CHART_VERSION=…` overrides the chart version.
+
+> 🔐 **The unseal keys and the root token land in `_out/vault-init.json`** (mode `0600`, and
+> `_out/` is gitignored). The script never prints them. That file is the **only** copy: lose it
+> and Vault is unrecoverable — back it up outside the repo. See §🔐 below.
+
+<details>
+<summary>The chart alone, by hand</summary>
 
 ```bash
 helm repo add hashicorp https://helm.releases.hashicorp.com && helm repo update
@@ -51,6 +64,8 @@ helm upgrade --install vault hashicorp/vault \
   --values _k8s/vault-cluster/values.yaml
 ```
 
+</details>
+
 Chart **0.34.0** → image **`hashicorp/vault:2.0.3`** (pinned versions, see the header of
 `values.yaml`).
 
@@ -59,7 +74,13 @@ fails as long as Vault is neither initialized nor unsealed.
 
 ## 🔐 Initialize + unseal
 
-Do this **once** after the install. 5 unseal keys, **threshold of 3**.
+`vault-up.sh` already did this — the commands below are the manual equivalent, useful to
+understand or to recover by hand. 5 unseal keys, **threshold of 3**.
+
+> ⚠️ **`vault-1` and `vault-2` cannot be unsealed straight away.** With integrated Raft they
+> start **uninitialized** and only join through `retry_join` once the leader is unsealed;
+> unsealing them too early fails with `400 — Vault is not initialized`. `vault-up.sh` waits for
+> `initialized=true` on each pod before unsealing it.
 
 ```bash
 # Init on pod 0 — KEEP THE OUTPUT SOMEWHERE SAFE (keys + root token).
@@ -82,12 +103,13 @@ done; done
 jq -r .root_token vault-init.json
 ```
 
-> ⚠️ **`vault-init.json` holds the 5 unseal keys AND the root token.** Never commit it. Every
-> **pod restart** (chart upgrade, node down, Talos reboot) brings it back **sealed**: you have to
-> unseal it again by hand with 3 of the 5 keys. A real deployment would use **auto-unseal** (the
+> ⚠️ **`vault-init.json` holds the 5 unseal keys AND the root token.** Never commit it —
+> `vault-up.sh` writes it to `_out/vault-init.json` precisely because `_out/` is gitignored.
+> Every **pod restart** (chart upgrade, node down, Talos reboot) brings it back **sealed**:
+> re-run `./_k8s/vault-cluster/vault-up.sh` (or unseal by hand with 3 of the 5 keys). A real deployment would use **auto-unseal** (the
 > Transit engine of another Vault, or a cloud KMS) — out of scope for the lab.
 
-Then expose the UI and the API:
+The UI and the API are exposed by the script's step `[4/4]`. To re-apply that route alone:
 
 ```bash
 kubectl apply -f _k8s/vault-cluster/httproute.yaml
