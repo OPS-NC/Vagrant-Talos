@@ -18,7 +18,7 @@ son `*-up.sh`.
 # 1. Bootstrap en CNI=cilium (défaut du dépôt) : Talos ne pose aucun CNI, cette couche si
 CNI=cilium ./talos/cluster-up.sh
 
-# 2. La plateforme de base : Cilium → Envoy Gateway → metrics-server → cert-manager
+# 2. La plateforme de base : Cilium → Envoy Gateway → metrics-server → wildcard TLS
 ./_k8s/platform-up.sh
 
 # 3. Les addons, à la carte
@@ -50,7 +50,7 @@ pas Talos qui l'a fait.
 ## 🔗 Chaîne de dépendances
 
 Chaque maillon suppose le précédent : pas d'IP LoadBalancer sans annonceur L2, pas d'HTTPS
-sans le Gateway, pas de certificat sans cert-manager.
+sans le Gateway, pas d'UI sans certificat sur l'écouteur `:443`.
 
 ```
 cluster Ready  (Talos a bootstrapé, CNI selon lab.env)
@@ -59,13 +59,17 @@ cluster Ready  (Talos a bootstrapé, CNI selon lab.env)
    │                      ou calico/ (CNI seul) ou flannel (déjà posé) ou rien
    ├─ 2. envoy-gateway/   contrôleur Envoy + main-gateway (écouteurs :80 et :443)
    ├─ 3. metric-server    API metrics.k8s.io  (kubectl top, HPA)
-   └─ 4. cert-manager/    wildcard *.talos.lab.example.io — Let's Encrypt DNS-01 Cloudflare
+   └─ 4. wildcard TLS     *.talos.lab.example.io — deux modes, selon SELF_SIGNED
+              │             true  (défaut) → self-signed/   openssl, AC locale, pas de cert-manager
+              │             false          → cert-manager/  Let's Encrypt DNS-01 Cloudflare
               │
               └─ addons : stockage → bases → secrets → observabilité → sécurité
 ```
 
-C'est exactement l'ordre de `platform-up.sh` (`[1/4]` → `[4/4]`) : **metrics-server avant
-cert-manager**.
+C'est exactement l'ordre de `platform-up.sh` (`[1/4]` → `[4/4]`) : **metrics-server avant le
+certificat**. Les deux modes TLS remplissent le **même** Secret
+(`wildcard-<LAB_DOMAIN en tirets>-tls`), donc aucun addon n'a jamais à savoir lequel tu as
+choisi — tous se contentent d'accrocher une `HTTPRoute` à l'écouteur `https`.
 
 ## 📋 Prérequis transverses
 
@@ -74,7 +78,8 @@ cert-manager**.
 | Cluster `Ready`, `KUBECONFIG` posé | tous les scripts testent `/readyz` | `kubectl get nodes` |
 | `kubectl` + `helm` | install des charts | `helm version` |
 | `main-gateway` en place | toute UI exposée en HTTPS passe par lui | `kubectl get gateway -n envoy-gateway-system` |
-| `CLOUDFLARE_API_TOKEN` dans `lab.env` | DNS-01 du wildcard TLS | lu par `platform-up.sh` |
+| `openssl` sur l'hôte — **seulement si `SELF_SIGNED=true`** (le défaut) | génère le wildcard TLS | `openssl version` |
+| `CLOUDFLARE_API_TOKEN` dans `lab.env` — **seulement si `SELF_SIGNED=false`** | DNS-01 du wildcard TLS | lu par `platform-up.sh` |
 | `LAB_DOMAIN` dans `lab.env` | domaine des UI (wildcard TLS + `HTTPRoute`) | `sed -n 's/^LAB_DOMAIN=//p' lab.env` |
 | StorageClass selon l'addon | `local-path`, `longhorn` ou `longhorn-r1` | `kubectl get sc` |
 
@@ -111,11 +116,16 @@ Aucun fichier versionné n'est réécrit : `git status` reste propre.
 > sed 's/talos\.lab\.example\.io/talos.lab.mon-domaine.tld/g' <fichier> | kubectl apply -f -
 > ```
 
-> ℹ️ Deux variables optionnelles complètent le tableau (cf. `lab.env.example`) :
-> `LAB_DNS_ZONE` (zone du solveur DNS-01 ; défaut = les 2 derniers labels de `LAB_DOMAIN`)
-> et `LAB_ACME_EMAIL` (compte Let's Encrypt ; défaut `admin@<zone>`). `LAB_ACME_ISSUER` choisit
-> l'émetteur ACME — `staging` (défaut, cert non trusté) ou `prod` (trusté, mais plafonné à
-> **5 certificats par semaine** pour un même wildcard, et chaque `vagrant destroy` en brûle un).
+> ℹ️ **`SELF_SIGNED` décide comment ce domaine obtient son certificat** (cf.
+> `lab.env.example`). `true` — le **défaut** — signe un wildcard avec `openssl` sous une AC
+> locale ([`self-signed/`](self-signed/LISEZ-MOI.md)) : pas de domaine réel, pas de token, pas
+> de quota, et le domaine n'a jamais besoin de résoudre publiquement. `false` bascule sur
+> [`cert-manager/`](cert-manager/LISEZ-MOI.md) + Let's Encrypt, et c'est seulement là que les
+> trois variables ACME comptent : `LAB_DNS_ZONE` (zone du solveur DNS-01 ; défaut = les
+> 2 derniers labels de `LAB_DOMAIN`), `LAB_ACME_EMAIL` (compte Let's Encrypt ; défaut
+> `admin@<zone>`) et `LAB_ACME_ISSUER` — `staging` (défaut, cert non trusté) ou `prod`
+> (trusté, mais plafonné à **5 certificats par semaine** pour un même wildcard, et chaque
+> `vagrant destroy` en brûle un).
 
 ## 🧱 Plateforme de base — `platform-up.sh`
 
@@ -127,7 +137,11 @@ relançable sans casse.
 | Cilium | `1.19.6` | `cilium/cilium-up.sh` |
 | Envoy Gateway | `1.8.3` | `platform-up.sh` (`ENVOY_GW_VERSION`) |
 | metrics-server | `v0.9.0` | `metric-server.yaml` |
-| cert-manager | `v1.20.2` | `platform-up.sh` (`CERT_MANAGER_VERSION`) |
+| cert-manager — **seulement si `SELF_SIGNED=false`** | `v1.20.2` | `platform-up.sh` (`CERT_MANAGER_VERSION`) |
+
+> ℹ️ Avec le défaut `SELF_SIGNED=true`, l'étape `[4/4]` lance
+> [`self-signed/selfsigned-up.sh`](self-signed/LISEZ-MOI.md) à la place et **cert-manager
+> n'est jamais installé** — ni chart, ni CRD, ni Secret Cloudflare.
 
 > ℹ️ **metrics-server adapté Talos** : `--kubelet-insecure-tls` + port sécurisé `10250`,
 > pour ne pas exiger d'approbateur de CSR kubelet. Vérif : `kubectl top nodes`.
@@ -180,7 +194,8 @@ reste dans n'importe quel ordre.
 | [`cilium/`](cilium/LISEZ-MOI.md) | **CNI par défaut** `1.19.6` + pool d'IP LoadBalancer + annonce L2 (ARP) | `cilium-up.sh`, appelé par `platform-up.sh` si `CNI=cilium` |
 | [`calico/`](calico/LISEZ-MOI.md) | **CNI alternatif** `v3.32.1` (opérateur Tigera) — CNI **seul**, sans annonce L2 | `calico-up.sh`, appelé par `platform-up.sh` si `CNI=calico` |
 | [`envoy-gateway/`](envoy-gateway/LISEZ-MOI.md) | contrôleur Envoy Gateway + `main-gateway` (`:80` et `:443` wildcard) + apps de démo | `platform-up.sh` |
-| [`cert-manager/`](cert-manager/LISEZ-MOI.md) | certificats TLS wildcard automatiques (ACME DNS-01 Cloudflare) | `platform-up.sh` |
+| [`self-signed/`](self-signed/LISEZ-MOI.md) | **mode TLS par défaut** — wildcard signé par une AC locale (`openssl`), sans domaine ni token | `selfsigned-up.sh`, appelé par `platform-up.sh` si `SELF_SIGNED=true` |
+| [`cert-manager/`](cert-manager/LISEZ-MOI.md) | certificats TLS wildcard automatiques (ACME DNS-01 Cloudflare) | `platform-up.sh`, si `SELF_SIGNED=false` |
 
 ### 🧪 Démos
 

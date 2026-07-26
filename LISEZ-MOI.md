@@ -151,10 +151,11 @@ cp lab.env.example lab.env
 | `WK_MEM` / `WK_CPU` | `2048` / `2` | ressources des workers |
 | `CNI` | `cilium` | `cilium`, `calico`, `flannel` ou `none` (cf. §9) |
 | `LAB_DOMAIN` | `talos.lab.example.io` | domaine des UI (`*.<domaine>` : wildcard TLS + `HTTPRoute`) |
+| `SELF_SIGNED` | `true` | mode TLS : `true` = wildcard signé par une AC locale (`openssl`, sans domaine ni token), `false` = cert-manager + Let's Encrypt |
 | `LAB_DNS_ZONE` | *(vide → 2 derniers labels)* | zone DNS du solveur ACME DNS-01 |
-| `LAB_ACME_EMAIL` | *(vide → `admin@<zone>`)* | compte Let's Encrypt (avis d'expiration) |
-| `LAB_ACME_ISSUER` | `staging` | émetteur ACME : `staging` (non trusté, quota énorme) ou `prod` (trusté, **5 certs/semaine**) |
-| `CLOUDFLARE_API_TOKEN` | *(vide)* | DNS-01 de cert-manager (`_k8s/`) |
+| `LAB_ACME_EMAIL` | *(vide → `admin@<zone>`)* | compte Let's Encrypt (avis d'expiration) — `SELF_SIGNED=false` seulement |
+| `LAB_ACME_ISSUER` | `staging` | émetteur ACME : `staging` (non trusté, quota énorme) ou `prod` (trusté, **5 certs/semaine**) — `SELF_SIGNED=false` seulement |
+| `CLOUDFLARE_API_TOKEN` | *(vide)* | DNS-01 de cert-manager (`_k8s/`) — `SELF_SIGNED=false` seulement |
 | `NETWORK` | `192.168.56` | réseau host-only |
 | `CP_IP_START` / `CP_IP_STEP` | `10` / `10` | → `.10`, `.20`, `.30` |
 | `WK_IP_START` / `WK_IP_STEP` | `101` / `1` | → `.101`, `.102`, `.103` |
@@ -344,7 +345,7 @@ Trivy, MinIO…
 
 ```bash
 ./talos/cluster-up.sh              # 1. cluster (CNI=cilium par défaut : Talos ne pose rien)
-./_k8s/platform-up.sh              # 2. Cilium → Envoy Gateway → metrics-server → cert-manager
+./_k8s/platform-up.sh              # 2. Cilium → Envoy Gateway → metrics-server → wildcard TLS
 ./_k8s/argocd/argocd-up.sh         # 3. addons à la carte
 ```
 
@@ -358,6 +359,15 @@ de dépendances complète et la liste des addons.
 > <pending>` et aucune UI n'est joignable. Détail au §9.
 
 ### 5.1 DNS + TLS : les deux prérequis manuels
+
+> ℹ️ **Toute cette sous-section ne concerne que `SELF_SIGNED=false`.** Avec le défaut
+> (`SELF_SIGNED=true`), `platform-up.sh` signe lui-même le wildcard avec `openssl` sous une AC
+> locale : **ni enregistrement DNS public, ni token Cloudflare**, et le domaine n'a jamais
+> besoin d'exister hors de ta machine. Il te reste seulement à faire résoudre le nom en local
+> — une ligne `/etc/hosts` pointant tes sous-domaines vers `192.168.56.200` — et, si tu veux,
+> à importer `_out/self-signed/ca.crt` pour faire taire l'avertissement du navigateur. Voir
+> [`_k8s/self-signed/LISEZ-MOI.md`](_k8s/self-signed/LISEZ-MOI.md). Ne lis la suite que si tu
+> possèdes un vrai domaine et que tu veux un certificat publiquement trusté.
 
 C'est la partie qu'on oublie, et rien ne fonctionne sans elle. Deux choses à faire **une
 seule fois**, en dehors du cluster.
@@ -415,6 +425,7 @@ Dans le tableau de bord Cloudflare → *My Profile* → *API Tokens* → *Create
 Puis dans `lab.env` (gitignoré — **jamais** dans `lab.env.example`) :
 
 ```bash
+SELF_SIGNED=false                      # en laissant le défaut (true), rien de tout ceci n'est lu
 LAB_DOMAIN=talos.lab.example.io        # ton domaine
 LAB_DNS_ZONE=example.io                # la zone Cloudflare (déduite si vide)
 LAB_ACME_EMAIL=toi@example.io          # avis d'expiration Let's Encrypt

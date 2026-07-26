@@ -30,10 +30,18 @@
 | Prérequis | Pourquoi | Vérifier |
 |---|---|---|
 | [`../cilium/`](../cilium/LISEZ-MOI.md) installé (pool L2) | c'est lui qui donne l'IP `.200` au Service du Gateway | `kubectl get ciliumloadbalancerippool` |
-| [`../cert-manager/`](../cert-manager/LISEZ-MOI.md) + token Cloudflare | remplit le Secret `wildcard-talos-lab-example-io-tls` de l'écouteur `:443` | `kubectl -n envoy-gateway-system get certificate` |
-| DNS `*.talos.lab.example.io → 192.168.56.200` en **DNS-only** | les routes matchent par hostname | `dig +short argo.talos.lab.example.io` |
+| Un Secret TLS wildcard, venu de **l'un ou l'autre** mode TLS | remplit le Secret `wildcard-talos-lab-example-io-tls` de l'écouteur `:443` | `kubectl -n envoy-gateway-system get secret wildcard-…-tls` |
+| Résolution de `*.talos.lab.example.io → 192.168.56.200` | les routes matchent par hostname | `dig +short argo.talos.lab.example.io` |
 
-Le HTTP (`:80`) fonctionne sans cert-manager ni DNS : `curl http://192.168.56.200/...`.
+Le Secret TLS vient de [`../self-signed/`](../self-signed/LISEZ-MOI.md) quand
+`SELF_SIGNED=true` (le défaut — une AC locale, sans domaine ni token) ou de
+[`../cert-manager/`](../cert-manager/LISEZ-MOI.md) + un token Cloudflare quand
+`SELF_SIGNED=false`. Le Gateway est le même dans les deux cas : seule l'annotation change. De
+même, la résolution peut être une ligne `/etc/hosts` (auto-signé) ou un enregistrement public
+**DNS-only** (ACME).
+
+Le HTTP (`:80`) fonctionne sans aucun des deux modes TLS et sans DNS :
+`curl http://192.168.56.200/...`.
 
 ## ⚡ Installation
 
@@ -82,6 +90,12 @@ porte `letsencrypt-staging` ; `platform-up.sh` la réécrit depuis `LAB_ACME_ISS
 par défaut, `prod` sur demande — attention au plafond de **5 certificats/semaine** en
 production). Le mécanisme est détaillé dans
 [`../cert-manager/LISEZ-MOI.md`](../cert-manager/LISEZ-MOI.md).
+
+> ℹ️ **Avec le défaut `SELF_SIGNED=true`, `platform-up.sh` retire purement et simplement cette
+> annotation** et remplit exactement le même Secret avec un wildcard signé par `openssl`
+> ([`../self-signed/`](../self-signed/LISEZ-MOI.md)). Les `certificateRefs` ci-dessus ne
+> changent pas — c'est précisément pour ça qu'aucun addon n'a à savoir dans quel mode TLS
+> tourne le lab.
 
 ### Brancher une application
 
@@ -172,3 +186,5 @@ kubectl delete -f _k8s/envoy-gateway/GW-Example.yml      # à retirer après la 
 - [Envoy Gateway — SecurityPolicy (Basic Auth, OIDC, JWT)](https://gateway.envoyproxy.io/docs/tasks/security/)
 - [`../cilium/LISEZ-MOI.md`](../cilium/LISEZ-MOI.md) — d'où vient le VIP ·
   [`../cert-manager/LISEZ-MOI.md`](../cert-manager/LISEZ-MOI.md) — d'où vient le certificat
+  avec `SELF_SIGNED=false`, et [`../self-signed/LISEZ-MOI.md`](../self-signed/LISEZ-MOI.md)
+  avec le défaut `SELF_SIGNED=true`

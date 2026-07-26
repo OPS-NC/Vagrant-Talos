@@ -151,10 +151,11 @@ cp lab.env.example lab.env
 | `WK_MEM` / `WK_CPU` | `2048` / `2` | worker resources |
 | `CNI` | `cilium` | `cilium`, `calico`, `flannel` or `none` (see §9) |
 | `LAB_DOMAIN` | `talos.lab.example.io` | UI domain (`*.<domain>`: wildcard TLS + `HTTPRoute`) |
-| `LAB_DNS_ZONE` | *(empty → last 2 labels)* | DNS zone of the ACME DNS-01 solver |
-| `LAB_ACME_EMAIL` | *(empty → `admin@<zone>`)* | Let's Encrypt account (expiry notices) |
-| `LAB_ACME_ISSUER` | `staging` | ACME issuer: `staging` (untrusted, huge quota) or `prod` (trusted, **5 certs/week**) |
-| `CLOUDFLARE_API_TOKEN` | *(empty)* | cert-manager DNS-01 (`_k8s/`) |
+| `SELF_SIGNED` | `true` | TLS mode: `true` = wildcard signed by a local CA (`openssl`, no domain, no token), `false` = cert-manager + Let's Encrypt |
+| `LAB_DNS_ZONE` | *(empty → last 2 labels)* | DNS zone of the ACME DNS-01 solver — `SELF_SIGNED=false` only |
+| `LAB_ACME_EMAIL` | *(empty → `admin@<zone>`)* | Let's Encrypt account (expiry notices) — `SELF_SIGNED=false` only |
+| `LAB_ACME_ISSUER` | `staging` | ACME issuer: `staging` (untrusted, huge quota) or `prod` (trusted, **5 certs/week**) — `SELF_SIGNED=false` only |
+| `CLOUDFLARE_API_TOKEN` | *(empty)* | cert-manager DNS-01 (`_k8s/`) — `SELF_SIGNED=false` only |
 | `NETWORK` | `192.168.56` | host-only network |
 | `CP_IP_START` / `CP_IP_STEP` | `10` / `10` | → `.10`, `.20`, `.30` |
 | `WK_IP_START` / `WK_IP_STEP` | `101` / `1` | → `.101`, `.102`, `.103` |
@@ -343,7 +344,7 @@ Trivy, MinIO…
 
 ```bash
 ./talos/cluster-up.sh              # 1. cluster (CNI=cilium by default: Talos installs nothing)
-./_k8s/platform-up.sh              # 2. Cilium → Envoy Gateway → metrics-server → cert-manager
+./_k8s/platform-up.sh              # 2. Cilium → Envoy Gateway → metrics-server → wildcard TLS
 ./_k8s/argocd/argocd-up.sh         # 3. opt-in addons
 ```
 
@@ -357,6 +358,15 @@ chain and the list of addons.
 > reachable. Details in §9.
 
 ### 5.1 DNS + TLS: the two manual prerequisites
+
+> ℹ️ **This whole subsection is for `SELF_SIGNED=false` only.** With the default
+> (`SELF_SIGNED=true`), `platform-up.sh` signs the wildcard itself with `openssl` under a
+> local CA: **no public DNS record and no Cloudflare token are needed**, and the domain never
+> has to exist outside your machine. All you do is make the name resolve locally — an
+> `/etc/hosts` line pointing your subdomains at `192.168.56.200` — and, optionally, import
+> `_out/self-signed/ca.crt` to silence the browser warning. See
+> [`_k8s/self-signed/README.md`](_k8s/self-signed/README.md). Read on only if you own a real
+> domain and want a publicly trusted certificate.
 
 This is the part everyone forgets, and nothing works without it. Two things to do **once**,
 outside the cluster.
@@ -414,6 +424,7 @@ In the Cloudflare dashboard → *My Profile* → *API Tokens* → *Create Token*
 Then in `lab.env` (gitignored — **never** in `lab.env.example`):
 
 ```bash
+SELF_SIGNED=false                      # leave the default (true) and none of this is read
 LAB_DOMAIN=talos.lab.example.io        # your domain
 LAB_DNS_ZONE=example.io                # the Cloudflare zone (derived if empty)
 LAB_ACME_EMAIL=you@example.io          # Let's Encrypt expiry notices
