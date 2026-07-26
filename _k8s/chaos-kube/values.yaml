@@ -20,7 +20,14 @@ chaoskube:
     #                        une appli — le lab n'a qu'un seul control plane.
     #   - longhorn-system  : le CSI porte les volumes de TOUT le reste ; tuer un
     #                        instance-manager démonte des volumes encore montés.
-    namespaces: "!kube-system,!longhorn-system"
+    #   - vault            : le Raft survit à la perte d'un pod, mais le pod revient SCELLÉ
+    #                        (pas d'auto-unseal ici). En quelques heures les 3 sont scellés
+    #                        et Vault tombe — ça ne teste plus rien, ça demande juste un
+    #                        ../vault-cluster/vault-up.sh manuel à chaque fois.
+    #   - cnpg-demo        : le cluster Postgres de démo (`Cluster/pg-demo`, cf.
+    #                        ../cloudnative-pg/cluster-demo.yaml). L'opérateur, lui, vit dans
+    #                        cnpg-system et reste du gibier : le tuer ne coupe aucune donnée.
+    namespaces: "!kube-system,!longhorn-system,!vault,!cnpg-demo"
     # Désactive le dry-run : à partir d'ici les pods sont VRAIMENT supprimés.
     no-dry-run: ""
     # Fuseau utilisé dans les logs (et par excluded-weekdays / excluded-times-of-day si

@@ -64,15 +64,20 @@ kubectl -n "$NS" rollout status deploy/chaoskube --timeout=180s
 
 # ============================================================================
 # On relit les flags REELLEMENT en place plutôt que de réafficher values.yaml : c'est la
-# seule preuve que l'exclusion et le no-dry-run ont bien atterri dans le pod.
+# seule preuve que l'exclusion et le no-dry-run ont bien atterri dans le pod. Tout ce qui
+# suit dérive de CES flags — un résumé codé en dur mentirait dès qu'on édite values.yaml.
+args_actifs="$(kubectl -n "$NS" get deploy chaoskube \
+  -o jsonpath='{range .spec.template.spec.containers[0].args[*]}{@}{"\n"}{end}')"
+exclusions="$(printf '%s\n' "$args_actifs" | sed -n 's/^--namespaces=//p')"
+intervalle="$(printf '%s\n' "$args_actifs" | sed -n 's/^--interval=//p')"
+
 log "Flags actifs (lus depuis le Deployment)"
-kubectl -n "$NS" get deploy chaoskube \
-  -o jsonpath='{range .spec.template.spec.containers[0].args[*]}    {@}{"\n"}{end}'
+printf '    %s\n' $args_actifs
 
 # ============================================================================
 log "chaoskube installé."
-echo "  Cible        : tous les namespaces SAUF kube-system et longhorn-system"
-echo "  Cadence      : 1 pod supprimé par heure"
+echo "  Cible        : tous les namespaces, filtre '${exclusions}'"
+echo "  Cadence      : 1 pod supprimé toutes les ${intervalle:-?}"
 echo "  Logs         : kubectl -n ${NS} logs -f deploy/chaoskube"
 echo "  Victimes     : kubectl get events -A --field-selector reason=Killing --sort-by=.lastTimestamp"
 echo
@@ -83,10 +88,17 @@ echo "    CHAOS_DRY_RUN=1 ./_k8s/chaos-kube/chaoskube-up.sh"
 echo "  Désinstaller :"
 echo "    helm -n ${NS} uninstall chaoskube"
 echo
-if kubectl get ns vault >/dev/null 2>&1; then
-  echo "  /!\\ Le namespace 'vault' existe et n'est PAS exclu : chaque pod Vault tué"
-  echo "      repart SCELLÉ (pas d'auto-unseal). Le redesceller :"
-  echo "        ./_k8s/vault-cluster/vault-up.sh"
-  echo "      Pour l'épargner, ajoute ',!vault' à chaoskube.args.namespaces dans"
+# Garde-fou, sur la même source que le résumé ci-dessus : on prévient si un namespace fragile
+# du lab existe dans le cluster sans être exclu.
+# vault : revient scellé. cnpg-demo : Postgres de démo. Les deux sont exclus par défaut.
+for fragile in vault cnpg-demo; do
+  kubectl get ns "$fragile" >/dev/null 2>&1 || continue
+  case ",${exclusions}," in
+    *",!${fragile},"*) continue ;;
+  esac
+  echo "  /!\\ Le namespace '${fragile}' existe et n'est PAS exclu (${exclusions})."
+  [ "$fragile" = "vault" ] && \
+    echo "      Chaque pod Vault tué repart SCELLÉ : ./_k8s/vault-cluster/vault-up.sh pour redesceller."
+  echo "      Pour l'épargner : ajoute ',!${fragile}' à chaoskube.args.namespaces dans"
   echo "      _k8s/chaos-kube/values.yaml puis relance ce script."
-fi
+done
