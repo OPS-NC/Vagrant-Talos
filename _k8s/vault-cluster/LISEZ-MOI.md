@@ -40,8 +40,22 @@ Voir `../longhorn/`, `../envoy-gateway/`, `../cert-manager/`.
 
 ## ⚡ Installation
 
-Pas de `*-up.sh` ici : l'install tient en un `helm upgrade --install`, et l'étape suivante
-(init + unseal) n'est **pas** scriptable sans manipuler des clés de descellement.
+```bash
+./_k8s/vault-cluster/vault-up.sh
+```
+
+Installe le chart, **initialise** Vault, **descelle** les 3 pods et applique l'`HTTPRoute`.
+Idempotent : n'initialise que si Vault ne l'est pas, ne descelle que les pods réellement
+scellés — c'est donc aussi **la commande à relancer après un reboot**, qui ramène toujours les
+pods scellés (§🔐). `VAULT_CHART_VERSION=…` surcharge la version du chart.
+
+> 🔐 **Les clés de descellement et le token root atterrissent dans `_out/vault-init.json`**
+> (mode `0600`, et `_out/` est gitignoré). Le script ne les affiche jamais. Ce fichier est le
+> **seul** exemplaire : le perdre rend Vault définitivement inaccessible — sauvegarde-le hors du
+> dépôt. Cf. §🔐 ci-dessous.
+
+<details>
+<summary>Le chart seul, à la main</summary>
 
 ```bash
 helm repo add hashicorp https://helm.releases.hashicorp.com && helm repo update
@@ -51,6 +65,8 @@ helm upgrade --install vault hashicorp/vault \
   --values _k8s/vault-cluster/values.yaml
 ```
 
+</details>
+
 Chart **0.34.0** → image **`hashicorp/vault:2.0.3`** (versions épinglées, cf. l'en-tête de
 `values.yaml`).
 
@@ -59,7 +75,13 @@ Les 3 pods démarrent puis restent **`0/1 Running` et SCELLÉS** : normal, la re
 
 ## 🔐 Initialiser + desceller
 
-À faire **une fois** après l'install. 5 clés de descellement, **seuil de 3**.
+`vault-up.sh` l'a déjà fait — les commandes ci-dessous sont l'équivalent manuel, utile pour
+comprendre ou pour rattraper à la main. 5 clés de descellement, **seuil de 3**.
+
+> ⚠️ **`vault-1` et `vault-2` ne se descellent pas tout de suite.** Avec le Raft intégré ils
+> démarrent **non initialisés** et ne rejoignent le cluster que par `retry_join`, une fois le
+> leader descellé ; les desceller trop tôt échoue en `400 — Vault is not initialized`.
+> `vault-up.sh` attend `initialized=true` sur chaque pod avant de le desceller.
 
 ```bash
 # Init sur le pod 0 — GARDE LA SORTIE EN LIEU SÛR (clés + root token).
@@ -83,11 +105,13 @@ jq -r .root_token vault-init.json
 ```
 
 > ⚠️ **`vault-init.json` contient les 5 clés de descellement ET le root token.** Ne jamais le
-> committer. Chaque **redémarrage de pod** (upgrade du chart, node down, reboot Talos) le fait
-> revenir **scellé** : il faut le redesceller à la main avec 3 des 5 clés. Un vrai déploiement
+> committer — `vault-up.sh` l'écrit dans `_out/vault-init.json` justement parce que `_out/` est
+> gitignoré. Chaque **redémarrage de pod** (upgrade du chart, node down, reboot Talos) le fait
+> revenir **scellé** : relancer `./_k8s/vault-cluster/vault-up.sh` (ou desceller à la main avec
+> 3 des 5 clés). Un vrai déploiement
 > utiliserait un **auto-unseal** (Transit d'un autre Vault, ou KMS cloud) — hors scope du lab.
 
-Puis exposer l'UI et l'API :
+L'UI et l'API sont exposées par l'étape `[4/4]` du script. Pour réappliquer cette route seule :
 
 ```bash
 kubectl apply -f _k8s/vault-cluster/httproute.yaml

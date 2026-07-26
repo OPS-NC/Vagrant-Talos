@@ -118,6 +118,19 @@ that is the guard to run after renaming a heading or adding a page.
   `talos/cni-flannel.yaml`, **not** in `patch-cp.yaml` — flannel picks the NAT interface
   (`10.0.2.15`, identical on every VM) ⇒ broken cross-node traffic and DNS. Same for Cilium:
   pin the `enp0s8` host-only interface.
+- **Vault + integrated Raft: `vault-1`/`vault-2` start NOT initialized.** They only join through
+  `retry_join` once `vault-0` is unsealed, so unsealing them immediately after `helm install`
+  fails with `400 — Vault is not initialized`. Wait for `initialized=true` per pod before
+  unsealing (`_k8s/vault-cluster/vault-up.sh` does this). Symptom of the race: `vault-0` unsealed,
+  the other two sealed, script dead at exit 2.
+- **jq: `//` treats `false` exactly like `null`.** `.sealed // true` therefore returns `true`
+  for an **unsealed** Vault, which made an idempotent re-run try to unseal an open Vault and
+  abort on `400 — already unsealed`. On any boolean field, use `.field | tostring` and compare
+  to `"true"`/`"false"` instead.
+- **`./script.sh; echo "EXIT=$?"` reports the exit code of `echo`, not of the script**, so a
+  background wrapper built that way reports success no matter what failed. Check the `EXIT=`
+  line inside the log, or use `${PIPESTATUS[0]}` — a shell that swallows failures is worse than
+  no check at all.
 - **Hostname**: per-node, therefore outside the shared patches. Set at `apply-config` time
   through a `HostnameConfig` document (`auto: "off"` + `hostname`). Vagrant VM name == Talos
   hostname.

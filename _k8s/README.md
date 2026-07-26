@@ -22,6 +22,7 @@ CNI=cilium ./talos/cluster-up.sh
 
 # 3. The addons, opt-in
 ./_k8s/longhorn/longhorn-up.sh      # block storage (StorageClass longhorn)
+./_k8s/vault-cluster/vault-up.sh    # Vault HA — needs longhorn-up.sh first
 ./_k8s/argocd/argocd-up.sh
 ```
 
@@ -168,7 +169,7 @@ rest in any order.
 
 | Directory | Purpose | Install | Prerequisites |
 |---|---|---|---|
-| [`vault-cluster/`](vault-cluster/README.md) | HashiCorp Vault HA (Raft), 3 nodes, UI/API under `vault.talos.lab.example.io` | manual Helm | SC `longhorn`; manual unsealing |
+| [`vault-cluster/`](vault-cluster/README.md) | HashiCorp Vault HA (Raft), 3 nodes, UI/API under `vault.talos.lab.example.io` | `vault-up.sh` | SC `longhorn`; manual unsealing |
 | [`vault-secret-operator/`](vault-secret-operator/README.md) | Vault secrets → native K8s `Secret`s (static KV, dynamic DB, PKI) — both the Vault **and** the K8s side | Helm + `vault/` scripts | `vault-cluster` unsealed |
 
 ### 📈 Observability
