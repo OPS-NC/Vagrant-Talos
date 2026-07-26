@@ -762,3 +762,17 @@ une ancre inter-pages ne résout plus.
 
 > ⚠️ Ne lance **jamais** `FORCE=1 ./talos/cluster-up.sh` « pour tester » : cela régénère les
 > secrets et casse un cluster en route.
+
+## 📄 11. Licence
+
+Ce projet est sous **licence Apache 2.0** — cf.
+[`LICENSE`](https://github.com/OPS-NC/Vagrant-Talos/blob/main/LICENSE).
+
+En résumé : utilisation, modification et redistribution libres, y compris commerciales, à
+condition de conserver la notice de copyright et d'indiquer les modifications apportées. Le tout
+**sans aucune garantie** : c'est un lab, ne le passe pas en production.
+
+La licence couvre ce que contient ce dépôt — le `Vagrantfile`, les scripts `talos/` et `_k8s/`,
+les manifestes et la documentation. Elle ne s'étend **pas** aux composants tiers que ces scripts
+téléchargent (Talos Linux, Cilium, Longhorn, Vault, Envoy Gateway, chaoskube…), qui gardent
+chacun leur propre licence.
