@@ -30,6 +30,7 @@ vagrant up                      # creates the VMs, they boot into maintenance mo
 | 📖 **Browsable docs** | [ops-nc.github.io/Vagrant-Talos](https://ops-nc.github.io/Vagrant-Talos/) — EN/FR switch, offline copy with `make docs` |
 | 📦 **Application layer** | [`_k8s/README.md`](_k8s/README.md) |
 | ⬆️ **Talos / K8s upgrades** | [`talos/UPGRADE.md`](talos/UPGRADE.md) |
+| 🚑 **Something broken?** | [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) |
 
 ---
 
@@ -47,63 +48,20 @@ vagrant up                      # creates the VMs, they boot into maintenance mo
 > 💡 **Keep `talosctl` aligned with `TALOS_VERSION`.** The binary version is what decides the
 > generated configuration schema; a mismatch with the ISO produces obscure errors.
 
-### Installing `talosctl` and `kubectl` on Ubuntu 26.04
+To pin `talosctl` to a specific version instead of taking the latest:
 
 ```bash
-# --- talosctl (official script: binary in /usr/local/bin) ---
-curl -sL https://talos.dev/install | sh
-talosctl version --client
-
-# --- kubectl (official Kubernetes apt repo, 1.36 series = Talos 1.13 default) ---
-sudo apt-get update
-sudo apt-get install -y apt-transport-https ca-certificates curl gnupg
-sudo mkdir -p /etc/apt/keyrings
-curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.36/deb/Release.key \
-  | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.36/deb/ /' \
-  | sudo tee /etc/apt/sources.list.d/kubernetes.list
-sudo apt-get update
-sudo apt-get install -y kubectl
-kubectl version --client
+curl -Lo /tmp/talosctl https://github.com/siderolabs/talos/releases/download/v1.13.7/talosctl-linux-amd64
+sudo install -m 0755 /tmp/talosctl /usr/local/bin/talosctl
 ```
-
-> ℹ️ Non-apt variant for `talosctl` (pinned binary — match the version to the
-> `TALOS_VERSION` of your `lab.env`):
-> ```bash
-> curl -Lo /tmp/talosctl https://github.com/siderolabs/talos/releases/download/v1.13.7/talosctl-linux-amd64
-> sudo install -m 0755 /tmp/talosctl /usr/local/bin/talosctl
-> ```
 
 > ℹ️ The Talos ISO (`metal-amd64.iso`) is **downloaded automatically** on the first
 > `vagrant up`, into `iso/`. No Vagrant box or plugin to install: the "dummy communicator"
 > (no SSH) and the empty `pace/empty` box are handled by the `Vagrantfile`.
 
-### VT-x conflict: unload KVM before starting VirtualBox
-
-VirtualBox and KVM cannot use **VT-x** at the same time. If the KVM kernel module is loaded,
-`vagrant up` fails at boot:
-
-```
-VBoxManage: error: VT-x is being used by another hypervisor (VERR_VMX_IN_VMX_ROOT_MODE).
-VBoxManage: error: VirtualBox can't operate in VMX root mode.
-```
-
-Check, then unload KVM (needs a real terminal: `sudo` asks for a password):
-
-```bash
-# 1. Is KVM loaded? (Intel: kvm_intel; AMD: kvm_amd)
-lsmod | grep kvm
-
-# 2. Unload (fails if a KVM/libvirt VM is still running — stop it first)
-sudo modprobe -r kvm_intel kvm      # AMD: sudo modprobe -r kvm_amd kvm
-```
-
-> 💡 **Persistence.** KVM is reloaded on every boot. If this host is **never** used for
-> KVM/libvirt, blacklist it once and for all:
-> ```bash
-> echo -e "blacklist kvm_intel\nblacklist kvm" | sudo tee /etc/modprobe.d/disable-kvm.conf
-> ```
-> To revert: delete that file and reboot (or `sudo modprobe kvm_intel`).
+> ⚠️ **VirtualBox and KVM cannot share VT-x.** If the KVM module is loaded, `vagrant up` dies on
+> `VERR_VMX_IN_VMX_ROOT_MODE` — unload it first:
+> [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md#vt-x-conflict-unload-kvm-before-starting-virtualbox).
 
 ---
 
@@ -413,18 +371,11 @@ dig +short argo.talos.lab.example.io      # must answer 192.168.56.200
 
 **b) A Cloudflare API token for the DNS-01 challenge.**
 
-The wildcard certificate `*.<LAB_DOMAIN>` cannot be validated over HTTP-01 (Let's Encrypt
-cannot reach a private IP): we use **DNS-01**, where cert-manager proves domain ownership by
-creating an `_acme-challenge` record — so it needs a token.
-
-In the Cloudflare dashboard → *My Profile* → *API Tokens* → *Create Token* →
-*Create Custom Token*:
-
-| Setting | Value |
-|---|---|
-| Permissions | `Zone` · `DNS` · **Edit** |
-| Permissions | `Zone` · `Zone` · **Read** |
-| Zone Resources | `Include` · `Specific zone` · **your zone** (e.g. `example.io`) |
+A wildcard cannot be validated over HTTP-01 (Let's Encrypt cannot reach a private IP), so
+cert-manager uses **DNS-01**: it proves ownership by writing an `_acme-challenge` record, which
+takes a token scoped to `Zone/DNS/Edit` + `Zone/Zone/Read` on **your zone only** — an `All zones`
+token would let the lab rewrite the DNS of every domain you own. How to create it, and how the
+certificate is then issued: **[`_k8s/cert-manager/README.md`](_k8s/cert-manager/README.md)**.
 
 Then in `lab.env` (gitignored — **never** in `lab.env.example`):
 
@@ -437,36 +388,16 @@ LAB_ACME_ISSUER=staging                # staging (default) | prod — see the wa
 CLOUDFLARE_API_TOKEN=<your-token>
 ```
 
-`platform-up.sh` reads those values, creates the `cloudflare-api-token` Secret in the
-`cert-manager` namespace, substitutes the domain in the manifests and waits for the
-certificate to be issued.
+`platform-up.sh` creates the `cloudflare-api-token` Secret, substitutes the domain in the
+manifests and waits for the certificate. Follow it with
+`kubectl -n envoy-gateway-system get certificate`.
 
-```bash
-# follow the issuance (1-2 min) then check
-kubectl -n envoy-gateway-system get certificate
-kubectl -n envoy-gateway-system describe challenge 2>/dev/null | tail -20
-```
-
-> ⚠️ **Restrict the token to the zone concerned.** An `All zones` token gives your lab the
-> right to change the DNS of every domain you own. The two permissions above are enough:
-> `Zone:Read` to find the zone, `DNS:Edit` to create the challenge record.
-
-> 💡 **`LAB_ACME_ISSUER=staging` is the default**, on purpose. The certificate will be invalid
-> in the browser — that is expected (`curl -k`).
-
-> ⚠️ **Switching to `prod` costs you a quota slot on every rebuild.** The wildcard lives
-> **only in etcd**: `vagrant destroy` destroys it, and the next `platform-up.sh` asks Let's
-> Encrypt for a brand new one. Production allows **5 certificates per week for the same
-> `*.<LAB_DOMAIN>`** — so the 6th rebuild in a week fails with a `429 rateLimited` and the lab
-> stays **without TLS** until the 168 h window slides:
->
-> ```
-> 429 urn:ietf:params:acme:error:rateLimited: too many certificates (5) already
-> issued for this exact set of identifiers in the last 168h0m0s
-> ```
->
-> Use `prod` when the lab is stable, not while you are iterating on it. To spend a slot only
-> when needed, back the wildcard up **before** destroying and restore it afterwards:
+> ⚠️ **`prod` costs a quota slot on every rebuild, and `staging` is the default on purpose.**
+> The wildcard lives **only in etcd**, so `vagrant destroy` burns it and the next
+> `platform-up.sh` asks for a brand new one. Let's Encrypt production allows **5 certificates
+> per week for the same `*.<LAB_DOMAIN>`**: the 6th rebuild fails with `429 rateLimited` and the
+> lab stays **without TLS** until the 168 h window slides. Use `prod` on a stable lab, not while
+> iterating — and back the wildcard up **before** a destroy:
 >
 > ```bash
 > kubectl -n envoy-gateway-system get secret wildcard-<your-domain-in-dashes>-tls \
@@ -487,30 +418,10 @@ vagrant destroy -f             # delete everything (dedicated disks included)
 > ⚠️ After a `destroy`, also delete the local Talos state before starting over:
 > `rm -rf _out kubeconfig`.
 
-### VirtualBox leftover cleanup (if `vagrant up` fails after a `destroy`)
-
-VirtualBox 7.x (linked clones) does not always clean up after a `destroy`. Symptom on the next
-`up`:
-
-```
-The name of your virtual machine couldn't be set because VirtualBox
-is reporting another VM with that name already exists.
-VBoxManage: error: Could not rename the directory '.../temp_clone_...'
-to '.../talos-cp1' ... (VERR_ALREADY_EXISTS)
-```
-
-Two layers of leftovers pile up: **orphan directories** `~/VirtualBox VMs/talos-*/` and dead
-entries in the **media registry** (`talos-*` disks still registered + accumulated
-`inaccessible` entries), which would then make the `up` fail on "medium already registered".
-
-```bash
-DRY_RUN=1 ./talos/virtualbox-cleanup.sh   # shows what would be deleted
-./talos/virtualbox-cleanup.sh             # actually purges
-```
-
-> ⚠️ Run it **AFTER** `vagrant destroy`, never on a running cluster. The script targets the
-> `talos-` prefix (`PREFIX=` variable) **and** the `temp_clone_*` VMs: if another Vagrant
-> project is in the middle of a `up` on the same machine, its temporary clone would be deleted.
+> ⚠️ **VirtualBox 7.x does not always clean up after a `destroy`**, and the next `up` then fails
+> on `VERR_ALREADY_EXISTS`. Purge the leftovers with `./talos/virtualbox-cleanup.sh` — details
+> and precautions in
+> [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md#vagrant-up-fails-after-a-destroy-virtualbox-leftovers).
 
 ### 6.1 Adding workers (live, without breaking the cluster)
 
@@ -558,107 +469,14 @@ Example — going from 3 to 5 workers (`talos-w4`=`.104`, `talos-w5`=`.105`):
 
 ## 🚑 7. Troubleshooting
 
-### A node does not get its `.x` IP
+Symptoms and fixes have their own page, so this one stays about installing:
+**[`TROUBLESHOOTING.md`](TROUBLESHOOTING.md)** — host and VirtualBox (VT-x/KVM conflict,
+leftovers after a `destroy`), addressing and DHCP (stale leases, unreachable VIP), Talos nodes
+(`--insecure` silence, `KUBERNETES: n/a`), cluster and pods (the NAT-NIC DNS trap, nodes staying
+`NotReady`).
 
-Talos retries DHCP in a loop: wait ~30 s. Otherwise `vagrant reload <node>` (the trigger
-re-arms the host-only DHCP with the reservations). To see a VM's real IP, open its console
-(`vb.gui = false` → `true` in the `Vagrantfile`): Talos prints its IP on screen.
-
-### A node takes an unexpected IP (stale DHCP leases)
-
-Symptom: `talosctl -n <reserved-ip> ... --insecure` returns `no route to host` while
-**another** IP answers. Cause: VirtualBox honours an already-`acked` DHCP lease **before**
-applying the MAC→IP reservations. An old lease (typically in the ~`.100` range, inherited from
-`vboxnet0`'s default DHCP server) overrides the reservation.
-
-The **`before :up`** trigger creates the MAC→IP reservations **and** purges those leases
-**before** the VMs boot (dhcpd restarted empty), so that every node gets its reserved IP on
-its 1st `DHCP DISCOVER`. The `after :destroy` trigger purges them too.
-
-To fix an **already started** cluster without destroying everything:
-
-```bash
-# 1. power off the nodes (maintenance mode => no data lost)
-for v in talos-cp1 talos-cp2 talos-cp3; do VBoxManage controlvm "$v" poweroff; done
-
-# 2. purge the host-only network lease file (adjust vboxnet0 if needed)
-CFG="${VBOX_USER_HOME:-$HOME/.config/VirtualBox}"
-rm -f "$CFG"/HostInterfaceNetworking-vboxnet0-Dhcpd.leases*
-VBoxManage dhcpserver restart --network HostInterfaceNetworking-vboxnet0
-
-# 3. power back on: the nodes redo a DHCP DISCOVER and get their reserved IP
-vagrant up
-```
-
-Check: `talosctl -n 192.168.56.10 version --insecure` must answer `NODE: 192.168.56.10`.
-
-### VirtualBox refuses the `192.168.56.0/24` network
-
-Allow the range in `/etc/vbox/networks.conf`:
-
-```
-* 192.168.56.0/21
-```
-
-### `talosctl ... --insecure` does not answer
-
-The node is not in maintenance mode yet, or has no host-only IP. Check
-`talosctl -n <ip> get disks --insecure` and the section above.
-
-### Pods can ping the Internet but have no DNS
-
-Symptom: `ping 1.1.1.1` works from a pod, but `nslookup`/`apk update` fail
-(`DNS: transient error`).
-
-Cause: **flannel** picks the public IP of its VXLAN tunnel on the **default route**
-interface = the **NAT** NIC (`10.0.2.15`, *identical* on every VM). All the VTEPs then point
-at an isolated NAT → **cross-node** pod traffic is broken. DNS fails because CoreDNS often
-runs on a **different** node than the client pod; Internet egress, on the other hand, leaves
-through the *local* NAT and works.
-
-```bash
-kubectl get nodes -o custom-columns='NODE:.metadata.name,FLANNEL-IP:.metadata.annotations.flannel\.alpha\.coreos\.com/public-ip'
-# KO if FLANNEL-IP = 10.0.2.15 everywhere; OK if = 192.168.56.10/.20/.30
-```
-
-The fix already lives in **`talos/cni-flannel.yaml`** (`--iface-can-reach=192.168.56.1`). On a
-**rebuild** it is picked up at bootstrap time. On an **already started** cluster, Talos does
-not re-push the manifest update on its own → patch the DaemonSet:
-
-```bash
-kubectl -n kube-system patch ds kube-flannel --type=json \
-  -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--iface-can-reach=192.168.56.1"}]'
-kubectl -n kube-system rollout status ds/kube-flannel
-```
-
-### The Talos console shows `KUBERNETES: n/a`
-
-Normal **before** `apply-config`. The dashboard derives that version from the kubelet image tag
-in the `KubeletSpec` resource, which only exists once the machine config has been applied. In
-maintenance mode no kubelet is configured → `n/a`. Nothing to fix: look at the console
-**after** applying the config. Check outside the console:
-`talosctl -n <ip> get kubeletspec` or `kubectl get nodes`.
-
-### The VIP `192.168.56.5` is unreachable
-
-The VIP only appears **after** etcd's `bootstrap`. Check that the host-only NIC really is
-`0000:00:08.0`: `talosctl -n 192.168.56.10 get links`, then `get addresses`. If the interface
-differs, adjust `busPath` in `talos/patch-cp.yaml`.
-
-### The install disk is not `/dev/sda`
-
-Check with `talosctl -n <ip> get disks --insecure` and adjust `INSTALL_DISK`.
-
-### `vagrant up` fails on `storagectl ... --remove SAS`
-
-The `pace/empty` box exposes its disk on a controller named `SAS` (replaced with SATA/AHCI). If
-a future version of the box changes that name, list it with
-`VBoxManage showvminfo <vm> | grep -i "Storage Controller Name"` and adjust the `Vagrantfile`.
-
-> ⚠️ The `Vagrantfile` uses **the existence of the disk** as a provisioning sentinel. If a
-> `destroy` fails and leaves `.vagrant/talos-disks/<vm>.vdi` behind, the next `up` creates a VM
-> **with no disk attached** and the install dies with an obscure error. Clean up with
-> `./talos/virtualbox-cleanup.sh`.
+Addon-specific problems live in the ⚠️ pitfalls and 🚑 troubleshooting sections of each
+`_k8s/<addon>/README.md` — index in [`_k8s/README.md`](_k8s/README.md).
 
 ---
 
@@ -759,7 +577,8 @@ make help           # lists the targets
 ```
 
 `make validate-talos` generates the config in a temporary directory, then feeds it to
-`talosctl validate --mode metal`: no risk for `_out/` nor for the cluster.
+`talosctl validate --mode metal`: no risk for `_out/` nor for the cluster — unlike
+`FORCE=1 ./talos/cluster-up.sh`, which regenerates the secrets and breaks a running cluster.
 `make validate-docs` builds the docs into a throwaway directory and fails if a `*.md` link or
 a cross-page anchor no longer resolves.
 `make validate-yaml` parses every `*.yaml` / `*.yml` tracked by git.
@@ -768,9 +587,6 @@ a cross-page anchor no longer resolves.
 YAML, and the `Vagrantfile` — by calling the very same `make` targets, so a check cannot pass
 in CI and fail on your machine. `vagrant validate` runs there with `--ignore-provider`, since a
 runner has no VirtualBox.
-
-> ⚠️ **NEVER** run `FORCE=1 ./talos/cluster-up.sh` "just to test": it regenerates the secrets
-> and breaks a running cluster.
 
 ## 📄 11. License
 
