@@ -67,8 +67,9 @@ FORCER: set[str] = set()
 # --- Langues ----------------------------------------------------------------
 # nom du fichier anglais (canonique) -> nom de son miroir français, même dossier.
 MIROIRS = {
-    "README.md":  "LISEZ-MOI.md",
-    "UPGRADE.md": "MISE-A-JOUR.md",
+    "README.md":          "LISEZ-MOI.md",
+    "UPGRADE.md":         "MISE-A-JOUR.md",
+    "TROUBLESHOOTING.md": "DEPANNAGE.md",
 }
 
 # Pages ANGLAIS SEULEMENT par choix : pas de miroir français, et donc pas de badge
@@ -136,7 +137,7 @@ LIBELLES: dict[str, dict[str, str]] = {
 # (titres par langue, emoji, chemins ANGLAIS ou dossiers, dans l'ordre d'affichage)
 GROUPES: list[tuple[dict[str, str], str, list[str]]] = [
     ({"en": "The lab",       "fr": "Le lab"},           "🏠",
-     ["README.md", "talos/UPGRADE.md"]),
+     ["README.md", "talos/UPGRADE.md", "TROUBLESHOOTING.md"]),
     ({"en": "Platform",      "fr": "Plateforme"},       "📦", ["_k8s/README.md"]),
     ({"en": "Networking",    "fr": "Réseau"},           "🌐",
      ["_k8s/cilium", "_k8s/calico", "_k8s/envoy-gateway", "_k8s/self-signed",
@@ -162,6 +163,7 @@ AUTRES = {"en": "Other", "fr": "Autres"}
 EMOJIS: dict[str, str] = {
     "README.md":                                  "🏠",
     "CLAUDE.md":                                  "🤖",
+    "TROUBLESHOOTING.md":                         "🚑",
     "talos/UPGRADE.md":                           "⬆️",
     "_k8s/README.md":                             "📦",
     "_k8s/cilium/README.md":                      "🐝",
