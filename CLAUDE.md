@@ -119,6 +119,18 @@ that is the guard to run after renaming a heading or adding a page.
   for 18 h — while the destroyed cert was valid for another 3 months. Before a destroy on a
   `prod` lab: `kubectl -n envoy-gateway-system get secret <wildcard>-tls -o yaml >
   _out/wildcard-tls.backup.yaml` (private key inside — `_out/` is gitignored).
+- **Calico/tigera-operator: two bootstrap traps, both fixed in `_k8s/calico/` — do not undo
+  them.** (1) The chart renders four CRs (`Installation`, `APIServer`, `Goldmane`, `Whisker`)
+  but ships **no `crds/` directory** — the operator creates the CRDs at runtime
+  (`-manage-crds=true`), so *any* CR left enabled kills `helm install` on a fresh cluster with
+  `no matches for kind … ensure CRDs are installed first`. All four stay `enabled=false`; the
+  ones we want live in `installation.yaml` / `apiserver.yaml`, applied after the CRD wait.
+  (2) The operator needs `hostNetwork` + a hostPath, which Talos's default `baseline`
+  PodSecurity rejects, and `helm --create-namespace` sets no PSS label ⇒ `_k8s/calico/namespace.yaml`
+  must be applied **before** the chart. Failure mode is nasty: `get pods` shows **zero** pod
+  (not a failing one), the Deployment just never rolls out — the reason is only in
+  `kubectl -n tigera-operator describe rs`. After such a failure, relabelling is not enough:
+  the ReplicaSet backoff outlives the 300 s timeout, so `rollout restart` then re-run.
 - **Only Cilium gives an IP to `LoadBalancer` Services** in this lab (L2/ARP announcement).
   Calico can only do it over BGP (no peer router on a host-only network) ⇒ MetalLB required,
   and `loadBalancerClass: io.cilium/l2-announcer` in `Envoy-Proxy.yml` has to go — which is

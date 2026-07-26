@@ -92,26 +92,40 @@ Overridable variables:
 
 1. **Guardrails**: binaries, `/readyz`, refusal if another CNI is already there, and refusal if
    `POD_CIDR` diverges from the `podSubnets` read in `_out/controlplane.yaml`.
-2. **`tigera-operator` chart** in the `tigera-operator` namespace (`--create-namespace`). The
-   operator runs in `hostNetwork`: it starts **without a CNI**, which is what makes bootstrapping
-   possible.
-3. **Waits for the `operator.tigera.io` CRDs**: the operator is started with `-manage-crds=true`,
-   so *it* is the one creating `installations.operator.tigera.io`. Applying the CR before that
-   would fail with "no matches for kind Installation".
-4. **`kubectl apply` of `installation.yaml`**, with both CIDRs substituted on the fly (same
-   mechanism as `LAB_DOMAIN` in `../platform-up.sh`).
-5. **Bounded waits**: the `calico-system/calico-node` DaemonSet created, `rollout status`
+2. **[`namespace.yaml`](namespace.yaml)** — the `tigera-operator` namespace, created **before**
+   the chart because it carries the PodSecurity `privileged` labels. Helm's `--create-namespace`
+   sets no label, and Talos's `baseline` default rejects the operator pod (see ⚠️ Pitfalls).
+3. **`tigera-operator` chart** in that namespace. The operator runs in `hostNetwork`: it starts
+   **without a CNI**, which is what makes bootstrapping possible.
+4. **Waits for the `operator.tigera.io` CRDs**: the operator is started with `-manage-crds=true`,
+   so *it* is the one creating `installations` **and** `apiservers.operator.tigera.io`. Applying
+   a CR before that fails with "no matches for kind …".
+5. **`kubectl apply` of [`installation.yaml`](installation.yaml)**, with both CIDRs substituted
+   on the fly (same mechanism as `LAB_DOMAIN` in `../platform-up.sh`), **then of
+   [`apiserver.yaml`](apiserver.yaml)** which deploys the `calico-apiserver`.
+6. **Bounded waits**: the `calico-system/calico-node` DaemonSet created, `rollout status`
    (600 s, the time of the first pull on 8 VMs), then all nodes `Ready` (300 s). Each one **fails
    with an error** carrying the diagnostic command to run — no `|| true` anywhere.
-6. **Summary** + a yellow reminder of the two steps still missing for the lab UIs.
+7. **Summary** + a yellow reminder of the two steps still missing for the lab UIs.
 
 ### The Helm settings that matter
+
+The chart renders **four** custom resources (`Installation`, `APIServer`, `Goldmane`, `Whisker`)
+and ships **no `crds/` directory** — the CRDs are created by the operator at runtime
+(`-manage-crds=true`). So every one of them has to be disabled at install time, otherwise Helm
+fails before it even creates the namespace:
+
+```
+Error: unable to build kubernetes objects from release manifest: resource mapping not found
+for name: "default" ... no matches for kind "APIServer" in version "operator.tigera.io/v1"
+ensure CRDs are installed first
+```
 
 | `--set` | Why |
 |---|---|
 | `installation.enabled=false` | the chart can generate the `Installation` CR itself; we pull it out into [`installation.yaml`](installation.yaml) to get **one** readable file and **one** owner of the object (not Helm *and* `kubectl apply`) |
-| `apiServer.enabled=true` | exposes `projectcalico.org/v3` → Calico objects via `kubectl`, no `calicoctl` needed |
-| `goldmane.enabled=false` + `whisker.enabled=false` | the flow aggregator + UI shipped by Calico 3.32, turned off to keep the lab light (VM RAM is counted, see `lab.env`). To turn them back on: `helm upgrade` with `--set goldmane.enabled=true --set whisker.enabled=true`, then `kubectl -n calico-system port-forward svc/whisker 8081:8081` |
+| `apiServer.enabled=false` | same reason, CR moved to [`apiserver.yaml`](apiserver.yaml) and applied once the CRDs exist. The `calico-apiserver` **is** deployed: it exposes `projectcalico.org/v3` → Calico objects via `kubectl`, no `calicoctl` needed |
+| `goldmane.enabled=false` + `whisker.enabled=false` | the flow aggregator + UI shipped by Calico 3.32, turned off to keep the lab light (VM RAM is counted, see `lab.env`). Turning them back on means extracting their CRs the same way — `--set goldmane.enabled=true` alone reintroduces the bootstrap failure above |
 
 ### The `installation.yaml` fields that matter
 
@@ -209,6 +223,18 @@ ping -c1 192.168.56.200                                   # from the host: ARP m
   isolated NAT, and cross-node pod traffic + DNS are broken. Hence
   `nodeAddressAutodetectionV4.cidrs: ["192.168.56.0/24"]`. Same problem, same countermeasure as
   `--iface-can-reach` (flannel) and `devices=enp0s8` (Cilium).
+- **PodSecurity `baseline` blocks the operator, and it fails SILENTLY.** The operator needs
+  `hostNetwork` (that is what lets it start with no CNI at all) and a `/var/lib/calico` hostPath;
+  Talos enforces `baseline` by default, which rejects both. `helm --create-namespace` sets no PSS
+  label, so without [`namespace.yaml`](namespace.yaml) the `Deployment` is created but the
+  ReplicaSet cannot create a single pod. The trap is the symptom: `kubectl -n tigera-operator get
+  pods` returns **nothing at all** — not a failing pod, zero pods — and the script dies on the
+  `rollout status` timeout. The cause is only visible in the ReplicaSet events:
+  `kubectl -n tigera-operator describe rs`. Same recipe as
+  [`../observability/namespace.yaml`](../observability/namespace.yaml).
+  > 💡 If you already hit the failure, fixing the labels is not enough: the ReplicaSet is in
+  > exponential backoff and can idle past the 300 s timeout. Kick it with
+  > `kubectl -n tigera-operator rollout restart deploy/tigera-operator`, then re-run the script.
 - **`IPPool` CIDR ≠ Talos `podSubnets`** = silently broken pod network. The script refuses to
   continue if it detects the mismatch in `_out/controlplane.yaml`, but if you change one, change
   the other.
@@ -238,6 +264,8 @@ ping -c1 192.168.56.200                                   # from the host: ARP m
 | Symptom | Likely cause | What to do |
 |---|---|---|
 | The script fails on "another CNI is already installed" | you are re-running Calico on the lab's Cilium (or flannel) cluster | that is the guardrail: rebuild the cluster, no live switch |
+| `helm` fails on `no matches for kind "APIServer"` / `ensure CRDs are installed first` | a chart CR is enabled while its CRD does not exist yet | keep the four CRs disabled (see the `--set` table); the CRs live in `installation.yaml` / `apiserver.yaml` |
+| `rollout status` times out and `get pods` shows **zero** pod in `tigera-operator` | PodSecurity `baseline` rejects the operator (hostNetwork + hostPath) | `kubectl -n tigera-operator describe rs` to confirm, apply `namespace.yaml`, then `rollout restart` |
 | CRD `installations.operator.tigera.io` never created | the operator cannot reach the apiserver, or never started | `kubectl -n tigera-operator logs deploy/tigera-operator` |
 | `calico-node` in `Init:` / `CreateContainerConfigError` | a read-only hostPath (typically the `flexvol-driver` if `flexVolumePath` was dropped) | check `kubectl get installation default -o yaml` ⇒ `flexVolumePath: None` |
 | Nodes `Ready` but DNS broken from a pod | NAT address elected for the tunnels | re-read the first ⚠️ Pitfalls bullet, then the annotations command in ✅ Verify |
