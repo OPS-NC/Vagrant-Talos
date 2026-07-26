@@ -32,8 +32,14 @@ metadata:
   name: main-gateway
   namespace: envoy-gateway-system      # Gateway + cert wildcard hors du ns default
   annotations:
-    # cert-manager émet et renouvelle le wildcard TLS tout seul (DNS-01 Cloudflare).
-    # Le Certificate + le Secret wildcard-talos-lab-example-io-tls sont créés dans CE namespace.
+    # ⚠️ Ce bloc `annotations:` entier n'existe QUE sur le chemin ACME. Le défaut du lab est
+    # SELF_SIGNED=true : platform-up.sh RETIRE alors ces lignes, et remplit lui-même le Secret
+    # ci-dessous avec un wildcard signé openssl (cf. _k8s/self-signed/). Laisser l'annotation
+    # ferait reprendre la main à cert-manager sur ce Secret dès qu'il serait installé.
+    #
+    # Avec SELF_SIGNED=false, cert-manager émet et renouvelle le wildcard tout seul (DNS-01
+    # Cloudflare) : le Certificate + le Secret wildcard-talos-lab-example-io-tls sont créés
+    # dans CE namespace.
     #
     # Défaut STAGING volontaire : Let's Encrypt production plafonne à 5 certificats par
     # semaine et par jeu d'identifiants, or le wildcard ne vit que dans etcd — chaque
@@ -60,7 +66,9 @@ spec:
         mode: Terminate
         certificateRefs:
           - kind: Secret
-            name: wildcard-talos-lab-example-io-tls   # rempli automatiquement par cert-manager
+            # Rempli par cert-manager (SELF_SIGNED=false) OU par selfsigned-up.sh
+            # (SELF_SIGNED=true, le défaut) : même nom de Secret dans les deux cas.
+            name: wildcard-talos-lab-example-io-tls
       allowedRoutes:
         namespaces:
           from: All

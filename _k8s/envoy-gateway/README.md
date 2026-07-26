@@ -31,10 +31,16 @@
 | Prerequisite | Why | Check |
 |---|---|---|
 | [`../cilium/`](../cilium/README.md) installed (L2 pool) | it is what gives the `.200` IP to the Gateway's Service | `kubectl get ciliumloadbalancerippool` |
-| [`../cert-manager/`](../cert-manager/README.md) + a Cloudflare token | fills the `wildcard-talos-lab-example-io-tls` Secret of the `:443` listener | `kubectl -n envoy-gateway-system get certificate` |
-| DNS `*.talos.lab.example.io → 192.168.56.200` in **DNS-only** mode | routes match by hostname | `dig +short argo.talos.lab.example.io` |
+| A wildcard TLS Secret, from **either** TLS mode | fills the `wildcard-talos-lab-example-io-tls` Secret of the `:443` listener | `kubectl -n envoy-gateway-system get secret wildcard-…-tls` |
+| Name resolution for `*.talos.lab.example.io → 192.168.56.200` | routes match by hostname | `dig +short argo.talos.lab.example.io` |
 
-HTTP (`:80`) works without cert-manager and without DNS: `curl http://192.168.56.200/...`.
+The TLS Secret comes from [`../self-signed/`](../self-signed/README.md) when
+`SELF_SIGNED=true` (the default — a local CA, no domain and no token needed) or from
+[`../cert-manager/`](../cert-manager/README.md) + a Cloudflare token when `SELF_SIGNED=false`.
+The Gateway is the same either way: only the annotation differs. Likewise, resolution can be
+an `/etc/hosts` line (self-signed) or a public **DNS-only** record (ACME).
+
+HTTP (`:80`) works with neither TLS mode nor DNS: `curl http://192.168.56.200/...`.
 
 ## ⚡ Install
 
@@ -82,6 +88,11 @@ create the `Certificate`, solve the DNS-01 challenge and fill the Secret. The ve
 manifest carries `letsencrypt-staging`; `platform-up.sh` rewrites it from `LAB_ACME_ISSUER`
 (`staging` by default, `prod` on demand — mind the **5 certificates/week** production cap). The
 mechanism is detailed in [`../cert-manager/README.md`](../cert-manager/README.md).
+
+> ℹ️ **With the default `SELF_SIGNED=true`, `platform-up.sh` strips that annotation entirely**
+> and fills the very same Secret with an `openssl`-signed wildcard
+> ([`../self-signed/`](../self-signed/README.md)). The `certificateRefs` above do not change —
+> which is exactly why no addon has to care which TLS mode the lab runs.
 
 ### Attaching an application
 
@@ -173,3 +184,5 @@ kubectl delete -f _k8s/envoy-gateway/GW-Example.yml      # remove after the demo
 - [Envoy Gateway — SecurityPolicy (Basic Auth, OIDC, JWT)](https://gateway.envoyproxy.io/docs/tasks/security/)
 - [`../cilium/README.md`](../cilium/README.md) — where the VIP comes from ·
   [`../cert-manager/README.md`](../cert-manager/README.md) — where the certificate comes from
+  with `SELF_SIGNED=false`, and [`../self-signed/README.md`](../self-signed/README.md) with the
+  default `SELF_SIGNED=true`

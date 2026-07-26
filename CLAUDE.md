@@ -89,7 +89,18 @@ that is the guard to run after renaming a heading or adding a page.
   manual `gen config` MUST include `--config-patch-control-plane @talos/cni-<CNI>.yaml` **and**
   `--install-image "$INSTALLER_IMAGE"` — without it the *classic* installer is laid down,
   without the iscsi extensions, and Longhorn fails later on `iscsiadm: not found`.
-- **ACME: `staging` is the default, and `prod` has a weekly quota**. `LAB_ACME_ISSUER`
+- **TLS: `SELF_SIGNED=true` is the default, and it skips cert-manager entirely.**
+  `platform-up.sh` step `[4/4]` branches on it: `true` runs
+  `_k8s/self-signed/selfsigned-up.sh` (local CA + `openssl` wildcard into
+  `_out/self-signed/`, then the TLS Secret) and **strips the
+  `cert-manager.io/cluster-issuer` annotation** from `main-gateway`; `false` installs
+  cert-manager as before. Both modes fill the SAME Secret
+  (`wildcard-<LAB_DOMAIN with dashes>-tls`), so no addon ever branches on the TLS mode —
+  keep it that way. `LAB_DNS_ZONE`, `LAB_ACME_EMAIL`, `LAB_ACME_ISSUER` and
+  `CLOUDFLARE_API_TOKEN` are dead variables when `SELF_SIGNED=true`. Switching modes on a
+  live cluster leaves the other mode's object behind (a `Certificate`, or a hand-made
+  Secret) — see `_k8s/self-signed/README.md` §⚠️.
+- **ACME: `staging` is the default, and `prod` has a weekly quota** (`SELF_SIGNED=false` only). `LAB_ACME_ISSUER`
   (`staging|prod`, default `staging`) drives the `cert-manager.io/cluster-issuer` annotation —
   the versioned `Envoy-Proxy.yml` carries `letsencrypt-staging`, and `platform-up.sh` rewrites
   it. Do NOT switch the repo default back to `prod`: the wildcard lives **only in etcd**, so

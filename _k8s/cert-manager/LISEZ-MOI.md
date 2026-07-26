@@ -9,6 +9,12 @@
 > que tu contrôles le domaine via un **TXT DNS chez Cloudflare**, puis remplit le Secret que
 > l'écouteur `:443` d'Envoy sert. Aucun port entrant, aucun `Certificate` écrit à la main.
 
+> ⚠️ **C'est le mode TLS optionnel.** `platform-up.sh` n'installe cert-manager **que** si
+> `SELF_SIGNED=false` dans `lab.env`. Le défaut (`SELF_SIGNED=true`) signe le même wildcard
+> localement avec `openssl` et n'installe rien de tout ceci — voir
+> [`../self-signed/`](../self-signed/LISEZ-MOI.md), qui compare aussi les deux modes point par
+> point. Tout ce qui suit suppose que tu as posé `SELF_SIGNED=false`.
+
 ## 🎯 À quoi ça sert
 
 Toutes les UI du lab (`argo.`, `vault.`, `longhorn.`, `grafana.`, `kyverno.`, `wordpress.`…)
@@ -48,9 +54,11 @@ Le token se met dans **`lab.env`** (`CLOUDFLARE_API_TOKEN=…`, fichier gitignor
 
 ## ⚡ Installation
 
-cert-manager **est** installé par la plateforme, étape `[4/4]` :
+cert-manager est installé par la plateforme, étape `[4/4]`, **à condition que
+`SELF_SIGNED=false`** :
 
 ```bash
+echo 'SELF_SIGNED=false' >> lab.env      # sinon l'étape [4/4] part en auto-signé
 ./_k8s/platform-up.sh
 ```
 
@@ -173,6 +181,12 @@ curl -sS -o /dev/null -w '%{http_code} verify=%{ssl_verify_result}\n' \
 
 ## ⚠️ Pièges
 
+- **`SELF_SIGNED=true` (le défaut) court-circuite toute cette page.** Si
+  `kubectl get clusterissuer` répond `no resources found` et que la Gateway ne porte aucune
+  annotation `cert-manager.io/cluster-issuer`, rien n'est cassé : tu es simplement sur le
+  chemin auto-signé. Pose `SELF_SIGNED=false` dans `lab.env`, relance `platform-up.sh`, puis
+  supprime le Secret auto-signé résiduel pour que cert-manager émette le sien :
+  `kubectl -n envoy-gateway-system delete secret <wildcard>-tls`.
 - **Ne pas appliquer `04-gateway-https-example.yaml`** (voir l'encart plus haut).
 - **Un seul niveau de wildcard** : `*.talos.lab.example.io` couvre `argo.talos.lab.example.io`, pas
   `a.b.talos.lab.example.io`. Une route avec un hostname non couvert ne s'attachera pas à l'écouteur.
@@ -184,6 +198,7 @@ curl -sS -o /dev/null -w '%{http_code} verify=%{ssl_verify_result}\n' \
 
 ## 📚 Références
 
+- [`../self-signed/LISEZ-MOI.md`](../self-signed/LISEZ-MOI.md) — l'autre mode TLS (`SELF_SIGNED=true`, le défaut)
 - [cert-manager — Gateway API integration](https://cert-manager.io/docs/usage/gateway/)
 - [cert-manager — DNS-01 Cloudflare](https://cert-manager.io/docs/configuration/acme/dns01/cloudflare/)
 - [Let's Encrypt — Rate limits](https://letsencrypt.org/docs/rate-limits/)

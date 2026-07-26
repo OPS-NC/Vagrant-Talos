@@ -10,6 +10,12 @@
 > then fills the Secret that Envoy's `:443` listener serves. No inbound port, no hand-written
 > `Certificate`.
 
+> ⚠️ **This is the opt-in TLS mode.** `platform-up.sh` installs cert-manager **only** when
+> `SELF_SIGNED=false` in `lab.env`. The default (`SELF_SIGNED=true`) signs the same wildcard
+> locally with `openssl` and installs none of this — see
+> [`../self-signed/`](../self-signed/README.md), which also compares the two modes side by
+> side. Everything below assumes you set `SELF_SIGNED=false`.
+
 ## 🎯 Purpose
 
 Every lab UI (`argo.`, `vault.`, `longhorn.`, `grafana.`, `kyverno.`, `wordpress.`…) is served
@@ -50,9 +56,10 @@ The token goes into **`lab.env`** (`CLOUDFLARE_API_TOKEN=…`, a gitignored file
 
 ## ⚡ Install
 
-cert-manager **is** installed by the platform, step `[4/4]`:
+cert-manager is installed by the platform, step `[4/4]`, **provided `SELF_SIGNED=false`**:
 
 ```bash
+echo 'SELF_SIGNED=false' >> lab.env      # otherwise step [4/4] goes the self-signed route
 ./_k8s/platform-up.sh
 ```
 
@@ -174,6 +181,12 @@ curl -sS -o /dev/null -w '%{http_code} verify=%{ssl_verify_result}\n' \
 
 ## ⚠️ Pitfalls
 
+- **`SELF_SIGNED=true` (the default) skips this whole page.** If `kubectl get clusterissuer`
+  answers `no resources found` and the Gateway carries no `cert-manager.io/cluster-issuer`
+  annotation, nothing is broken — you are simply on the self-signed path. Set
+  `SELF_SIGNED=false` in `lab.env` and re-run `platform-up.sh`, then delete the leftover
+  self-signed Secret so cert-manager issues its own:
+  `kubectl -n envoy-gateway-system delete secret <wildcard>-tls`.
 - **Do not apply `04-gateway-https-example.yaml`** (see the callout above).
 - **A single wildcard level**: `*.talos.lab.example.io` covers `argo.talos.lab.example.io`, not
   `a.b.talos.lab.example.io`. A route with a hostname that is not covered will not attach to the
@@ -186,6 +199,7 @@ curl -sS -o /dev/null -w '%{http_code} verify=%{ssl_verify_result}\n' \
 
 ## 📚 References
 
+- [`../self-signed/README.md`](../self-signed/README.md) — the other TLS mode (`SELF_SIGNED=true`, the default)
 - [cert-manager — Gateway API integration](https://cert-manager.io/docs/usage/gateway/)
 - [cert-manager — DNS-01 Cloudflare](https://cert-manager.io/docs/configuration/acme/dns01/cloudflare/)
 - [Let's Encrypt — Rate limits](https://letsencrypt.org/docs/rate-limits/)

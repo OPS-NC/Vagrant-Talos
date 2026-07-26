@@ -17,7 +17,7 @@ Read this directory in two passes: a **base platform** (4 components, a single s
 # 1. Bootstrap with CNI=cilium (the repo default): Talos installs no CNI, this layer does
 CNI=cilium ./talos/cluster-up.sh
 
-# 2. The base platform: Cilium → Envoy Gateway → metrics-server → cert-manager
+# 2. The base platform: Cilium → Envoy Gateway → metrics-server → wildcard TLS
 ./_k8s/platform-up.sh
 
 # 3. The addons, opt-in
@@ -49,7 +49,7 @@ Talos did not.
 ## 🔗 Dependency chain
 
 Every link assumes the previous one: no LoadBalancer IP without an L2 announcer, no HTTPS
-without the Gateway, no certificate without cert-manager.
+without the Gateway, no UI without a certificate on the `:443` listener.
 
 ```
 cluster Ready  (Talos has bootstrapped, CNI per lab.env)
@@ -58,13 +58,17 @@ cluster Ready  (Talos has bootstrapped, CNI per lab.env)
    │                      or calico/ (CNI only) or flannel (already there) or nothing
    ├─ 2. envoy-gateway/   Envoy controller + main-gateway (listeners :80 and :443)
    ├─ 3. metric-server    metrics.k8s.io API  (kubectl top, HPA)
-   └─ 4. cert-manager/    wildcard *.talos.lab.example.io — Let's Encrypt DNS-01 Cloudflare
+   └─ 4. wildcard TLS     *.talos.lab.example.io — one of two modes, per SELF_SIGNED
+              │             true  (default) → self-signed/   openssl, local CA, no cert-manager
+              │             false           → cert-manager/  Let's Encrypt DNS-01 Cloudflare
               │
               └─ addons: storage → databases → secrets → observability → security
 ```
 
 That is exactly the order of `platform-up.sh` (`[1/4]` → `[4/4]`): **metrics-server before
-cert-manager**.
+the certificate**. Both TLS modes fill the **same** Secret
+(`wildcard-<LAB_DOMAIN with dashes>-tls`), so no addon ever has to know which one you picked
+— they all just attach an `HTTPRoute` to the `https` listener.
 
 ## 📋 Cross-cutting prerequisites
 
@@ -73,7 +77,8 @@ cert-manager**.
 | Cluster `Ready`, `KUBECONFIG` set | every script probes `/readyz` | `kubectl get nodes` |
 | `kubectl` + `helm` | chart installs | `helm version` |
 | `main-gateway` in place | every UI exposed over HTTPS goes through it | `kubectl get gateway -n envoy-gateway-system` |
-| `CLOUDFLARE_API_TOKEN` in `lab.env` | DNS-01 for the TLS wildcard | read by `platform-up.sh` |
+| `openssl` on the host — **only if `SELF_SIGNED=true`** (the default) | generates the wildcard TLS | `openssl version` |
+| `CLOUDFLARE_API_TOKEN` in `lab.env` — **only if `SELF_SIGNED=false`** | DNS-01 for the TLS wildcard | read by `platform-up.sh` |
 | `LAB_DOMAIN` in `lab.env` | UI domain (TLS wildcard + `HTTPRoute`) | `sed -n 's/^LAB_DOMAIN=//p' lab.env` |
 | StorageClass, depending on the addon | `local-path`, `longhorn` or `longhorn-r1` | `kubectl get sc` |
 
@@ -110,11 +115,15 @@ No versioned file is rewritten: `git status` stays clean.
 > sed 's/talos\.lab\.example\.io/talos.lab.my-domain.tld/g' <file> | kubectl apply -f -
 > ```
 
-> ℹ️ Two optional variables complete the picture (see `lab.env.example`):
-> `LAB_DNS_ZONE` (zone of the DNS-01 solver; default = the last 2 labels of `LAB_DOMAIN`)
-> and `LAB_ACME_EMAIL` (Let's Encrypt account; default `admin@<zone>`). `LAB_ACME_ISSUER`
-> picks the ACME issuer — `staging` (default, untrusted cert) or `prod` (trusted, but capped
-> at **5 certificates per week** for the same wildcard, and every `vagrant destroy` burns one).
+> ℹ️ **`SELF_SIGNED` decides how that domain gets its certificate** (see `lab.env.example`).
+> `true` — the **default** — signs a wildcard with `openssl` under a local CA
+> ([`self-signed/`](self-signed/README.md)): no real domain, no token, no quota, and the
+> domain never has to resolve publicly. `false` switches to
+> [`cert-manager/`](cert-manager/README.md) + Let's Encrypt, and only then do the three ACME
+> variables matter: `LAB_DNS_ZONE` (zone of the DNS-01 solver; default = the last 2 labels of
+> `LAB_DOMAIN`), `LAB_ACME_EMAIL` (Let's Encrypt account; default `admin@<zone>`) and
+> `LAB_ACME_ISSUER` — `staging` (default, untrusted cert) or `prod` (trusted, but capped at
+> **5 certificates per week** for the same wildcard, and every `vagrant destroy` burns one).
 
 ## 🧱 Base platform — `platform-up.sh`
 
@@ -126,7 +135,11 @@ without breaking anything.
 | Cilium | `1.19.6` | `cilium/cilium-up.sh` |
 | Envoy Gateway | `1.8.3` | `platform-up.sh` (`ENVOY_GW_VERSION`) |
 | metrics-server | `v0.9.0` | `metric-server.yaml` |
-| cert-manager | `v1.20.2` | `platform-up.sh` (`CERT_MANAGER_VERSION`) |
+| cert-manager — **only if `SELF_SIGNED=false`** | `v1.20.2` | `platform-up.sh` (`CERT_MANAGER_VERSION`) |
+
+> ℹ️ With the default `SELF_SIGNED=true`, step `[4/4]` runs
+> [`self-signed/selfsigned-up.sh`](self-signed/README.md) instead and **cert-manager is never
+> installed** — no chart, no CRDs, no Cloudflare Secret.
 
 > ℹ️ **metrics-server tuned for Talos**: `--kubelet-insecure-tls` + secure port `10250`, so it
 > does not require a kubelet CSR approver. Check: `kubectl top nodes`.
@@ -179,7 +192,8 @@ rest in any order.
 | [`cilium/`](cilium/README.md) | **default CNI** `1.19.6` + LoadBalancer IP pool + L2 announcement (ARP) | `cilium-up.sh`, called by `platform-up.sh` when `CNI=cilium` |
 | [`calico/`](calico/README.md) | **alternative CNI** `v3.32.1` (Tigera operator) — CNI **only**, no L2 announcement | `calico-up.sh`, called by `platform-up.sh` when `CNI=calico` |
 | [`envoy-gateway/`](envoy-gateway/README.md) | Envoy Gateway controller + `main-gateway` (`:80` and `:443` wildcard) + demo apps | `platform-up.sh` |
-| [`cert-manager/`](cert-manager/README.md) | automatic wildcard TLS certificates (ACME DNS-01 Cloudflare) | `platform-up.sh` |
+| [`self-signed/`](self-signed/README.md) | **default TLS mode** — wildcard signed by a local CA (`openssl`), no domain and no token needed | `selfsigned-up.sh`, called by `platform-up.sh` when `SELF_SIGNED=true` |
+| [`cert-manager/`](cert-manager/README.md) | automatic wildcard TLS certificates (ACME DNS-01 Cloudflare) | `platform-up.sh`, when `SELF_SIGNED=false` |
 
 ### 🧪 Demos
 

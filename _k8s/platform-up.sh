@@ -8,7 +8,10 @@
 #                          calico (CNI seul), flannel (déjà posé par Talos), none
 #   2. Envoy Gateway       contrôleur + CRD Gateway API + main-gateway (HTTP/HTTPS)
 #   3. metrics-server      metrics.k8s.io (kubectl top)
-#   4. cert-manager        + secret Cloudflare (lab.env) + ClusterIssuers -> cert wildcard
+#   4. wildcard TLS        selon `SELF_SIGNED` de lab.env :
+#                          true  -> AC locale + cert openssl (self-signed/), PAS de cert-manager
+#                          false -> cert-manager + secret Cloudflare + ClusterIssuers (ACME)
+#                          Les deux chemins remplissent le MÊME Secret que sert la Gateway.
 #
 # EXCLUS volontairement (à installer à part, chacun son README + up.sh) :
 #   argocd/ · longhorn/ · vault-cluster/ · vault-secret-operator/ · kyverno/ ·
@@ -17,7 +20,8 @@
 # Domaine : les manifestes versionnés portent le domaine NEUTRE `talos.lab.example.io`
 # (dépôt public). Il est remplacé à la volée par `LAB_DOMAIN` (env ou lab.env) — idem
 # `LAB_DNS_ZONE` (zone du solveur DNS-01), `LAB_ACME_EMAIL` (compte Let's Encrypt) et
-# `LAB_ACME_ISSUER` (staging par défaut / prod sur demande).
+# `LAB_ACME_ISSUER` (staging par défaut / prod sur demande). Ces trois dernières ne
+# servent QUE sur le chemin ACME (SELF_SIGNED=false).
 #
 # Idempotent : `helm upgrade --install` + `kubectl apply`. Relançable sans casse.
 # À lancer depuis la racine du dépôt : ./_k8s/platform-up.sh
@@ -59,7 +63,22 @@ LAB_DNS_ZONE="${LAB_DNS_ZONE:-$(printf '%s\n' "$LAB_DOMAIN" | awk -F. '{ print (
 LAB_ACME_EMAIL="${LAB_ACME_EMAIL:-$(lire_lab_env LAB_ACME_EMAIL)}"
 LAB_ACME_EMAIL="${LAB_ACME_EMAIL:-admin@${LAB_DNS_ZONE}}"
 
+# --- Mode TLS : auto-signé (défaut) ou cert-manager + Let's Encrypt ----------
+# Le défaut versionné est `talos.lab.example.io`, un domaine d'exemple : sans domaine
+# RÉEL et sans token Cloudflare, le chemin ACME ne peut de toute façon rien émettre et
+# le lab reste sans TLS. L'auto-signé, lui, marche partout et hors-ligne — c'est donc
+# le bon défaut « ça démarre ». On ne passe à ACME que quand on a vraiment un domaine.
+SELF_SIGNED="${SELF_SIGNED:-$(lire_lab_env SELF_SIGNED)}"
+SELF_SIGNED="${SELF_SIGNED:-true}"
+# Tolérant sur la casse : `True`/`TRUE`/`true` sont le même « oui ».
+SELF_SIGNED="$(printf '%s' "$SELF_SIGNED" | tr '[:upper:]' '[:lower:]')"
+case "$SELF_SIGNED" in
+  true|false) ;;
+  *) echo "ERREUR : SELF_SIGNED='${SELF_SIGNED}' inconnu (true|false)." >&2 ; exit 1 ;;
+esac
+
 # --- Émetteur ACME : staging par défaut, production sur demande --------------
+# (ignoré quand SELF_SIGNED=true : aucun ACME n'entre en jeu)
 # Le wildcard ne vit QUE dans etcd : `vagrant destroy` le détruit, et le rebuild en
 # redemande un neuf. Or Let's Encrypt PRODUCTION plafonne à 5 certificats par semaine
 # pour un même jeu d'identifiants (`*.<LAB_DOMAIN>`) — un lab jetable épuise ce quota en
@@ -94,7 +113,10 @@ LB_POOL_START="${LB_POOL_START:-$(lire_lab_env LB_POOL_START)}"
 LB_POOL_START="${LB_POOL_START:-192.168.56.200}"
 
 # --- Pré-requis -------------------------------------------------------------
-for bin in kubectl helm; do
+requis="kubectl helm"
+# openssl n'est nécessaire que pour fabriquer le wildcard auto-signé.
+[ "$SELF_SIGNED" = "true" ] && requis="$requis openssl"
+for bin in $requis; do
   command -v "$bin" >/dev/null 2>&1 || { echo "ERREUR : '$bin' introuvable." >&2; exit 1; }
 done
 kubectl get --raw='/readyz' >/dev/null 2>&1 || { echo "ERREUR : apiserver injoignable (KUBECONFIG=${KUBECONFIG})." >&2; exit 1; }
@@ -133,10 +155,19 @@ helm upgrade --install eg oci://docker.io/envoyproxy/gateway-helm \
 kubectl -n envoy-gateway-system rollout status deploy/envoy-gateway --timeout=180s
 # Rend le manifeste : hostname de l'écouteur https + nom du Secret TLS depuis LAB_DOMAIN,
 # et l'émetteur ACME depuis LAB_ACME_ISSUER (le manifeste versionné porte `staging`).
+# En auto-signé, on RETIRE le bloc `annotations:` du Gateway (commentaires compris) :
+# l'annotation `cert-manager.io/cluster-issuer` est ce qui déclenche la création d'un
+# Certificate. La laisser en place ferait écraser notre Secret par cert-manager dès
+# qu'il serait installé pour une autre raison.
 rendre_envoy_proxy() {
+  if [ "$SELF_SIGNED" = "true" ]; then
+    remplacer_issuer='/^  annotations:/,\|^    cert-manager\.io/cluster-issuer:|d'
+  else
+    remplacer_issuer="s|\(cert-manager\.io/cluster-issuer:\)[[:space:]]*letsencrypt-[a-z]*|\1 ${ACME_ISSUER}|"
+  fi
   sed -e "s/talos\.lab\.example\.io/${LAB_DOMAIN}/g" \
       -e "s/talos-lab-example-io/${LAB_DOMAIN_DASH}/g" \
-      -e "s|\(cert-manager\.io/cluster-issuer:\)[[:space:]]*letsencrypt-[a-z]*|\1 ${ACME_ISSUER}|" \
+      -e "$remplacer_issuer" \
       _k8s/envoy-gateway/Envoy-Proxy.yml
 }
 ip_gateway() {
@@ -173,6 +204,14 @@ fi
 
 log "[3/4] metrics-server (adapté Talos)"
 kubectl apply -f _k8s/metric-server.yaml
+
+if [ "$SELF_SIGNED" = "true" ]; then
+
+log "[4/4] Wildcard TLS auto-signé (openssl) — cert-manager NON installé"
+echo "    -> _k8s/self-signed/selfsigned-up.sh (AC locale + cert *.${LAB_DOMAIN})"
+bash _k8s/self-signed/selfsigned-up.sh
+
+else
 
 log "[4/4] cert-manager ${CERT_MANAGER_VERSION} + Cloudflare + ClusterIssuers"
 helm repo add jetstack https://charts.jetstack.io >/dev/null 2>&1 || true
@@ -213,17 +252,29 @@ if [ -n "${CLOUDFLARE_API_TOKEN:-}" ]; then
   done
 fi
 
+fi   # fin de la bascule SELF_SIGNED
+
 # ============================================================================
 log "Plateforme installée."
 echo "  CNI          : ${CNI}$([ "$LB_L2" = 1 ] && echo ' (annonce L2 des IP LoadBalancer)' || echo ' (pas d IP LoadBalancer)')"
 echo "  Nodes        : $(kubectl get nodes --no-headers | grep -c ' Ready ')/$(kubectl get nodes --no-headers | wc -l) Ready"
 echo "  Gateway      : $(kubectl -n envoy-gateway-system get gateway main-gateway -o jsonpath='{.status.addresses[0].value}' 2>/dev/null)"
-echo "  Cert wildcard: $(kubectl -n envoy-gateway-system get certificate "${WILDCARD_TLS}" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo '?') (Ready) [${WILDCARD_TLS}]"
-echo "  Émetteur ACME: ${ACME_ISSUER}$([ "$LAB_ACME_ISSUER" = "staging" ] && echo '  (cert NON trusté : avertissement navigateur attendu)' || echo '  (cert trusté — quota 5/semaine !)')"
-echo "  Domaine      : *.${LAB_DOMAIN}  (zone DNS ${LAB_DNS_ZONE})"
-if [ "$LAB_ACME_ISSUER" = "staging" ]; then
-  echo "                 Pour un cert trusté : LAB_ACME_ISSUER=prod dans lab.env, puis"
-  echo "                 kubectl -n envoy-gateway-system delete secret ${WILDCARD_TLS}"
+if [ "$SELF_SIGNED" = "true" ]; then
+  echo "  Cert wildcard: $(kubectl -n envoy-gateway-system get secret "${WILDCARD_TLS}" -o jsonpath='{.metadata.name}' 2>/dev/null || echo 'ABSENT') (auto-signé) [${WILDCARD_TLS}]"
+  echo "  Mode TLS     : SELF_SIGNED=true — AC locale _out/self-signed/ca.crt, pas de cert-manager"
+  echo "  Domaine      : *.${LAB_DOMAIN}  (aucun DNS public requis)"
+  echo "                 Le navigateur avertit tant que l'AC n'est pas importée :"
+  echo "                 sudo cp _out/self-signed/ca.crt /usr/local/share/ca-certificates/vagrant-talos-lab.crt"
+  echo "                 sudo update-ca-certificates"
+  echo "                 Pour un cert publiquement trusté : SELF_SIGNED=false + CLOUDFLARE_API_TOKEN."
+else
+  echo "  Cert wildcard: $(kubectl -n envoy-gateway-system get certificate "${WILDCARD_TLS}" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo '?') (Ready) [${WILDCARD_TLS}]"
+  echo "  Émetteur ACME: ${ACME_ISSUER}$([ "$LAB_ACME_ISSUER" = "staging" ] && echo '  (cert NON trusté : avertissement navigateur attendu)' || echo '  (cert trusté — quota 5/semaine !)')"
+  echo "  Domaine      : *.${LAB_DOMAIN}  (zone DNS ${LAB_DNS_ZONE})"
+  if [ "$LAB_ACME_ISSUER" = "staging" ]; then
+    echo "                 Pour un cert trusté : LAB_ACME_ISSUER=prod dans lab.env, puis"
+    echo "                 kubectl -n envoy-gateway-system delete secret ${WILDCARD_TLS}"
+  fi
 fi
 echo
 echo "  Addons à installer ensuite (chacun son dossier + up.sh) :"
@@ -231,6 +282,17 @@ echo "    Argo CD  : ./_k8s/argocd/argocd-up.sh          (GitOps, argo.${LAB_DOM
 echo "    Longhorn : voir _k8s/longhorn/README.md         (stockage bloc)"
 echo "    Vault    : voir _k8s/vault-cluster/README.md    (secrets HA)"
 echo
-echo "  DNS — à faire UNE FOIS chez ton registrar/Cloudflare pour joindre les UI :"
-echo "    enregistrement A  *.${LAB_DOMAIN}  ->  $(ip_gateway || true)${LB_POOL_START:+ (sinon ${LB_POOL_START})}"
-echo "    en DNS-only (nuage GRIS) : le proxy Cloudflare ne peut pas joindre une IP privée."
+gw_ip="$(ip_gateway || true)"
+gw_ip="${gw_ip:-$LB_POOL_START}"
+if [ "$SELF_SIGNED" = "true" ]; then
+  # Pas de contrainte ACME en auto-signé : le domaine n'a jamais besoin d'exister
+  # publiquement, une résolution locale suffit à joindre les UI.
+  echo "  Résolution des noms — à faire UNE FOIS pour joindre les UI :"
+  echo "    ligne /etc/hosts (le plus simple, un sous-domaine par ligne) :"
+  echo "      ${gw_ip}  argo.${LAB_DOMAIN} grafana.${LAB_DOMAIN} vault.${LAB_DOMAIN}"
+  echo "    ou un enregistrement A wildcard  *.${LAB_DOMAIN} -> ${gw_ip}  si tu as une zone DNS."
+else
+  echo "  DNS — à faire UNE FOIS chez ton registrar/Cloudflare pour joindre les UI :"
+  echo "    enregistrement A  *.${LAB_DOMAIN}  ->  ${gw_ip}"
+  echo "    en DNS-only (nuage GRIS) : le proxy Cloudflare ne peut pas joindre une IP privée."
+fi
