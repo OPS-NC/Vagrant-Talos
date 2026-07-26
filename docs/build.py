@@ -35,6 +35,7 @@ GROUPES / EMOJIS ci-dessous ; un dossier inconnu tombe dans « Autres ».
 from __future__ import annotations
 
 import argparse
+import base64
 import html
 import json
 import re
@@ -294,7 +295,7 @@ def decouvrir() -> list[dict]:
 # Emoji en tête de titre : les README commencent par un emoji (contrat de style),
 # et le générateur en ajoute un. Sans séparation, ils apparaîtraient en double.
 # La répétition tolère les espaces, pour qu'un titre en portant plusieurs
-# (`# 🏠 🐧 VagrantLab-Talos`) les garde tous groupés dans l'en-tête.
+# (`# 🏠 🐧 Vagrant-Talos`) les garde tous groupés dans l'en-tête.
 RE_EMOJI_INITIAL = re.compile(
     r"^((?:[\U0001F000-\U0001FAFF←-⇿⌀-➿⬀-⯿]"
     r"[︎️‍]*[ \t]*)+)"
@@ -473,6 +474,44 @@ def resoudre(rendu: dict, index: dict[str, dict[str, str]],
     return RE_LIEN_MD.sub(remplacer, rendu["corps"])
 
 
+RE_IMG_SRC = re.compile(r'(<img\b[^>]*?\bsrc=")([^"]+)(")', re.IGNORECASE)
+MIMES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+         ".gif": "image/gif", ".svg": "image/svg+xml", ".webp": "image/webp"}
+
+
+def inliner_images(corps: str, chemin: str, alertes: list[str]) -> str:
+    """Convertit les images LOCALES du corps en data: URI base64.
+
+    Le chemin écrit dans le markdown est relatif au fichier source, donc juste
+    pour GitHub ; il ne résoudrait pas depuis la page unique, qui vit ailleurs
+    (`docs/index.html` en local, `_site/index.html` en CI). Plutôt que copier
+    les fichiers à côté de la sortie, on les embarque : la page reste UN seul
+    fichier autonome, transportable et lisible hors ligne — la promesse tenue
+    partout ailleurs dans ce générateur.
+
+    Corollaire : garder les images LÉGÈRES, elles gonflent la page d'environ
+    4/3 de leur poids (surcoût du base64).
+    """
+    base = Path(chemin).parent
+
+    def remplacer(m: re.Match[str]) -> str:
+        src = m.group(2)
+        if src.startswith(("http://", "https://", "data:", "//")):
+            return m.group(0)                      # ressource externe : intacte
+        fichier = (RACINE / base / unquote(src)).resolve()
+        if not fichier.is_file():
+            alertes.append(f"{chemin} → {src} (image introuvable)")
+            return m.group(0)
+        mime = MIMES.get(fichier.suffix.lower())
+        if mime is None:
+            alertes.append(f"{chemin} → {src} (format d'image non géré)")
+            return m.group(0)
+        donnees = base64.b64encode(fichier.read_bytes()).decode("ascii")
+        return f"{m.group(1)}data:{mime};base64,{donnees}{m.group(3)}"
+
+    return RE_IMG_SRC.sub(remplacer, corps)
+
+
 # ===========================================================================
 #  Feuille de style
 # ===========================================================================
@@ -547,12 +586,18 @@ a:hover{text-decoration:underline;text-underline-offset:3px}
   min-height:100vh;align-items:start}
 .menu{position:sticky;top:0;height:100vh;overflow-y:auto;background:var(--fond-2);
   border-right:1px solid var(--bord);padding:1.4rem 0 3rem;scrollbar-width:thin}
-.contenu{min-width:0;padding:2.4rem clamp(1.2rem,4vw,3.4rem) 6rem;
+/* `width:100%` est INDISPENSABLE avec `margin-inline:auto` : des marges auto sur un
+   élément de grille désactivent l'étirement sur la piste, l'élément est alors
+   dimensionné en fit-content — donc plafonné à sa `max-width` (941px) quelle que
+   soit la largeur réelle de la piste. Sous 941px de viewport il débordait à droite,
+   avec un scroll horizontal global. Avec `width:100%` il suit la piste, et les
+   marges auto ne recentrent que lorsqu'il reste de la place. */
+.contenu{min-width:0;width:100%;padding:2.4rem clamp(1.2rem,4vw,3.4rem) 6rem;
   max-width:calc(var(--texte-large) + 6.8rem);margin-inline:auto}
 
 /* ---------- menu ---------- */
 /* Marque en COLONNE : le badge dépôt sur sa propre ligne. Posé en bout de la
-   ligne de titre, il la rétrécissait assez pour couper « VagrantLab-Talos » et
+   ligne de titre, il la rétrécissait assez pour couper « Vagrant-Talos » et
    l'horodatage en deux (menu à 290px). */
 .marque{display:flex;flex-direction:column;align-items:flex-start;gap:.6rem;
   padding:0 1.3rem 1.1rem;font-weight:650;letter-spacing:-.01em}
@@ -562,7 +607,7 @@ a:hover{text-decoration:underline;text-underline-offset:3px}
   letter-spacing:0;font-family:var(--mono)}
 /* Badge dépôt, en haut du menu de gauche sous le titre.
    `currentColor` sur le SVG => il suit le thème clair/sombre. */
-.marque .depot{display:inline-flex;align-items:center;gap:.3rem;
+.marque .depot{display:inline-flex;align-items:center;gap:.3rem;align-self:center;
   padding:.2rem .45rem;border:1px solid var(--bord-fort);border-radius:6px;
   color:var(--texte-2);font-size:.72rem;font-weight:600;letter-spacing:0}
 .marque .depot:hover{color:var(--texte);background:var(--fond-3);
@@ -710,7 +755,12 @@ details > :not(summary):last-child{margin-bottom:1.05rem}
 .theme-flottant{position:fixed;bottom:1.1rem;right:1.1rem;z-index:30;box-shadow:var(--ombre)}
 .voile{position:fixed;inset:0;z-index:35;background:rgba(0,0,0,.45);display:none}
 @media (max-width:1000px){
-  .enveloppe{grid-template-columns:1fr}
+  /* minmax(0,1fr) et NON 1fr : une piste `1fr` garde un min-width:auto implicite,
+     donc elle refuse de descendre sous la largeur intrinsèque de son contenu. Les
+     blocs de code et les tableaux larges élargissaient alors la colonne au-delà du
+     viewport => tout le texte débordait à droite, avec un scroll horizontal global.
+     Le desktop utilisait déjà minmax(0,1fr) ; seul le mobile avait été oublié. */
+  .enveloppe{grid-template-columns:minmax(0,1fr)}
   .barre{display:flex}
   .menu{position:fixed;inset:0 auto 0 0;width:min(86vw,var(--menu));z-index:40;
     transform:translateX(-100%);transition:transform .2s ease;box-shadow:var(--ombre)}
@@ -722,7 +772,7 @@ details > :not(summary):last-child{margin-bottom:1.05rem}
 @media print{
   .menu,.sommaire,.barre,.copier,.theme-flottant,.header-anchor,.voile,
   .langues{display:none!important}
-  .enveloppe{grid-template-columns:1fr}
+  .enveloppe{grid-template-columns:minmax(0,1fr)}
   .page{display:block!important;page-break-after:always}
   .bloc-code,.table-scroll{box-shadow:none}
 }
@@ -811,7 +861,7 @@ JS = r"""
       actif ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current');
     });
     construireSommaire(cible);
-    document.title = cible.dataset.titre + ' · VagrantLab-Talos';
+    document.title = cible.dataset.titre + ' · Vagrant-Talos';
     const h = section && cible.querySelector('[id="' + CSS.escape(section) + '"]');
     h ? h.scrollIntoView() : window.scrollTo(0, 0);
   };
@@ -988,7 +1038,8 @@ def construire(rendus: list[dict], version: str, alertes: list[str]) -> str:
 
     for r in rendus:
         mots = LIBELLES[r["langue"]]
-        corps = resoudre(r, index, ancres, alertes)
+        corps = inliner_images(resoudre(r, index, ancres, alertes),
+                               r["chemin"], alertes)
         badges = ""
         if not r["suivi"]:
             badges += (f'<span class="badge" title="{html.escape(mots["badge_titre"], quote=True)}">'
@@ -1052,7 +1103,7 @@ def construire(rendus: list[dict], version: str, alertes: list[str]) -> str:
 <meta name="color-scheme" content="dark light">
 <meta name="generator" content="docs/build.py">
 <meta name="description" content="{html.escape(mots['sous_titre'], quote=True)}">
-<title>VagrantLab-Talos · Documentation</title>
+<title>Vagrant-Talos · Documentation</title>
 <style>
 {CSS}
 {css_pygments()}
@@ -1062,7 +1113,7 @@ def construire(rendus: list[dict], version: str, alertes: list[str]) -> str:
 <div class="voile"></div>
 <header class="barre">
   <button class="bouton-icone" data-menu-toggle aria-label="{html.escape(mots['menu'], quote=True)}">☰</button>
-  <strong>VagrantLab-Talos</strong>
+  <strong>Vagrant-Talos</strong>
   {selecteur_langue(mots)}
   <button class="bouton-icone" data-theme-toggle>☀</button>
 </header>
@@ -1071,7 +1122,7 @@ def construire(rendus: list[dict], version: str, alertes: list[str]) -> str:
     <div class="marque">
       <div class="marque-titre">
         <span class="logo">🐧</span>
-        <span>VagrantLab-Talos<small>{html.escape(version)}</small></span>
+        <span>Vagrant-Talos<small>{html.escape(version)}</small></span>
       </div>
       {lien_depot(mots)}
     </div>

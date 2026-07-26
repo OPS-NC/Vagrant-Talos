@@ -2,11 +2,16 @@
 **English** · [Français](LISEZ-MOI.md)
 <!-- /i18n -->
 
-# 🏠 🐧 VagrantLab-Talos
+# 🏠 🐧 Vagrant-Talos
 
 > Build a **Talos Linux** cluster (immutable, API-driven Kubernetes) on **VirtualBox** with
 > `vagrant up` plus one script. Single control plane or **HA with 3 CPs and a VIP**, then a
 > full application layer (Cilium, Envoy Gateway, Longhorn, Vault, PostgreSQL…).
+
+<p align="center">
+  <img src="docs/vagrant-talos.png" width="220" height="220"
+       alt="Vagrant-Talos — the Vagrant logo next to the Talos Linux logo">
+</p>
 
 Talos has **no SSH and no package manager**: the OS is immutable and driven entirely through
 the `talosctl` API from the host. Vagrant therefore only creates and starts the VMs; all the
