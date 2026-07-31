@@ -767,7 +767,6 @@ details > :not(summary):last-child{margin-bottom:1.05rem}
   border:1px solid var(--bord-fort);border-radius:8px;background:var(--fond);
   color:var(--texte-2);font-size:1rem;cursor:pointer}
 .bouton-icone:hover{color:var(--accent);border-color:var(--accent)}
-.theme-flottant{position:fixed;bottom:1.1rem;right:1.1rem;z-index:30;box-shadow:var(--ombre)}
 .voile{position:fixed;inset:0;z-index:35;background:rgba(0,0,0,.45);display:none}
 @media (max-width:1000px){
   /* minmax(0,1fr) et NON 1fr : une piste `1fr` garde un min-width:auto implicite,
@@ -782,10 +781,9 @@ details > :not(summary):last-child{margin-bottom:1.05rem}
   .menu.ouvert{transform:none}
   .voile.ouvert{display:block}
   .contenu{padding:1.6rem 1.15rem 5rem}
-  .theme-flottant{display:none}
 }
 @media print{
-  .menu,.sommaire,.barre,.copier,.theme-flottant,.header-anchor,.voile,
+  .menu,.sommaire,.barre,.copier,.header-anchor,.voile,
   .langues,.themes{display:none!important}
   .enveloppe{grid-template-columns:minmax(0,1fr)}
   .page{display:block!important;page-break-after:always}
@@ -994,14 +992,13 @@ def selecteur_langue(mots: dict[str, str]) -> str:
 def selecteur_theme(mots: dict[str, str]) -> str:
     """Sélecteur clair/sombre EXPLICITE, posé dans la barre latérale.
 
-    Il existait déjà deux bascules `data-theme-toggle` : une dans la barre mobile,
-    une flottante en bas à droite. Mais la barre mobile est `display:none` sur poste
-    fixe, si bien que le seul contrôle visible en desktop était une pastille ☀ sans
-    libellé, dans un coin, par-dessus le contenu — invisible en pratique.
+    Groupe segmenté « Clair / Sombre » calqué sur le sélecteur de langue, posé juste
+    en dessous de lui : même gabarit, même endroit, c'est là que l'œil le cherche.
 
-    On ajoute donc un groupe segmenté « Clair / Sombre » calqué sur le sélecteur de
-    langue, au même endroit et avec la même forme : c'est là que l'œil le cherche.
-    Les deux bascules d'origine restent en place et partagent l'état.
+    Il remplace la pastille ☀ flottante en bas à droite, sans libellé et par-dessus le
+    contenu, qui était l'UNIQUE contrôle visible en desktop (la barre mobile, elle, est
+    `display:none` au-dessus du point de rupture). La bascule de la barre mobile reste
+    en place, où elle est bien visible, et partage l'état (localStorage).
     """
     boutons = "".join(
         f'<button type="button" data-theme-set="{valeur}" aria-pressed="false">'
@@ -1186,7 +1183,6 @@ def construire(rendus: list[dict], version: str, alertes: list[str]) -> str:
   <main class="contenu">{"".join(articles)}</main>
   <aside class="sommaire" aria-label="{html.escape(mots['sommaire'], quote=True)}"></aside>
 </div>
-<button class="bouton-icone theme-flottant" data-theme-toggle>☀</button>
 <script>{js}</script>
 </body>
 </html>
