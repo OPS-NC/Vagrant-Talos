@@ -199,6 +199,18 @@ that is the guard to run after renaming a heading or adding a page.
   for an **unsealed** Vault, which made an idempotent re-run try to unseal an open Vault and
   abort on `400 — already unsealed`. On any boolean field, use `.field | tostring` and compare
   to `"true"`/`"false"` instead.
+- **`lab.env` is PARSED, never SOURCED — and the parser must stay identical to kubeadm's.**
+  Three rules, each covering a bug this repo actually shipped: (1) `while IFS='=' read -r key
+  val || [ -n "$key" ]` — without the `|| [ -n "$key" ]`, a last line with **no trailing
+  newline** is silently dropped; (2) the key name is validated against
+  `^[A-Za-z_][A-Za-z0-9_]*$` **before** any `eval`; (3) `eval ": \${$key:=\$val}"` and **never**
+  `:=\"$val\"` — quoting the value *inside* the evaluated string makes `LAB_DOMAIN=$(cmd)` run
+  `cmd`. The same applies to the `Makefile`: `. ./lab.env` not only executes the file, it
+  **inverts the documented precedence** (real env var > `lab.env` > default), so
+  `CNI=flannel make validate-talos` used to validate the *cilium* patch and announce it as
+  such — a target that validates something other than what you asked is worse than no target.
+  `validate-talos` now reads keys with the same `sed` extraction as `lire_lab_env` in
+  `_k8s/lib/common.sh`. If you touch any of these three readers, touch them all.
 - **`./script.sh; echo "EXIT=$?"` reports the exit code of `echo`, not of the script**, so a
   background wrapper built that way reports success no matter what failed. Check the `EXIT=`
   line inside the log, or use `${PIPESTATUS[0]}` — a shell that swallows failures is worse than

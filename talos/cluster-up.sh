@@ -15,11 +15,26 @@ set -euo pipefail
 # --- Topologie : source unique lab.env (partagée avec le Vagrantfile) -------
 # Chargée sans écraser une variable déjà exportée (override CLI prioritaire).
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# ⚠️ Trois détails NON négociables dans cette boucle, chacun couvrant une panne réelle :
+#   1. `|| [ -n "$key" ]` : sans lui, `read` renvoie faux sur une dernière ligne SANS saut
+#      de ligne final et la clé est PERDUE en silence. Un lab.env édité par un outil qui
+#      ne termine pas le fichier perdrait sa dernière valeur.
+#   2. Le nom de clé est validé AVANT tout `eval` : un lab.env bricolé ne doit pas pouvoir
+#      exécuter du code arbitraire.
+#   3. `eval ": \${$key:=\$val}"` et NON `:=\"$val\"` : avec la valeur entre guillemets
+#      DANS la chaîne évaluée, `LAB_DOMAIN=$(cmd)` fait exécuter `cmd`. En référençant la
+#      variable shell `$val`, la valeur n'est jamais ré-évaluée.
+# Ces trois règles sont celles de kubeadm/cluster-up.sh (dépôt Vagrant-kubeadm) : les deux
+# parseurs doivent rester identiques, sinon le même lab.env se lit différemment d'un lab
+# à l'autre.
 if [ -f "${REPO_DIR}/lab.env" ]; then
-  while IFS='=' read -r key val; do
-    case "$key" in ''|\#*) continue ;; esac   # ignore lignes vides et commentaires
-    val="${val%%#*}" ; val="${val// /}"       # retire commentaire inline + espaces
-    eval ": \${$key:=\"$val\"}"               # := : ne pose que si non défini
+  while IFS='=' read -r key val || [ -n "$key" ]; do
+    case "$key" in ''|\#*) continue ;; esac             # lignes vides et commentaires
+    case "$key" in [A-Za-z_]*) ;; *) continue ;; esac
+    printf '%s' "$key" | grep -qE '^[A-Za-z_][A-Za-z0-9_]*$' || continue
+    val="${val%%#*}"                                    # commentaire de fin de ligne
+    val="$(printf '%s' "$val" | tr -d '[:space:]"'"'")" # espaces et guillemets
+    eval ": \${$key:=\$val}"                            # := : ne pose que si non défini
   done < "${REPO_DIR}/lab.env"
 fi
 

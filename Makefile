@@ -81,14 +81,28 @@ validate-yaml: ## Vérifie que tous les YAML du dépôt parsent
 validate-vagrant: ## Valide le Vagrantfile (VAGRANT_VALIDATE_FLAGS=--ignore-provider en CI)
 	@vagrant validate $(VAGRANT_VALIDATE_FLAGS) && echo "✅ Vagrantfile OK"
 
+# ⚠️ `lab.env` est PARSÉ, jamais SOURCÉ. Un `. ./lab.env` avait deux défauts :
+#   1. il INVERSE la précédence documentée (variable d'env réelle > lab.env > défaut) :
+#      `CNI=flannel make validate-talos` validait le patch cilium et l'annonçait comme
+#      tel. Une cible qui valide autre chose que ce qu'on lui demande est pire que pas
+#      de cible du tout ;
+#   2. il exécute le fichier — un lab.env bricolé ne doit pas pouvoir lancer du code.
+# `lab_get` reproduit l'extraction de `lire_lab_env` (_k8s/lib/common.sh) : `export`
+# optionnel, commentaire de fin de ligne précédé d'une espace. `|| true` obligatoire :
+# .SHELLFLAGS porte `pipefail`, et sed sort en 2 si lab.env n'existe pas.
 validate-talos: ## Génère la config Talos dans un dossier jetable puis la valide
 	@set -eu; \
-	. ./lab.env 2>/dev/null || true; \
-	cni="$${CNI:-cilium}"; net="$${NETWORK:-192.168.56}"; vip="$${VIP:-$$net.5}"; \
+	lab_get() { sed -n "s/^[[:space:]]*\(export[[:space:]]\{1,\}\)\{0,1\}$$1=//p" lab.env 2>/dev/null \
+	              | head -n1 | sed 's/[[:space:]][[:space:]]*#.*$$//' | tr -d " \"'" || true; }; \
+	cni="$${CNI:-$$(lab_get CNI)}"                   ; cni="$${cni:-cilium}"; \
+	net="$${NETWORK:-$$(lab_get NETWORK)}"           ; net="$${net:-192.168.56}"; \
+	vip="$${VIP:-$$(lab_get VIP)}"                   ; vip="$${vip:-$$net.5}"; \
+	disk="$${INSTALL_DISK:-$$(lab_get INSTALL_DISK)}"; disk="$${disk:-/dev/sda}"; \
+	[ -f "talos/cni-$$cni.yaml" ] || { echo "❌ CNI '$$cni' inconnu (talos/cni-$$cni.yaml absent)"; exit 1; }; \
 	out="$$(mktemp -d)"; \
 	trap 'rm -rf "$$out"' EXIT; \
 	talosctl gen config validate-only "https://$$vip:6443" \
-	  --install-disk "$${INSTALL_DISK:-/dev/sda}" \
+	  --install-disk "$$disk" \
 	  --additional-sans "$$vip,$$net.10,$$net.20,$$net.30" \
 	  --config-patch               @talos/patch-all.yaml \
 	  --config-patch-control-plane @talos/patch-cp.yaml \
