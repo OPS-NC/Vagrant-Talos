@@ -24,8 +24,8 @@ git clone --recurse-submodules https://github.com/OPS-NC/Vagrant-Talos.git
 cd Vagrant-Talos
 vagrant up                      # creates the VMs, they boot into maintenance mode
 ./talos/cluster-up.sh           # config + etcd bootstrap + kubeconfig + health
-export TALOSCONFIG="$PWD/_out/talosconfig" KUBECONFIG="$PWD/kubeconfig" LAB_DIR="$PWD"
-./_k8s/install.sh talos platform   # CNI, Envoy Gateway, metrics-server, wildcard TLS
+export TALOSCONFIG="$PWD/_out/talosconfig" KUBECONFIG="$PWD/kubeconfig"
+./_k8s/platform-up.sh           # CNI, Envoy Gateway, metrics-server, wildcard TLS
 ```
 
 | | |
@@ -45,8 +45,9 @@ export TALOSCONFIG="$PWD/_out/talosconfig" KUBECONFIG="$PWD/kubeconfig" LAB_DIR=
 > same k8s-playground submodule under `_k8s/`. What is opposite is the OS and the operating
 > model: there you get an ordinary Debian box with SSH and `apt`, and you drive `kubeadm`
 > yourself. Here the OS is immutable, has no shell and no package manager, and everything goes
-> through the `talosctl` API from the host — which is why the application layer takes the
-> distribution as an argument (`install.sh talos …` vs `install.sh kubeadm …`).
+> through the `talosctl` API from the host — which the application layer recognises on its own:
+> it detects the distribution from the lab it sits in (`talos/cluster-up.sh` here,
+> `kubeadm/cluster-up.sh` there), so the same commands work in both repos.
 
 ---
 
@@ -165,7 +166,7 @@ Variables read by `cluster-up.sh` but missing from the template (all have a defa
 > to their internal defaults — both aligned on `v1.13.7` and on `CNI=cilium`, but you lose the
 > Image Factory installer image (iscsi extensions), and therefore Longhorn. Keep the `CNI`
 > value in `lab.env` in sync with what you actually want: `cluster-up.sh` decides what Talos
-> lays down, `install.sh talos platform` decides what Helm installs afterwards, and two
+> lays down, `platform-up.sh` decides what Helm installs afterwards, and two
 > disagreeing values give you two competing CNIs — a broken pod network.
 
 > ⚠️ **Do not lower `CP_MEM` below `3072`.** 2 GB control planes starve etcd as soon as the
@@ -176,7 +177,7 @@ Variables read by `cluster-up.sh` but missing from the template (all have a defa
 > ~6 × 20 GB of disk. A 16 GB host cannot run it — use the minimal lab below.
 
 > 💡 **Minimal lab (2 VMs, ~6 GB).** Enough for Talos itself and the base platform
-> (`install.sh talos platform`); the data addons expect the default 3 workers (Longhorn replicates ×3,
+> (`platform-up.sh`); the data addons expect the default 3 workers (Longhorn replicates ×3,
 > `observability/` wants 4 GB control planes). Edit **`lab.env`**:
 > ```bash
 > CONTROL_PLANES=1
@@ -342,46 +343,46 @@ Argo CD… — comes from a **separate repository**,
 submodule.
 
 That layer used to be duplicated in this repo and in the kubeadm twin. It is now maintained
-**once**, and the target distribution became an **argument** — which is why the entry point is
-`install.sh <distro> …` and no longer a bare `platform-up.sh`. Its documentation is published
-on its own: **<https://ops-nc.github.io/k8s-playground/>**.
+**once**, and it works out on its own which lab it is mounted in and which distribution that
+lab runs — so its entry points are called **bare**, with no argument. Its documentation is
+published on its own: **<https://ops-nc.github.io/k8s-playground/>**.
 
 ```bash
 ./talos/cluster-up.sh                       # 1. cluster (CNI=cilium by default: Talos installs nothing)
 
 export TALOSCONFIG="$PWD/_out/talosconfig"  # 2. where the Talos API is
 export KUBECONFIG="$PWD/kubeconfig"         #    where the cluster is
-export LAB_DIR="$PWD"                       #    where lab.env and _out/ are — see below
 
-./_k8s/install.sh talos platform            # 3. Cilium → Envoy Gateway → metrics-server → TLS
-./_k8s/install.sh talos longhorn vault argocd     # 4. opt-in addons
+./_k8s/platform-up.sh                       # 3. Cilium → Envoy Gateway → metrics-server → TLS
+./_k8s/install.sh longhorn vault argocd     # 4. opt-in addons
 ```
 
-Useful variants — the distribution (`talos`) is always the **first positional argument**:
+Useful variants — still nothing to prefix, the distribution is detected:
 
 | Command | What it does |
 |---|---|
-| `./_k8s/install.sh talos list` | the full catalogue of addons |
-| `./_k8s/install.sh talos all` | platform + every addon, in dependency order |
-| `./_k8s/longhorn/longhorn-up.sh talos` | one addon on its own |
+| `./_k8s/install.sh list` | the full catalogue of addons |
+| `./_k8s/install.sh all` | platform + every addon, in dependency order |
+| `./_k8s/longhorn/longhorn-up.sh` | one addon on its own |
 
-The distribution is resolved in this order: **first positional argument** → `--distro=` →
-the `K8S_DISTRO` environment variable → `DISTRO=` in `lab.env` (set to `talos` in the shipped
-template). Anything else and the scripts refuse to run, rather than apply a Debian-shaped
-manifest on Talos.
+**How the detection works**: k8s-playground recognises the lab as Talos from the presence of
+`talos/cluster-up.sh` next to `_k8s/` (the kubeadm twin is recognised from
+`kubeadm/cluster-up.sh`), with `_out/talosconfig` as a secondary signal. It therefore works
+right after the clone, before the first `vagrant up`. An explicit form still exists and takes
+priority if you ever need it: a first positional argument (`./_k8s/install.sh talos platform`),
+`--distro=talos`, or the `K8S_DISTRO` environment variable.
 
 After the bootstrap, the nodes stay `NotReady` until the CNI is installed — that is expected,
-`install.sh talos platform` handles it in its first step. Full dependency chain, addon list and
+`platform-up.sh` handles it in its first step. Full dependency chain, addon list and
 per-addon pitfalls: **<https://ops-nc.github.io/k8s-playground/>**.
 
-> ⚠️ **`export LAB_DIR="$PWD"` is mandatory in this layout — this is the trap.**
-> k8s-playground looks for `lab.env` and `_out/` in this order: `$LAB_DIR` / `$LAB_ENV`, then
-> its own repo root, then `<its root>/../Vagrant-Talos`. Mounted as a submodule its root
-> **is** `Vagrant-Talos/_k8s`, so that last path resolves to `Vagrant-Talos/Vagrant-Talos`,
-> which does not exist. Resolution then falls back on `_k8s/` itself, where there is neither a
-> `lab.env` nor an `_out/`: the scripts would run on built-in defaults — **wrong domain, wrong
-> CNI** — and with no kubeconfig, **silently**. `LAB_DIR` is the variable provided for exactly
-> this case; export it next to `TALOSCONFIG` and `KUBECONFIG`, every time.
+> ℹ️ **How the lab is located, and how to force it.** k8s-playground takes the parent
+> directory of `_k8s/` that carries a `Vagrantfile` as the lab root — here `Vagrant-Talos/` —
+> and that is where it reads `lab.env` and finds `_out/`. Nothing to export in this layout.
+> For an unusual setup only (a `_k8s/` checked out somewhere else, scripts run from an odd
+> place), `LAB_DIR` remains the explicit override:
+> `LAB_DIR=/path/to/Vagrant-Talos ./_k8s/platform-up.sh`. `TALOSCONFIG` and `KUBECONFIG`, on
+> the other hand, really are required — see the block above.
 
 > ⚠️ **If `_k8s/` is empty**, the submodule was never initialised:
 > `git submodule update --init --recursive` (§1). To pull a newer application layer:
@@ -400,7 +401,7 @@ per-addon pitfalls: **<https://ops-nc.github.io/k8s-playground/>**.
 ### 5.1 DNS + TLS: the two manual prerequisites
 
 > ℹ️ **This whole subsection is for `SELF_SIGNED=false` only.** With the default
-> (`SELF_SIGNED=true`), `install.sh talos platform` signs the wildcard itself with `openssl` under a
+> (`SELF_SIGNED=true`), `platform-up.sh` signs the wildcard itself with `openssl` under a
 > local CA: **no public DNS record and no Cloudflare token are needed**, and the domain never
 > has to exist outside your machine. All you do is make the name resolve locally — an
 > `/etc/hosts` line pointing your subdomains at `192.168.56.200` — and, optionally, import
@@ -466,13 +467,13 @@ LAB_ACME_ISSUER=staging                # staging (default) | prod — see the wa
 CLOUDFLARE_API_TOKEN=<your-token>
 ```
 
-`install.sh talos platform` creates the `cloudflare-api-token` Secret, substitutes the domain in the
+`platform-up.sh` creates the `cloudflare-api-token` Secret, substitutes the domain in the
 manifests and waits for the certificate. Follow it with
 `kubectl -n envoy-gateway-system get certificate`.
 
 > ⚠️ **`prod` costs a quota slot on every rebuild, and `staging` is the default on purpose.**
 > The wildcard lives **only in etcd**, so `vagrant destroy` burns it and the next
-> `install.sh talos platform` asks for a brand new one. Let's Encrypt production allows **5 certificates
+> `platform-up.sh` asks for a brand new one. Let's Encrypt production allows **5 certificates
 > per week for the same `*.<LAB_DOMAIN>`**: the 6th rebuild fails with `429 rateLimited` and the
 > lab stays **without TLS** until the 168 h window slides. Use `prod` on a stable lab, not while
 > iterating — and back the wildcard up **before** a destroy:
@@ -563,7 +564,8 @@ leftovers after a `destroy`), addressing and DHCP (stale leases, unreachable VIP
 `NotReady`).
 
 Two entries there are new since the application layer became a submodule: `_k8s/` empty after a
-plain `git clone`, and the `_k8s/` scripts running without `LAB_DIR`.
+plain `git clone`, and the `_k8s/` scripts pointed at the wrong lab root (an exotic layout —
+see the `LAB_DIR` override in §5).
 
 Addon-specific problems are documented with the addons themselves, in the ⚠️ pitfalls and 🚑
 troubleshooting sections of the k8s-playground pages:
@@ -606,17 +608,17 @@ References: [Talos Linux](https://www.talos.dev/) ·
 1. **`talos/cluster-up.sh`** applies the `talos/cni-<CNI>.yaml` patch, which fills in
    `cluster.network.cni` in the control plane config. **Talos** installs flannel itself, at
    `bootstrap` — without `kubectl`, by rendering an internal manifest.
-2. **`./_k8s/install.sh talos platform`** installs the CNI in every other case, through Helm.
+2. **`./_k8s/platform-up.sh`** installs the CNI in every other case, through Helm.
 
 | `CNI=` | Talos patch | Who installs | `LoadBalancer` IP |
 |---|---|---|---|
-| **`cilium`** *(default)* | `cni-cilium.yaml` → `none` | `install.sh talos platform` → [k8s-playground `cilium/`](https://github.com/OPS-NC/k8s-playground/blob/main/cilium/README.md) | ✅ pool + L2 announcement (ARP) |
-| `calico` | `cni-calico.yaml` → `none` | `install.sh talos platform` → [k8s-playground `calico/`](https://github.com/OPS-NC/k8s-playground/blob/main/calico/README.md) | ❌ BGP only |
+| **`cilium`** *(default)* | `cni-cilium.yaml` → `none` | `platform-up.sh` → [k8s-playground `cilium/`](https://github.com/OPS-NC/k8s-playground/blob/main/cilium/README.md) | ✅ pool + L2 announcement (ARP) |
+| `calico` | `cni-calico.yaml` → `none` | `platform-up.sh` → [k8s-playground `calico/`](https://github.com/OPS-NC/k8s-playground/blob/main/calico/README.md) | ❌ BGP only |
 | `flannel` | `cni-flannel.yaml` | **Talos**, at bootstrap time | ❌ |
 | `none` | `cni-none.yaml` | you | ❌ |
 
 ```bash
-CNI=calico ./talos/cluster-up.sh && LAB_DIR="$PWD" ./_k8s/install.sh talos platform
+CNI=calico ./talos/cluster-up.sh && ./_k8s/platform-up.sh
 ```
 
 ### Which one to choose?
@@ -637,13 +639,13 @@ cluster, if you just want to explore Talos.
 The Cilium install (chart pinned to `1.19.6`, L2 pool, `--set devices=enp0s8`) is documented
 and scripted in
 **[k8s-playground `cilium/`](https://github.com/OPS-NC/k8s-playground/blob/main/cilium/README.md)**
-— that is the source of truth, `install.sh talos platform` calls it for you.
+— that is the source of truth, `platform-up.sh` calls it for you.
 
 > ⚠️ **Calico does not announce `LoadBalancer` Service IPs.** It can only do it over **BGP**,
 > which assumes a peer router — non-existent on a VirtualBox host-only network. With
 > `CNI=calico` you therefore have to **install MetalLB** (L2 mode) *and* adjust
 > `_k8s/envoy-gateway/Envoy-Proxy.yml`, which pins `loadBalancerClass:
-> io.cilium/l2-announcer` (`install.sh talos platform` strips that line outside Cilium). Full
+> io.cilium/l2-announcer` (`platform-up.sh` strips that line outside Cilium). Full
 > procedure:
 > [k8s-playground `calico/`](https://github.com/OPS-NC/k8s-playground/blob/main/calico/README.md).
 

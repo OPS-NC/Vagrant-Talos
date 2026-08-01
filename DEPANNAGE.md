@@ -20,7 +20,6 @@ Sauf mention contraire, chaque commande se lance **depuis la racine du dépôt**
 ```bash
 export TALOSCONFIG="$PWD/_out/talosconfig"
 export KUBECONFIG="$PWD/kubeconfig"
-export LAB_DIR="$PWD"          # exigé par les scripts _k8s/ — voir la section 1
 ```
 
 ---
@@ -108,7 +107,7 @@ une future version de la box change ce nom, le lister avec
 
 ```bash
 ls _k8s/            # rien, ou un dossier vide
-./_k8s/install.sh talos platform
+./_k8s/install.sh platform
 # bash: ./_k8s/install.sh: No such file or directory
 ```
 
@@ -135,29 +134,50 @@ Pour cloner correctement dès le départ : `git clone --recurse-submodules <url>
 Symptômes : les addons s'installent sur le **mauvais domaine** (`lab.example.io` au lieu de ton
 `LAB_DOMAIN`), le **mauvais CNI** est retenu, ou chaque appel `kubectl` interne aux scripts
 échoue en `connection refused` / `no configuration has been provided`. La bannière affichée au
-démarrage des scripts indique `lab.env : absent (défauts)`. Rien ne plante — le run utilise
-silencieusement les valeurs par défaut.
+démarrage des scripts indique `lab.env : absent (défauts)`. Rien ne plante — le run retombe
+silencieusement sur les valeurs par défaut et, faute de kubeconfig, installe l'addon dans le
+vide.
 
-**Cause.** `LAB_DIR` n'est pas exporté. k8s-playground cherche `lab.env` et `_out/` dans cet
-ordre : `$LAB_DIR` / `$LAB_ENV` → sa propre racine → `<sa racine>/../Vagrant-Talos`. Ce dernier
-chemin suppose les deux dépôts **voisins**. Monté en sous-module, sa racine *est*
-`Vagrant-Talos/_k8s` : le chemin devient donc `Vagrant-Talos/Vagrant-Talos`, qui n'existe pas —
-et la résolution retombe sur `_k8s/` lui-même, où il n'y a ni `lab.env` ni `_out/`. Conséquence
-propre à Talos : pas de `_out/talosconfig` non plus, donc tout addon qui appelle `talosctl`
-(Longhorn, local-path) échoue sur une API Talos non configurée.
+**Cause.** Le lab n'a pas été localisé. Il n'y a plus à l'indiquer à k8s-playground : le
+**dossier parent de `_k8s/`** est le lab, dès lors qu'il porte un `Vagrantfile`. Monté en
+sous-module, ce parent est ce clone — `lab.env`, `_out/` et le `KUBECONFIG` par défaut en
+découlent tous. Si cette condition n'est pas remplie, rien n'est trouvé et chaque valeur
+retombe sur son défaut. Conséquence propre à Talos : pas de `_out/talosconfig` non plus, donc
+tout addon qui appelle `talosctl` (Longhorn, local-path) échoue sur une API Talos non
+configurée.
 
-**Correctif.** L'exporter à côté de `TALOSCONFIG` et `KUBECONFIG`, depuis la racine du dépôt :
+**Vérification.** Le `Vagrantfile` doit se trouver juste au-dessus de `_k8s/` :
+
+```bash
+ls Vagrantfile _k8s/     # depuis la racine du lab : les deux doivent exister
+ls ../Vagrantfile        # depuis _k8s/ : le même contrôle, vu par les scripts
+```
+
+Deux cas seulement cassent légitimement ce mécanisme : `_k8s/` a été cloné ou déplacé **hors**
+du lab (son parent est alors un dossier quelconque, sans `Vagrantfile`), ou une copie des
+scripts est lancée depuis un tout autre endroit.
+
+**Correctif.** Lancer les scripts depuis le clone qui porte le `Vagrantfile` à sa racine — sans
+`LAB_DIR`, sans argument de distribution :
 
 ```bash
 export TALOSCONFIG="$PWD/_out/talosconfig"
 export KUBECONFIG="$PWD/kubeconfig"
-export LAB_DIR="$PWD"
-./_k8s/install.sh talos platform
+./_k8s/platform-up.sh
 ```
 
-> 💡 `LAB_ENV=/chemin/vers/lab.env` rend le même service quand le fichier ne s'appelle pas
-> `lab.env` ou ne vit pas à la racine du lab. `LAB_DIR` est celle à retenir : elle pilote
-> `lab.env`, `_out/` **et** le `KUBECONFIG` par défaut d'un coup.
+Si `_k8s/` vit réellement hors du lab, désigner le lab explicitement :
+
+```bash
+LAB_DIR=/chemin/vers/Vagrant-Talos ./_k8s/platform-up.sh
+```
+
+> 💡 `LAB_DIR` reste disponible comme surcharge explicite — exportée ou posée en ligne — et
+> prime sur la détection automatique. `LAB_ENV=/chemin/vers/lab.env` rend le même service pour
+> ce seul fichier, quand il ne s'appelle pas `lab.env` ou ne vit pas à la racine du lab. Ni
+> l'une ni l'autre n'est nécessaire dans le cas normal. Attention, `TALOSCONFIG` et
+> `KUBECONFIG`, c'est **autre chose** : ceux-là, il faut continuer à les exporter, les addons
+> qui pilotent l'API Talos en dépendent.
 
 ---
 
@@ -268,7 +288,7 @@ kubectl -n kube-system rollout status ds/kube-flannel
 ### Les nodes restent `NotReady` après le bootstrap
 
 Attendu avec `CNI=cilium`, `calico` ou `none` : Talos n'installe aucun CNI, et un node sans
-réseau pod ne passe jamais `Ready`. `./_k8s/install.sh talos platform` l'installe à sa première
+réseau pod ne passe jamais `Ready`. `./_k8s/install.sh platform` l'installe à sa première
 étape et les débloque. Seul `flannel` est posé par Talos lui-même, au bootstrap.
 
 S'ils sont **toujours** `NotReady` après l'installation du CNI, regarder d'abord les pods du CNI
