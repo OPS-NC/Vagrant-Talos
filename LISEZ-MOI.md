@@ -144,6 +144,7 @@ cp lab.env.example lab.env
 |---|---|---|
 | `TALOS_VERSION` | `v1.13.7` | ISO de boot **et** image d'installeur |
 | `INSTALLER_IMAGE` | image Image Factory | installeur avec extensions (iscsi pour Longhorn) |
+| `KUBERNETES_VERSION` | *(vide → celle de `talosctl`)* | version de Kubernetes du cluster (`1.36.3`) — cf. ci-dessous |
 | `CONTROL_PLANES` | `3` | `1` = single, `3` = HA avec VIP |
 | `WORKERS` | `3` | nombre de workers |
 | `CP_MEM` / `CP_CPU` | `4096` / `2` | ressources des control planes (**jamais sous `3072`** : etcd) |
@@ -170,6 +171,28 @@ Variables lues par `cluster-up.sh` mais absentes du modèle (toutes ont un défa
 > valeur de `CNI` dans `lab.env` cohérente avec ce que tu veux vraiment : `cluster-up.sh`
 > décide de ce que pose Talos, `platform-up.sh` de ce qu'installe Helm ensuite, et
 > deux valeurs divergentes donnent deux CNI concurrents — réseau pod cassé.
+
+> ☸️ **`KUBERNETES_VERSION` : la version de Kubernetes ne suit pas celle de Talos.** Laissée
+> vide (le défaut du modèle), le cluster tourne dans la version qu'embarque le binaire
+> `talosctl` local — `v1.36.2` pour `talosctl v1.13.7` — qui est toujours une version
+> supportée par Talos. Renseigne-la pour épingler explicitement :
+> ```bash
+> KUBERNETES_VERSION=1.36.3      # le « v » de tête est toléré (v1.36.3)
+> ```
+> `cluster-up.sh` la passe à `talosctl gen config --kubernetes-version`, ce qui épingle les
+> images du plan de contrôle (`kube-apiserver`, `kube-controller-manager`, `kube-scheduler`,
+> `kube-proxy`) **et** celle du kubelet (`ghcr.io/siderolabs/kubelet`).
+>
+> ⚠️ **Rien ne valide la valeur.** `gen config` ne fait que remplir des tags d'image : une
+> version inexistante, ou hors du skew supporté par Talos, produit une config qui se génère et
+> se valide parfaitement, puis laisse les pods statiques en `ErrImagePull`. Vérifie d'abord les
+> release notes de ton `TALOS_VERSION`. `make validate-talos` affiche la version utilisée —
+> c'est ce qui permet de confirmer que la clé est bien lue.
+>
+> ⚠️ **Elle n'est lue qu'à la GÉNÉRATION de la config.** Sur un `_out/` existant,
+> `cluster-up.sh` réutilise la config et cette clé ne change rien. Pour faire bouger un cluster
+> **en route** : `talosctl upgrade-k8s --to <version>`
+> ([`talos/MISE-A-JOUR.md`](talos/MISE-A-JOUR.md#4-upgrade-de-kubernetes)).
 
 > ⚠️ **Ne descends pas `CP_MEM` sous `3072`.** Des control planes à 2 Go affament etcd dès
 > qu'on empile les addons `_k8s/`, et le cluster s'effondre sous charge — `observability/`
@@ -264,6 +287,7 @@ talosctl gen config talos-lab https://192.168.56.5:6443 \
   --install-disk /dev/sda \
   --install-image "$INSTALLER_IMAGE" \
   --additional-sans 192.168.56.5,192.168.56.10,192.168.56.20,192.168.56.30 \
+  ${KUBERNETES_VERSION:+--kubernetes-version "${KUBERNETES_VERSION#v}"} \
   --config-patch               @talos/patch-all.yaml \
   --config-patch-control-plane @talos/patch-cp.yaml \
   --config-patch-control-plane "@talos/cni-${CNI:-cilium}.yaml" \
@@ -278,6 +302,12 @@ kube-apiserver est la **VIP** `192.168.56.5`, en single comme en HA.
 > ⚠️ **`--install-image` n'est pas optionnel.** Sans lui, tu installes l'installeur
 > *classic*, sans les extensions système — et Longhorn échoue plus tard sur
 > `iscsiadm: not found`. La valeur vient de `INSTALLER_IMAGE` (`lab.env`).
+
+> ℹ️ **`--kubernetes-version` est conditionnel, et ce n'est pas cosmétique.** Le `${VAR:+…}`
+> ci-dessus n'ajoute le drapeau que si `KUBERNETES_VERSION` est renseignée. Le passer **vide**
+> ne renvoie aucune erreur mais génère une config dont tous les champs `image:` sont
+> **commentés** — donc aucune image épinglée, ce qui n'est pas la même chose que le défaut.
+> `cluster-up.sh` construit le drapeau de la même façon.
 
 > ⚠️ **Le patch CNI n'est pas optionnel non plus.** Un fichier par intention —
 > `cni-cilium.yaml` (le défaut), `cni-calico.yaml`, `cni-flannel.yaml`, `cni-none.yaml` — d'où

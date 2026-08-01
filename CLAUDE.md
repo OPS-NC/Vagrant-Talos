@@ -127,6 +127,16 @@ that is the guard to run after renaming a heading or adding a page.
   `talos/cluster-up.sh` (fallback default) and `lab.env`. Both defaults are now aligned on
   `v1.13.7` — keep them that way on every bump, and remember that `INSTALLER_IMAGE` (factory
   image, tag included) overrides `TALOS_VERSION` for what actually lands on disk.
+- **The Kubernetes version is a FOURTH version axis** (`KUBERNETES_VERSION` in `lab.env`, empty
+  by default = whatever the `talosctl` binary ships). `cluster-up.sh` maps it to
+  `talosctl gen config --kubernetes-version`, and it is read **only at generation time** — on a
+  running cluster the tool is `talosctl upgrade-k8s`. Two traps: (1) `talosctl` validates the
+  value **not at all** (it just templates image tags — even `9.99.99` and `abc` generate a
+  config that passes `talosctl validate`), so a bad version only shows up as `ErrImagePull` on
+  the static pods; (2) passing the flag with an **empty** value is NOT the same as omitting it —
+  empty leaves every `image:` field **commented out** (no pin at all), which is why both
+  `cluster-up.sh` and `validate-talos` build the flag conditionally. Do not "simplify" that
+  into an unconditional `--kubernetes-version "$KUBERNETES_VERSION"`.
 - **Never lower `CP_MEM` below `3072`**: 2 GB control planes starve etcd as soon as `_k8s/`
   addons stack up. The template now ships `4096` (and so does the `Vagrantfile` fallback),
   which `observability/` requires. Cost of the default topology: 18 GB of host RAM.

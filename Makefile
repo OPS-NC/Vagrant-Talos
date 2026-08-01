@@ -98,19 +98,23 @@ validate-talos: ## Génère la config Talos dans un dossier jetable puis la vali
 	net="$${NETWORK:-$$(lab_get NETWORK)}"           ; net="$${net:-192.168.56}"; \
 	vip="$${VIP:-$$(lab_get VIP)}"                   ; vip="$${vip:-$$net.5}"; \
 	disk="$${INSTALL_DISK:-$$(lab_get INSTALL_DISK)}"; disk="$${disk:-/dev/sda}"; \
+	kver="$${KUBERNETES_VERSION:-$$(lab_get KUBERNETES_VERSION)}"; \
 	[ -f "talos/cni-$$cni.yaml" ] || { echo "❌ CNI '$$cni' inconnu (talos/cni-$$cni.yaml absent)"; exit 1; }; \
 	out="$$(mktemp -d)"; \
 	trap 'rm -rf "$$out"' EXIT; \
+	kargs=(); [ -z "$$kver" ] || kargs=(--kubernetes-version "$${kver#v}"); \
 	talosctl gen config validate-only "https://$$vip:6443" \
 	  --install-disk "$$disk" \
 	  --additional-sans "$$vip,$$net.10,$$net.20,$$net.30" \
+	  "$${kargs[@]}" \
 	  --config-patch               @talos/patch-all.yaml \
 	  --config-patch-control-plane @talos/patch-cp.yaml \
 	  --config-patch-control-plane "@talos/cni-$$cni.yaml" \
-	  --output-dir "$$out" --force >/dev/null 2>&1; \
+	  --output-dir "$$out" --force >/dev/null 2>&1 \
+	  || { echo "❌ gen config a échoué (KUBERNETES_VERSION='$$kver' invalide ?)"; exit 1; }; \
 	talosctl validate --config "$$out/controlplane.yaml" --mode metal; \
 	talosctl validate --config "$$out/worker.yaml" --mode metal; \
-	echo "   (CNI=$$cni, VIP=$$vip)"
+	echo "   (CNI=$$cni, VIP=$$vip, Kubernetes=$${kver:-défaut talosctl})"
 
 # Un sous-module enregistre TOUJOURS un commit précis dans le dépôt parent — c'est ainsi
 # que git garantit qu'un clone donne exactement le même arbre. « Suivre main » se déclare

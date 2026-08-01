@@ -32,13 +32,22 @@ talosctl -n <ip-node> upgrade --image ghcr.io/siderolabs/installer:<vX.Y.Z>
 
 ## 🔢 2. The version model in this lab
 
-Three version references coexist, and they do **not** move together:
+Four version references coexist, and they do **not** move together:
 
 | Reference | Purpose | Driven by |
 |---|---|---|
 | ISO `metal-amd64.iso` | boot in maintenance mode, **before** the install | `TALOS_VERSION` (`lab.env`) |
 | Installer image | version actually **installed on disk** | `INSTALLER_IMAGE`, otherwise `ghcr.io/siderolabs/installer:${TALOS_VERSION}` |
 | `talosctl` binary | generated config schema, command compatibility | your local install |
+| **Kubernetes** | control-plane and kubelet images | `KUBERNETES_VERSION` (`lab.env`), otherwise `talosctl`'s default |
+
+> ☸️ **Kubernetes is the fourth axis, and it is independent of the other three.**
+> `KUBERNETES_VERSION` in `lab.env` becomes `talosctl gen config --kubernetes-version` in
+> `cluster-up.sh`; left empty it falls back to what the `talosctl` binary ships (`v1.36.2` for
+> `talosctl v1.13.7`). It is read **only when the config is generated** — on a **running**
+> cluster it is `upgrade-k8s` that does the work (§4), and `lab.env` is then updated so the
+> next rebuild starts on the same version. Nothing validates the value at generation time: a
+> version outside the skew Talos supports lands as an `ErrImagePull` on the static pods.
 
 > ⚠️ **`INSTALLER_IMAGE` masks `TALOS_VERSION`.** `lab.env.example` sets an **Image Factory**
 > image whose tag carries its own version
@@ -111,6 +120,12 @@ This orchestrates the static pods' apiserver / controller-manager / scheduler / 
 component at a time. Check the supported Talos ↔ Kubernetes skew in the Talos release notes
 first.
 
+> 💡 **Then align `KUBERNETES_VERSION` in `lab.env`** (and, if it is a repo-wide bump, in the
+> `lab.env.example` template): `upgrade-k8s` only touches the **live** cluster, so without that
+> line the next `vagrant destroy` + `cluster-up.sh` rebuilds on the old version. That variable
+> is the *fresh install* path; `upgrade-k8s` is the *running cluster* path. Same version, two
+> mechanisms — see §2.
+
 ## 🧩 5. Adding extensions = the same mechanism
 
 Adding `iscsi-tools` / `util-linux-tools` (required by Longhorn) is **not** a `kubectl` job:
@@ -149,6 +164,8 @@ kubectl get nodes -o wide
   template) → future `vagrant up` / `cluster-up.sh` runs will start on the right version, ISO
   **and** installer.
 - Bump the local `talosctl` binary to stay aligned.
+- If you also moved Kubernetes (§4), set **`KUBERNETES_VERSION`** in `lab.env` — otherwise the
+  next rebuild silently goes back to the version the `talosctl` binary ships.
 
 ## 📊 7. Real test: v1.13.5 → v1.13.7
 

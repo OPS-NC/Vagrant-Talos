@@ -61,6 +61,12 @@ CNI="${CNI:-cilium}"
 # pin, la version INSTALLÉE suivait celle du binaire talosctl (skew avec l'ISO).
 TALOS_VERSION="${TALOS_VERSION:-v1.13.7}"
 INSTALLER_IMAGE="${INSTALLER_IMAGE:-ghcr.io/siderolabs/installer:${TALOS_VERSION}}"
+# Version de Kubernetes — INDÉPENDANTE de la version de Talos (cf. talos/UPGRADE.md §2).
+# Vide (défaut) = celle qu'embarque le binaire talosctl (v1.36.2 pour talosctl v1.13.7) ;
+# renseignée, elle épingle les images du plan de contrôle (kube-apiserver, -scheduler,
+# -controller-manager, kube-proxy) ET celle du kubelet. Le « v » de tête est toléré, pour
+# rester homogène avec TALOS_VERSION.
+KUBERNETES_VERSION="${KUBERNETES_VERSION:-}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
@@ -132,22 +138,31 @@ apply_config() {
 # seulement si la config est absente, ou explicitement via FORCE=1 (typiquement
 # après un `vagrant destroy`). Sinon on réutilise la config existante.
 if [ "${FORCE:-0}" = "1" ] || [ ! -f "${OUT}/controlplane.yaml" ]; then
-  echo "==> [1/5] Génération de la config Talos (${OUT}/) — CNI=${CNI}"
+  echo "==> [1/5] Génération de la config Talos (${OUT}/) — CNI=${CNI}, Kubernetes=${KUBERNETES_VERSION:-défaut talosctl}"
   [ -f "talos/cni-${CNI}.yaml" ] || { echo "ERREUR : CNI '${CNI}' inconnu (talos/cni-${CNI}.yaml absent)." >&2; exit 1; }
   sans="${VIP}"
   for ip in "${cp_ips[@]}"; do sans="${sans},${ip}"; done
+  # Drapeau ajouté SEULEMENT si la version est demandée, et ce n'est PAS cosmétique :
+  # `--kubernetes-version ""` ne renvoie aucune erreur, mais génère une config où les
+  # champs `image:` du plan de contrôle et du kubelet sont COMMENTÉS — donc aucune image
+  # épinglée. Drapeau absent = défaut de talosctl, explicitement épinglé (v1.36.2 en 1.13.7).
+  k8s_args=()
+  if [ -n "$KUBERNETES_VERSION" ]; then
+    k8s_args+=(--kubernetes-version "${KUBERNETES_VERSION#v}")
+  fi
   # Le CNI est piloté par le patch talos/cni-${CNI}.yaml (flannel = défaut ; none = Cilium & co).
   talosctl gen config "${CLUSTER_NAME}" "https://${VIP}:6443" \
     --install-disk "${INSTALL_DISK}" \
     --install-image "${INSTALLER_IMAGE}" \
     --additional-sans "${sans}" \
+    "${k8s_args[@]}" \
     --config-patch               @talos/patch-all.yaml \
     --config-patch-control-plane @talos/patch-cp.yaml \
     --config-patch-control-plane "@talos/cni-${CNI}.yaml" \
     --output-dir "${OUT}" --force
 else
   echo "==> [1/5] Config existante réutilisée (${OUT}/)."
-  echo "    /!\\ Un changement de CONTROL_PLANES/WORKERS/VIP/INSTALL_DISK/patches n'est PAS"
+  echo "    /!\\ Un changement de CONTROL_PLANES/WORKERS/VIP/INSTALL_DISK/KUBERNETES_VERSION/patches n'est PAS"
   echo "        pris en compte ici. Pour repartir propre :"
   echo "        vagrant destroy -f && rm -rf ${OUT} kubeconfig   (puis relancer)"
   echo "        ou : FORCE=1 ./talos/cluster-up.sh   (régénère, nouveaux secrets)"
