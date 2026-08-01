@@ -247,11 +247,11 @@ that is the guard to run after renaming a heading or adding a page.
   which only resolves once the submodule is checked out.
 - The default gateway through NAT `10.0.2.2` is **intentional** (Internet access). What must be
   host-only is the node's identity (kubelet nodeIP / etcd / VIP), not the default route.
-- **Bilingual docs**: `docs/build.py` pairs pages per directory through `MIROIRS`
+- **Bilingual docs**: `docs/build.py` pairs pages per directory through `MIRRORS`
   (`README.md` ↔ `LISEZ-MOI.md`, `UPGRADE.md` ↔ `MISE-A-JOUR.md`). A page with no mirror does
   not fail the build: it shows up **in English inside the French menu**, with an `EN` badge.
   That badge is the symptom of a forgotten mirror — except for the pages listed in
-  `SANS_MIROIR` (this file), which are English-only on purpose and carry no badge.
+  `WITHOUT_MIRROR` (this file), which are English-only on purpose and carry no badge.
 - **FR anchors ≠ EN anchors**: slugs derive from headings, so translating a heading breaks
   every link that targeted it. `*.md` links are rewritten into internal routes at build time;
   `make docs` lists whatever no longer resolves. Two **contractual** anchors now live in
@@ -350,7 +350,7 @@ this checklist on every addition:
 | `CLAUDE.md` | every newly earned pitfall, and every new validation command |
 | `TROUBLESHOOTING.md` | if the component has a failure mode a reader will meet on the lab side |
 | `talos/UPGRADE.md` | if the component requires a system extension or constrains a version |
-| `docs/build.py` | the page emoji in `EMOJIS` and its placement in `GROUPES` (`_k8s/` pages are excluded from discovery — nothing to declare for them) |
+| `docs/build.py` | the page emoji in `EMOJIS` and its placement in `GROUPS` (`_k8s/` pages are excluded from discovery — nothing to declare for them) |
 | **the FR mirror of every page touched** | `LISEZ-MOI.md`, `DEPANNAGE.md`, `talos/MISE-A-JOUR.md`: same structure, same content, **same commit** as the English version. `CLAUDE.md` has no mirror |
 
 Then `make docs` to regenerate the page, and `make validate` before committing.
