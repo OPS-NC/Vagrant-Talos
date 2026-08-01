@@ -10,7 +10,6 @@ harbor.txt
 # Addon databasement : local uniquement. values.yaml porte une clé applicative
 # Laravel (appKey) en clair — le dossier n'était que « untracked », donc un
 # `git add -A` l'aurait commitée.
-/_k8s/databasement/
 
 # Talos
 iso/

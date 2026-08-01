@@ -115,6 +115,10 @@ Orchestre apiserver / controller-manager / scheduler / kubelet des static pods, 
 Ajouter `iscsi-tools` / `util-linux-tools` (requis par Longhorn) n'est **pas** un `kubectl` :
 c'est un upgrade vers une image d'installeur **Image Factory** qui les *bake*.
 
+> ℹ️ `schematic.yaml` et `patch-longhorn.yaml` vivent dans le **sous-module `_k8s/`**
+> ([k8s-playground](https://github.com/OPS-NC/k8s-playground)), que les chemins ci-dessous
+> supposent sorti. Si `_k8s/longhorn/` est vide : `git submodule update --init --recursive`.
+
 ```bash
 SCHEMATIC_ID=$(curl -sX POST --data-binary @_k8s/longhorn/schematic.yaml \
   https://factory.talos.dev/schematics -H "Content-Type: application/yaml" | jq -r .id)
@@ -131,7 +135,7 @@ talosctl -n 192.168.56.101 get extensions      # iscsi-tools + util-linux-tools 
 
 > 💡 Pour un cluster **neuf**, il est plus simple d'ajouter
 > `--config-patch @_k8s/longhorn/patch-longhorn.yaml` au `gen config` — voir
-> [`../_k8s/longhorn/LISEZ-MOI.md`](../_k8s/longhorn/LISEZ-MOI.md).
+> [k8s-playground — `longhorn/`](https://github.com/OPS-NC/k8s-playground/blob/main/longhorn/LISEZ-MOI.md).
 
 ## ✅ 6. Après l'upgrade
 
@@ -196,4 +200,5 @@ Post-upgrade : Longhorn 5 nodes `Ready`, Argo CD et UI Longhorn servis en HTTPS 
 - [Talos — Upgrading Talos Linux](https://www.talos.dev/latest/talos-guides/upgrading-talos/)
 - [Talos — Upgrading Kubernetes](https://www.talos.dev/latest/kubernetes-guides/upgrading-kubernetes/)
 - [Image Factory](https://factory.talos.dev/) — extensions bakées dans l'installeur
-- [`../_k8s/longhorn/LISEZ-MOI.md`](../_k8s/longhorn/LISEZ-MOI.md) — prérequis Talos de Longhorn
+- [k8s-playground — `longhorn/`](https://github.com/OPS-NC/k8s-playground/blob/main/longhorn/LISEZ-MOI.md)
+  — prérequis Talos de Longhorn, dans le sous-module `_k8s/`

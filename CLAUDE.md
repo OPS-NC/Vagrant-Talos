@@ -2,7 +2,35 @@
 
 **Talos Linux on VirtualBox** lab, driven by Vagrant. Talos has neither SSH nor a shell:
 everything is driven with `talosctl` from the host. User docs: [`README.md`](README.md) ·
-application layer: [`_k8s/README.md`](_k8s/README.md).
+application layer: <https://ops-nc.github.io/k8s-playground/> · symptoms:
+[`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) · version bumps:
+[`talos/UPGRADE.md`](talos/UPGRADE.md).
+
+## 🚫 `_k8s/` is a SUBMODULE — never edit it from here
+
+`_k8s/` is not a directory of this repository. It is a pinned checkout of
+**[OPS-NC/k8s-playground](https://github.com/OPS-NC/k8s-playground)**, the application layer
+shared with the [kubeadm sibling](https://github.com/OPS-NC/Vagrant-kubeadm) lab: one source,
+one place to maintain it. Its documentation is published separately at
+<https://ops-nc.github.io/k8s-playground/>.
+
+- **Read it freely** to understand how the layer behaves — it is checked out on disk.
+- **Never write to it.** Editing a file under `_k8s/` dirties another repository's working
+  tree and produces a commit that does not belong here. Addon changes are made *in
+  k8s-playground*, then this repo bumps the pointer.
+- **Never link to `_k8s/…*.md` from a Markdown file of this repo.** Those pages are not part of
+  this documentation set and `make validate-docs` fails on the dead link. Point at
+  <https://ops-nc.github.io/k8s-playground/>, or at the file on GitHub
+  (`https://github.com/OPS-NC/k8s-playground/blob/main/<dir>/README.md` — the directories sit at
+  the **root** of that repo, with no `_k8s/` prefix).
+- Paths on disk (`./_k8s/install.sh`, `_k8s/longhorn/schematic.yaml`) stay correct and must not
+  be rewritten: the submodule really does mount there.
+- If `_k8s/` is empty on the machine you work on, the submodule was never initialised:
+  `git submodule update --init --recursive`. `git pull` alone does **not** update it.
+- **Nothing Talos-specific was lost when the layer moved out.** `longhorn/schematic.yaml`,
+  `longhorn/patch-longhorn.yaml` and the `talosctl`/`TALOSCONFIG` support in `lib/common.sh`,
+  `longhorn/longhorn-up.sh` and `local-path-storage/local-path-up.sh` all live in
+  k8s-playground now, behind the `talos` profile (`lib/profiles/talos.sh`).
 
 ## 🚀 Order of work
 
@@ -10,15 +38,27 @@ application layer: [`_k8s/README.md`](_k8s/README.md).
 2. `./talos/cluster-up.sh` generates the config, applies it, bootstraps etcd, fetches the
    kubeconfig and waits for health. This is the real path (the `<details>` in §4 of the README
    is the manual "to understand what happens" version).
-3. `./_k8s/platform-up.sh` lays down the base platform, then the addons, opt-in
-   (`_k8s/*/*-up.sh`).
+3. `./_k8s/install.sh talos platform` lays down the base platform, then the addons, opt-in
+   (`./_k8s/install.sh talos <addon>…`, or a single `_k8s/<addon>/<addon>-up.sh talos`).
+
+The application-layer entry point takes the **distribution as its first positional argument**
+(`talos` here, `kubeadm` in the sibling lab), and it needs **`LAB_DIR`** exported to find
+`lab.env` and `_out/` — see the pitfall section below. The full sequence from the host:
+
+```bash
+export TALOSCONFIG="$PWD/_out/talosconfig"
+export KUBECONFIG="$PWD/kubeconfig"
+export LAB_DIR="$PWD"
+./_k8s/install.sh talos platform
+```
 
 The reference lab runs **`CNI=cilium`** — the repo default, in `lab.env.example`, in
-`talos/cluster-up.sh` and in `platform-up.sh`. Talos installs no CNI at bootstrap and
-`platform-up.sh` installs Cilium right after; that is what the `_k8s/` layer assumes
-everywhere (`LoadBalancer` Services depend on Cilium's L2 announcement). `CNI=none` produces
-the exact same machine config but installs nothing at all — it means "I lay down my own CNI",
-and `platform-up.sh` then stops on `no node Ready`.
+`talos/cluster-up.sh` and in k8s-playground's `platform-up.sh`. Talos installs no CNI at
+bootstrap and `install.sh talos platform` installs Cilium right after; that is what the
+application layer assumes everywhere (`LoadBalancer` Services depend on Cilium's L2
+announcement). `CNI=none` produces the exact same machine config but installs nothing at all —
+it means "I lay down my own CNI", and `install.sh talos platform` then stops on
+`no node Ready`.
 
 ## 🚧 Working rules (non-negotiable)
 
@@ -47,6 +87,15 @@ so nothing to install). The `ci` workflow re-runs `validate-shell`, `validate-ya
 `validate-vagrant` on every PR **through the same make targets** — never duplicate a check's
 definition in the workflow. A runner has no VirtualBox, hence
 `make validate-vagrant VAGRANT_VALIDATE_FLAGS=--ignore-provider` there.
+
+> ⚠️ **`validate-shell` and `validate-yaml` only cover files tracked by *this* repo.** The
+> `_k8s/` submodule is tracked as a single pointer, not file by file, so none of its scripts or
+> manifests are checked here — they are validated in k8s-playground's own CI. A green
+> `make validate` says nothing about the application layer. `make validate-submodule` checks
+> the *pointer*, not its content: that `.gitmodules` uses an `https://` URL (an SSH one breaks
+> the clone for everyone without a GitHub key, on a public repo) and that the pinned commit is
+> publicly fetchable (a never-pushed commit makes `git clone --recurse-submodules` fail for
+> everyone but you). Both failures are invisible from your own working copy.
 
 `make validate-talos` generates the config in an `mktemp -d`, then feeds it to `talosctl
 validate --mode metal`: neither `_out/` nor the cluster is touched. To test a patch against an
@@ -93,14 +142,16 @@ that is the guard to run after renaming a heading or adding a page.
   `.vagrant/talos-disks/<vm>.vdi` exists. A `destroy` that fails and leaves the `.vdi` behind
   makes the next `up` create a VM **with no disk attached**, with an obscure install error.
 - **CNI**: `CNI=cilium|calico|flannel|none` (default `cilium`) expresses an **intent**, read in
-  two places — `cluster-up.sh` applies `talos/cni-<CNI>.yaml`, then `platform-up.sh` installs
-  the CNI unless Talos already did. Only `flannel` is laid down by **Talos** at bootstrap time
+  two places — `cluster-up.sh` applies `talos/cni-<CNI>.yaml`, then
+  `./_k8s/install.sh talos platform` installs the CNI unless Talos already did. Note the two
+  readers now live in **two repositories**: changing the default here means changing it in
+  k8s-playground too. Only `flannel` is laid down by **Talos** at bootstrap time
   (`cluster.network.cni`); `cilium` and `calico` go through `cni.name: none` then Helm. Any
   manual `gen config` MUST include `--config-patch-control-plane @talos/cni-<CNI>.yaml` **and**
   `--install-image "$INSTALLER_IMAGE"` — without it the *classic* installer is laid down,
   without the iscsi extensions, and Longhorn fails later on `iscsiadm: not found`.
 - **TLS: `SELF_SIGNED=true` is the default, and it skips cert-manager entirely.**
-  `platform-up.sh` step `[4/4]` branches on it: `true` runs
+  k8s-playground's `platform-up.sh` step `[4/4]` branches on it: `true` runs
   `_k8s/self-signed/selfsigned-up.sh` (local CA + `openssl` wildcard into
   `_out/self-signed/`, then the TLS Secret) and **strips the
   `cert-manager.io/cluster-issuer` annotation** from `main-gateway`; `false` installs
@@ -109,18 +160,18 @@ that is the guard to run after renaming a heading or adding a page.
   keep it that way. `LAB_DNS_ZONE`, `LAB_ACME_EMAIL`, `LAB_ACME_ISSUER` and
   `CLOUDFLARE_API_TOKEN` are dead variables when `SELF_SIGNED=true`. Switching modes on a
   live cluster leaves the other mode's object behind (a `Certificate`, or a hand-made
-  Secret) — see `_k8s/self-signed/README.md` §⚠️.
+  Secret) — see the `self-signed/` page of k8s-playground, §⚠️.
 - **ACME: `staging` is the default, and `prod` has a weekly quota** (`SELF_SIGNED=false` only). `LAB_ACME_ISSUER`
   (`staging|prod`, default `staging`) drives the `cert-manager.io/cluster-issuer` annotation —
-  the versioned `Envoy-Proxy.yml` carries `letsencrypt-staging`, and `platform-up.sh` rewrites
-  it. Do NOT switch the repo default back to `prod`: the wildcard lives **only in etcd**, so
+  the versioned `Envoy-Proxy.yml` carries `letsencrypt-staging`, and k8s-playground's
+  `platform-up.sh` rewrites it. Do NOT switch the repo default back to `prod`: the wildcard lives **only in etcd**, so
   every `vagrant destroy` burns one of the **5 certificates/week per identifier set** Let's
   Encrypt production allows. Already hit on 2026-07-26: 5/5 consumed, `429 rateLimited`, no TLS
   for 18 h — while the destroyed cert was valid for another 3 months. Before a destroy on a
   `prod` lab: `kubectl -n envoy-gateway-system get secret <wildcard>-tls -o yaml >
   _out/wildcard-tls.backup.yaml` (private key inside — `_out/` is gitignored).
-- **Calico/tigera-operator: two bootstrap traps, both fixed in `_k8s/calico/` — do not undo
-  them.** (1) The chart renders four CRs (`Installation`, `APIServer`, `Goldmane`, `Whisker`)
+- **Calico/tigera-operator: two bootstrap traps, both fixed in `_k8s/calico/` (in
+  k8s-playground — fix them *there*, never here) — do not undo them.** (1) The chart renders four CRs (`Installation`, `APIServer`, `Goldmane`, `Whisker`)
   but ships **no `crds/` directory** — the operator creates the CRDs at runtime
   (`-manage-crds=true`), so *any* CR left enabled kills `helm install` on a fresh cluster with
   `no matches for kind … ensure CRDs are installed first`. All four stay `enabled=false`; the
@@ -134,8 +185,8 @@ that is the guard to run after renaming a heading or adding a page.
 - **Only Cilium gives an IP to `LoadBalancer` Services** in this lab (L2/ARP announcement).
   Calico can only do it over BGP (no peer router on a host-only network) ⇒ MetalLB required,
   and `loadBalancerClass: io.cilium/l2-announcer` in `Envoy-Proxy.yml` has to go — which is
-  what `platform-up.sh` does when the CNI is not Cilium. Changing CNI = `vagrant destroy`, not
-  a live switch.
+  what `install.sh talos platform` does when the CNI is not Cilium. Changing CNI =
+  `vagrant destroy`, not a live switch.
 - **Flannel/VXLAN**: without `--iface-can-reach=192.168.56.1` — which lives in
   `talos/cni-flannel.yaml`, **not** in `patch-cp.yaml` — flannel picks the NAT interface
   (`10.0.2.15`, identical on every VM) ⇒ broken cross-node traffic and DNS. Same for Cilium:
@@ -169,7 +220,10 @@ that is the guard to run after renaming a heading or adding a page.
 - **`_k8s/longhorn/patch-longhorn.yaml` is NOT applied by `cluster-up.sh`** (which only passes
   `patch-all`, `patch-cp` and `cni-*`): the rshared mount of `/var/lib/longhorn` is applied by
   `_k8s/longhorn/longhorn-up.sh`, to the workers, right before the chart. A freshly bootstrapped
-  cluster therefore has **no** `extraMounts` — see `_k8s/longhorn/README.md`.
+  cluster therefore has **no** `extraMounts` — see the `longhorn/` page of k8s-playground. That
+  script, its `schematic.yaml` and its `patch-longhorn.yaml` moved into the submodule with the
+  rest of the layer; the `talos/UPGRADE.md` commands still reference them at `_k8s/longhorn/…`,
+  which only resolves once the submodule is checked out.
 - The default gateway through NAT `10.0.2.2` is **intentional** (Internet access). What must be
   host-only is the node's identity (kubelet nodeIP / etcd / VIP), not the default route.
 - **Bilingual docs**: `docs/build.py` pairs pages per directory through `MIROIRS`
@@ -179,12 +233,40 @@ that is the guard to run after renaming a heading or adding a page.
   `SANS_MIROIR` (this file), which are English-only on purpose and carry no badge.
 - **FR anchors ≠ EN anchors**: slugs derive from headings, so translating a heading breaks
   every link that targeted it. `*.md` links are rewritten into internal routes at build time;
-  `make docs` lists whatever no longer resolves. Two anchors are **contractual**, because many
-  addons point at them: `_k8s/README.md#-lab_domain--the-ui-domain` and
-  `#-remote-access-tailscale--cloudflare`.
+  `make docs` lists whatever no longer resolves. Two **contractual** anchors now live in
+  k8s-playground (`README.md#-lab_domain--the-ui-domain` and
+  `#-remote-access-tailscale--cloudflare`); this repo links them as absolute GitHub URLs, so
+  renaming those headings *there* breaks the links *here* — and `make validate-docs` cannot see
+  it, because it does not follow external URLs.
+- **No Markdown link may point into `_k8s/`.** `docs/build.py --strict` resolves `*.md` links
+  and anchors, the submodule's pages are not part of this documentation set, and
+  `make validate-docs` fails on them. Use <https://ops-nc.github.io/k8s-playground/> or a
+  GitHub URL instead. Disk paths in prose or in code blocks (`./_k8s/install.sh`) are fine.
 - The `<!-- i18n --> … <!-- /i18n -->` banner at the top of every page is there for GitHub
   readers; `docs/build.py` strips it (it has its own switcher). Do not remove it from the
   files, and do not put anything else between the markers.
+
+### The `_k8s/` submodule
+
+- **`LAB_DIR` must be exported before any `_k8s/` script.** k8s-playground resolves `lab.env`
+  and `_out/` in this order: `$LAB_DIR` / `$LAB_ENV` → its own repo root →
+  `<its root>/../$LAB_REPO_NAME`, and the `talos` profile sets `LAB_REPO_NAME="Vagrant-Talos"`.
+  That last candidate assumes the two repos are **siblings**; mounted as a submodule its root
+  *is* `Vagrant-Talos/_k8s`, so the path becomes `Vagrant-Talos/Vagrant-Talos`, which does not
+  exist, and resolution falls back on `_k8s/` itself — no `lab.env`, no `_out/`, so built-in
+  defaults (wrong domain, wrong CNI), no kubeconfig and no `_out/talosconfig`, **silently**.
+  Every doc example that runs the application layer must show `export LAB_DIR="$PWD"` next to
+  `export TALOSCONFIG=…` and `export KUBECONFIG=…`. Do not "simplify" it away.
+- **The distribution is an argument, not a guess.** `./_k8s/install.sh talos platform`,
+  `./_k8s/longhorn/longhorn-up.sh talos`. Resolution order: first positional argument →
+  `--distro=` → `K8S_DISTRO` → `DISTRO=` in `lab.env` (`lab.env.example` now ships
+  `DISTRO=talos`). A bare `./_k8s/platform-up.sh` with none of those is not the documented
+  invocation.
+- **Do not edit anything under `_k8s/`** from this repo, and do not link to its `*.md` files.
+  See the dedicated section at the top of this file.
+- **`docs/build.py` excludes `_k8s/` from page discovery** and carries an external "☸️
+  Plateforme" link to <https://ops-nc.github.io/k8s-playground/> in the sidebar instead. Do not
+  re-add `_k8s` menu groups: those pages are built and published by the other repo.
 
 ## 🔐 Secrets
 
@@ -192,9 +274,14 @@ that is the guard to run after renaming a heading or adding a page.
   keys). Never commit it, never copy its values into a README, a commit, a report or terminal
   output.
 - `_out/*.yaml` holds the cluster CA and keys; `kubeconfig` holds the admin credentials.
-- `_k8s/databasement/` is gitignored: its `values.yaml` carries an application key in the
-  clear.
-- Before committing: `git status` — no secret file may show up.
+- `_k8s/databasement/` is gitignored on **both** sides (here, and in k8s-playground's own
+  `.gitignore`): its `values.yaml` carries an application key in the clear. Since `_k8s/` became
+  a submodule, this repo no longer tracks its contents file by file — the rule that matters now
+  is the one in k8s-playground.
+- The repo is **public**: every versioned default must stay neutral (`talos.lab.example.io`,
+  empty `CLOUDFLARE_API_TOKEN`).
+- Before committing: `git status` — no secret file may show up, and `_k8s` must appear as a
+  submodule pointer at most, never as modified content.
 
 ## 📝 Conventions
 
@@ -218,15 +305,14 @@ this checklist on every addition:
 
 | Where | What to update |
 |---|---|
-| `_k8s/<addon>/README.md` | the dedicated README (skeleton: 🎯 purpose · 📋 prerequisites · ⚡ install · 🔧 how it works · ✅ verify · 🌐 access · ⚠️ pitfalls · 📚 references) |
-| `_k8s/README.md` | the index: the table of the right family (storage / databases / secrets / observability / security / networking / demos) **and** the dependency chain if it changes |
+| **k8s-playground** (separate repo) | the addon's own page (skeleton: 🎯 purpose · 📋 prerequisites · ⚡ install · 🔧 how it works · ✅ verify · 🌐 access · ⚠️ pitfalls · 📚 references), the index table of the right family, the dependency chain, and the cross-references of the **neighbouring** addons — *none of it editable from here*: open a PR there, then bump the `_k8s` pointer in this repo |
 | `README.md` (root) | only if it touches the install path, `lab.env` or the CNI choice |
 | `lab.env.example` | every new variable, commented, with a neutral default (public repo) |
 | `CLAUDE.md` | every newly earned pitfall, and every new validation command |
+| `TROUBLESHOOTING.md` | if the component has a failure mode a reader will meet on the lab side |
 | `talos/UPGRADE.md` | if the component requires a system extension or constrains a version |
-| README of the **neighbouring** addons | the cross-references: the one we depend on, the ones depending on us |
-| `docs/build.py` | the page emoji in `EMOJIS` and its placement in `GROUPES` |
-| **the FR mirror of every page touched** | `LISEZ-MOI.md` (and `talos/MISE-A-JOUR.md`): same structure, same content, **same commit** as the English version. `CLAUDE.md` has no mirror |
+| `docs/build.py` | the page emoji in `EMOJIS` and its placement in `GROUPES` (`_k8s/` pages are excluded from discovery — nothing to declare for them) |
+| **the FR mirror of every page touched** | `LISEZ-MOI.md`, `DEPANNAGE.md`, `talos/MISE-A-JOUR.md`: same structure, same content, **same commit** as the English version. `CLAUDE.md` has no mirror |
 
 Then `make docs` to regenerate the page, and `make validate` before committing.
 - "Test" topology: edit **`lab.env`** (gitignored, therefore never committed). The repo default
