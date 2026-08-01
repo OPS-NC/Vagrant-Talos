@@ -38,26 +38,25 @@ one place to maintain it. Its documentation is published separately at
 2. `./talos/cluster-up.sh` generates the config, applies it, bootstraps etcd, fetches the
    kubeconfig and waits for health. This is the real path (the `<details>` in §4 of the README
    is the manual "to understand what happens" version).
-3. `./_k8s/install.sh talos platform` lays down the base platform, then the addons, opt-in
-   (`./_k8s/install.sh talos <addon>…`, or a single `_k8s/<addon>/<addon>-up.sh talos`).
+3. `./_k8s/platform-up.sh` lays down the base platform, then the addons, opt-in
+   (`./_k8s/install.sh <addon>…`, or a single `_k8s/<addon>/<addon>-up.sh`).
 
-The application-layer entry point takes the **distribution as its first positional argument**
-(`talos` here, `kubeadm` in the sibling lab), and it needs **`LAB_DIR`** exported to find
-`lab.env` and `_out/` — see the pitfall section below. The full sequence from the host:
+The application-layer entry point needs **no argument and no `LAB_DIR`**: it finds the lab by
+itself (the parent directory of `_k8s/` carries a `Vagrantfile`) and detects the distribution
+from `talos/cluster-up.sh` — see the pitfall section below. The full sequence from the host:
 
 ```bash
 export TALOSCONFIG="$PWD/_out/talosconfig"
 export KUBECONFIG="$PWD/kubeconfig"
-export LAB_DIR="$PWD"
-./_k8s/install.sh talos platform
+./_k8s/platform-up.sh
 ```
 
 The reference lab runs **`CNI=cilium`** — the repo default, in `lab.env.example`, in
 `talos/cluster-up.sh` and in k8s-playground's `platform-up.sh`. Talos installs no CNI at
-bootstrap and `install.sh talos platform` installs Cilium right after; that is what the
+bootstrap and `platform-up.sh` installs Cilium right after; that is what the
 application layer assumes everywhere (`LoadBalancer` Services depend on Cilium's L2
 announcement). `CNI=none` produces the exact same machine config but installs nothing at all —
-it means "I lay down my own CNI", and `install.sh talos platform` then stops on
+it means "I lay down my own CNI", and `platform-up.sh` then stops on
 `no node Ready`.
 
 ## 🚧 Working rules (non-negotiable)
@@ -143,7 +142,7 @@ that is the guard to run after renaming a heading or adding a page.
   makes the next `up` create a VM **with no disk attached**, with an obscure install error.
 - **CNI**: `CNI=cilium|calico|flannel|none` (default `cilium`) expresses an **intent**, read in
   two places — `cluster-up.sh` applies `talos/cni-<CNI>.yaml`, then
-  `./_k8s/install.sh talos platform` installs the CNI unless Talos already did. Note the two
+  `./_k8s/platform-up.sh` installs the CNI unless Talos already did. Note the two
   readers now live in **two repositories**: changing the default here means changing it in
   k8s-playground too. Only `flannel` is laid down by **Talos** at bootstrap time
   (`cluster.network.cni`); `cilium` and `calico` go through `cni.name: none` then Helm. Any
@@ -185,7 +184,7 @@ that is the guard to run after renaming a heading or adding a page.
 - **Only Cilium gives an IP to `LoadBalancer` Services** in this lab (L2/ARP announcement).
   Calico can only do it over BGP (no peer router on a host-only network) ⇒ MetalLB required,
   and `loadBalancerClass: io.cilium/l2-announcer` in `Envoy-Proxy.yml` has to go — which is
-  what `install.sh talos platform` does when the CNI is not Cilium. Changing CNI =
+  what `platform-up.sh` does when the CNI is not Cilium. Changing CNI =
   `vagrant destroy`, not a live switch.
 - **Flannel/VXLAN**: without `--iface-can-reach=192.168.56.1` — which lives in
   `talos/cni-flannel.yaml`, **not** in `patch-cp.yaml` — flannel picks the NAT interface
@@ -248,20 +247,25 @@ that is the guard to run after renaming a heading or adding a page.
 
 ### The `_k8s/` submodule
 
-- **`LAB_DIR` must be exported before any `_k8s/` script.** k8s-playground resolves `lab.env`
-  and `_out/` in this order: `$LAB_DIR` / `$LAB_ENV` → its own repo root →
-  `<its root>/../$LAB_REPO_NAME`, and the `talos` profile sets `LAB_REPO_NAME="Vagrant-Talos"`.
-  That last candidate assumes the two repos are **siblings**; mounted as a submodule its root
-  *is* `Vagrant-Talos/_k8s`, so the path becomes `Vagrant-Talos/Vagrant-Talos`, which does not
-  exist, and resolution falls back on `_k8s/` itself — no `lab.env`, no `_out/`, so built-in
-  defaults (wrong domain, wrong CNI), no kubeconfig and no `_out/talosconfig`, **silently**.
-  Every doc example that runs the application layer must show `export LAB_DIR="$PWD"` next to
-  `export TALOSCONFIG=…` and `export KUBECONFIG=…`. Do not "simplify" it away.
-- **The distribution is an argument, not a guess.** `./_k8s/install.sh talos platform`,
-  `./_k8s/longhorn/longhorn-up.sh talos`. Resolution order: first positional argument →
-  `--distro=` → `K8S_DISTRO` → `DISTRO=` in `lab.env` (`lab.env.example` now ships
-  `DISTRO=talos`). A bare `./_k8s/platform-up.sh` with none of those is not the documented
-  invocation.
+- **The lab is located automatically — never export `LAB_DIR` in a doc example.**
+  k8s-playground walks up from `_k8s/` and takes the parent directory that carries a
+  `Vagrantfile` as the lab root, so `lab.env` and `_out/` resolve on their own from anywhere.
+  `LAB_DIR` (like `LAB_ENV`) survives **only as an explicit override** for odd setups —
+  mention it as such, never as a step. Doc examples that run the application layer must NOT
+  show `export LAB_DIR="$PWD"`. Do not "helpfully" re-add it.
+- **`TALOSCONFIG` is a different matter — it IS required.** The addons that drive the Talos API
+  (`longhorn/longhorn-up.sh`, `local-path-storage/local-path-up.sh`) need
+  `export TALOSCONFIG="$PWD/_out/talosconfig"`, and everything touching the cluster needs
+  `export KUBECONFIG="$PWD/kubeconfig"`. Both stay in the examples. Do not confuse this rule
+  with the `LAB_DIR` one above and strip them together.
+- **The distribution is auto-detected, not an argument.** k8s-playground reads this lab as
+  `talos` from the presence of `talos/cluster-up.sh` (the sibling lab: `kubeadm/cluster-up.sh`),
+  so detection works straight after clone, **before** any `vagrant up`; secondary signal,
+  `_out/talosconfig` → `talos`. The **bare** form is the documented invocation:
+  `./_k8s/platform-up.sh`, `./_k8s/install.sh longhorn vault argocd`, `./_k8s/install.sh list`,
+  `./_k8s/longhorn/longhorn-up.sh`. An explicit `talos` argument still wins over everything and
+  `--distro=` / `K8S_DISTRO` still work, but they are **overrides**, not the normal path. There
+  is no `DISTRO=` key in `lab.env` any more — do not reintroduce it in any doc.
 - **Do not edit anything under `_k8s/`** from this repo, and do not link to its `*.md` files.
   See the dedicated section at the top of this file.
 - **`docs/build.py` excludes `_k8s/` from page discovery** and carries an external "☸️

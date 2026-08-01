@@ -20,7 +20,7 @@ YAML_PY := uv run --quiet --with pyyaml --no-project python
 VAGRANT_VALIDATE_FLAGS ?=
 
 .PHONY: help docs docs-open validate validate-shell validate-yaml validate-vagrant \
-        validate-talos validate-submodule validate-docs clean
+        validate-talos validate-submodule validate-docs k8s-update clean
 
 help: ## Affiche cette aide
 	@grep -hE '^[a-z-]+:.*?##' $(MAKEFILE_LIST) \
@@ -97,6 +97,21 @@ validate-talos: ## Génère la config Talos dans un dossier jetable puis la vali
 	talosctl validate --config "$$out/controlplane.yaml" --mode metal; \
 	talosctl validate --config "$$out/worker.yaml" --mode metal; \
 	echo "   (CNI=$$cni, VIP=$$vip)"
+
+# Un sous-module enregistre TOUJOURS un commit précis dans le dépôt parent — c'est ainsi
+# que git garantit qu'un clone donne exactement le même arbre. « Suivre main » se déclare
+# donc dans .gitmodules (`branch = main`) et se matérialise par `--remote`, qui va chercher
+# la pointe de cette branche et met à jour le pointeur enregistré.
+k8s-update: ## Aligne le sous-module _k8s sur la pointe de main (puis committer le pointeur)
+	@git submodule update --remote --init _k8s
+	@if git diff --quiet -- _k8s; then \
+	  echo "✅ _k8s déjà sur la pointe de main ($$(git -C _k8s rev-parse --short HEAD))"; \
+	else \
+	  echo "⬆️  _k8s -> $$(git -C _k8s rev-parse --short HEAD)"; \
+	  git -C _k8s log --oneline -5; \
+	  echo; echo "   Pointeur mis à jour dans l'arbre de travail. Pour le figer :"; \
+	  echo "     git add _k8s && git commit -m '[Claude] chore: bump _k8s'"; \
+	fi
 
 clean: ## Supprime la doc générée
 	@rm -f $(DOCS_OUT) && echo "docs/index.html supprimé"
