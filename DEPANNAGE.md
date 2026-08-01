@@ -5,16 +5,27 @@
 # 🚑 Dépannage
 
 > Symptômes et correctifs du lab, de l'hôte jusqu'aux pods. Retour au chemin d'installation :
-> [`LISEZ-MOI.md`](LISEZ-MOI.md) · couche applicative : [`_k8s/LISEZ-MOI.md`](_k8s/LISEZ-MOI.md) ·
-> mises à jour : [`talos/MISE-A-JOUR.md`](talos/MISE-A-JOUR.md).
+> [`LISEZ-MOI.md`](LISEZ-MOI.md) · couche applicative :
+> <https://ops-nc.github.io/k8s-playground/> · mises à jour :
+> [`talos/MISE-A-JOUR.md`](talos/MISE-A-JOUR.md).
 
-Chaque `_k8s/<addon>/LISEZ-MOI.md` porte ses **propres** sections ⚠️ pièges et 🚑 dépannage pour
-ce qui lui est spécifique (Longhorn, Vault, Calico…). Cette page couvre le lab lui-même :
-l'hôte, VirtualBox, l'adressage et les nodes Talos.
+La couche applicative vit dans son **propre dépôt**
+([k8s-playground](https://github.com/OPS-NC/k8s-playground), monté ici comme sous-module
+`_k8s/`) et chacun de ses addons porte ses **propres** sections ⚠️ pièges et 🚑 dépannage, sur
+son propre site (Longhorn, Vault, Calico…). Cette page couvre le lab lui-même : l'hôte,
+VirtualBox, l'adressage et les nodes Talos.
+
+Sauf mention contraire, chaque commande se lance **depuis la racine du dépôt**, avec :
+
+```bash
+export TALOSCONFIG="$PWD/_out/talosconfig"
+export KUBECONFIG="$PWD/kubeconfig"
+export LAB_DIR="$PWD"          # exigé par les scripts _k8s/ — voir la section 1
+```
 
 ---
 
-## 🖥️ 1. Hôte et VirtualBox
+## 🖥️ 1. Hôte, dépôt et VirtualBox
 
 ### Conflit VT-x : décharger KVM avant de lancer VirtualBox
 
@@ -92,6 +103,61 @@ une future version de la box change ce nom, le lister avec
 > `destroy` échoue et laisse `.vagrant/talos-disks/<vm>.vdi` derrière lui, le `up` suivant crée
 > une VM **sans disque attaché** et l'installation meurt sur une erreur obscure. Nettoyer avec
 > `./talos/virtualbox-cleanup.sh`.
+
+### `_k8s/` est vide, ou `./_k8s/install.sh: No such file or directory`
+
+```bash
+ls _k8s/            # rien, ou un dossier vide
+./_k8s/install.sh talos platform
+# bash: ./_k8s/install.sh: No such file or directory
+```
+
+**Cause.** `_k8s/` est un **sous-module git** qui pointe sur
+[k8s-playground](https://github.com/OPS-NC/k8s-playground) — la couche applicative partagée
+avec le lab jumeau kubeadm. Un `git clone` simple enregistre le sous-module mais ne le sort
+**pas** : le dossier reste vide.
+
+```bash
+git submodule update --init --recursive     # remplit _k8s/
+git -C _k8s log --oneline -1                # vérification : il y a bien un commit dedans
+```
+
+Pour cloner correctement dès le départ : `git clone --recurse-submodules <url>`.
+
+> ⚠️ **Un `git pull` ne met pas le sous-module à jour non plus.** Il ne déplace que ce dépôt ;
+> `_k8s/` reste sur le commit sorti précédemment, et on exécute alors les commandes documentées
+> contre une couche applicative plus ancienne. Relancer `git submodule update --init
+> --recursive` après chaque pull, ou `git submodule update --remote _k8s` pour sauter au
+> dernier commit amont.
+
+### Les scripts `_k8s/` ne trouvent ni `lab.env` ni le kubeconfig
+
+Symptômes : les addons s'installent sur le **mauvais domaine** (`lab.example.io` au lieu de ton
+`LAB_DOMAIN`), le **mauvais CNI** est retenu, ou chaque appel `kubectl` interne aux scripts
+échoue en `connection refused` / `no configuration has been provided`. La bannière affichée au
+démarrage des scripts indique `lab.env : absent (défauts)`. Rien ne plante — le run utilise
+silencieusement les valeurs par défaut.
+
+**Cause.** `LAB_DIR` n'est pas exporté. k8s-playground cherche `lab.env` et `_out/` dans cet
+ordre : `$LAB_DIR` / `$LAB_ENV` → sa propre racine → `<sa racine>/../Vagrant-Talos`. Ce dernier
+chemin suppose les deux dépôts **voisins**. Monté en sous-module, sa racine *est*
+`Vagrant-Talos/_k8s` : le chemin devient donc `Vagrant-Talos/Vagrant-Talos`, qui n'existe pas —
+et la résolution retombe sur `_k8s/` lui-même, où il n'y a ni `lab.env` ni `_out/`. Conséquence
+propre à Talos : pas de `_out/talosconfig` non plus, donc tout addon qui appelle `talosctl`
+(Longhorn, local-path) échoue sur une API Talos non configurée.
+
+**Correctif.** L'exporter à côté de `TALOSCONFIG` et `KUBECONFIG`, depuis la racine du dépôt :
+
+```bash
+export TALOSCONFIG="$PWD/_out/talosconfig"
+export KUBECONFIG="$PWD/kubeconfig"
+export LAB_DIR="$PWD"
+./_k8s/install.sh talos platform
+```
+
+> 💡 `LAB_ENV=/chemin/vers/lab.env` rend le même service quand le fichier ne s'appelle pas
+> `lab.env` ou ne vit pas à la racine du lab. `LAB_DIR` est celle à retenir : elle pilote
+> `lab.env`, `_out/` **et** le `KUBECONFIG` par défaut d'un coup.
 
 ---
 
@@ -202,9 +268,9 @@ kubectl -n kube-system rollout status ds/kube-flannel
 ### Les nodes restent `NotReady` après le bootstrap
 
 Attendu avec `CNI=cilium`, `calico` ou `none` : Talos n'installe aucun CNI, et un node sans
-réseau pod ne passe jamais `Ready`. `./_k8s/platform-up.sh` l'installe et les débloque. Seul
-`flannel` est posé par Talos lui-même, au bootstrap.
+réseau pod ne passe jamais `Ready`. `./_k8s/install.sh talos platform` l'installe à sa première
+étape et les débloque. Seul `flannel` est posé par Talos lui-même, au bootstrap.
 
 S'ils sont **toujours** `NotReady` après l'installation du CNI, regarder d'abord les pods du CNI
 (`kubectl -n kube-system get pods` pour Cilium, `kubectl -n calico-system get pods` pour
-Calico), puis le README de l'addon.
+Calico), puis la page de l'addon sur <https://ops-nc.github.io/k8s-playground/>.

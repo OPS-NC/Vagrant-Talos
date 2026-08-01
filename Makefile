@@ -20,7 +20,7 @@ YAML_PY := uv run --quiet --with pyyaml --no-project python
 VAGRANT_VALIDATE_FLAGS ?=
 
 .PHONY: help docs docs-open validate validate-shell validate-yaml validate-vagrant \
-        validate-talos validate-docs clean
+        validate-talos validate-submodule validate-docs clean
 
 help: ## Affiche cette aide
 	@grep -hE '^[a-z-]+:.*?##' $(MAKEFILE_LIST) \
@@ -32,8 +32,33 @@ docs: ## Régénère docs/index.html depuis tous les README (EN + miroirs FR)
 docs-open: docs ## Régénère puis ouvre la doc dans le navigateur
 	@xdg-open $(DOCS_OUT) >/dev/null 2>&1 || open $(DOCS_OUT)
 
-validate: validate-shell validate-yaml validate-vagrant validate-talos validate-docs ## Tout valider (sans cluster)
+validate: validate-shell validate-yaml validate-vagrant validate-talos validate-submodule validate-docs ## Tout valider (sans cluster)
 	@echo "✅ Validation complète OK"
+
+# `_k8s/` est un sous-module (k8s-playground, partagé avec le lab kubeadm). Deux façons
+# de casser un clone neuf sans s'en rendre compte depuis SA copie locale, où tout marche :
+#   1. épingler un commit jamais poussé — `git clone --recurse-submodules` échoue alors
+#      pour tout le monde sauf soi ;
+#   2. déclarer une URL en `git@github.com:` — le clone échoue pour quiconque n'a pas de
+#      clé SSH GitHub, alors que ce dépôt est public et invite au clone.
+# Les deux sont invisibles en local : ce test les rend visibles.
+validate-submodule: ## Vérifie que le sous-module _k8s est déclaré, public et récupérable
+	@url="$$(git config -f .gitmodules submodule._k8s.url)"; \
+	case "$$url" in \
+	  https://*) ;; \
+	  *) echo "❌ sous-module _k8s : URL '$$url' — attendu https:// (un clone public ne peut pas utiliser SSH)"; exit 1 ;; \
+	esac; \
+	sha="$$(git ls-files -s _k8s | awk '{print $$2}')"; \
+	[ -n "$$sha" ] || { echo "❌ _k8s n'est pas enregistré comme sous-module"; exit 1; }; \
+	tmp="$$(mktemp -d)"; trap 'rm -rf "$$tmp"' EXIT; \
+	git -C "$$tmp" init -q .; \
+	if git -C "$$tmp" fetch -q --depth 1 "$$url" "$$sha" 2>/dev/null; then \
+	  echo "✅ sous-module : _k8s -> $$url @ $$(echo "$$sha" | cut -c1-7) (récupérable publiquement)"; \
+	else \
+	  echo "❌ sous-module : le commit $$(echo "$$sha" | cut -c1-7) est introuvable sur $$url"; \
+	  echo "   -> il n'a probablement jamais été poussé. Un clone --recurse-submodules échouerait."; \
+	  exit 1; \
+	fi
 
 validate-docs: ## Construit la doc dans un fichier jetable et exige des liens valides
 	@out="$$(mktemp -d)"; trap 'rm -rf "$$out"' EXIT; \
