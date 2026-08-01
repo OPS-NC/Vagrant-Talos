@@ -318,10 +318,23 @@ that is the guard to run after renaming a heading or adding a page.
   coding agents, and there is no French mirror to keep in sync).
 - **Commit messages in English**, conventional (`fix(...)`, `feat(...)`, `docs: ...`). Branch
   from `main`, then PR (squash).
-- **Code comments in French** (scripts, YAML, `docs/build.py`): that is the repo's working
-  language, leave it alone. **Exceptions, in English**: `Vagrantfile` and `lab.env.example`
-  — they are the first two files a newcomer opens, so they follow the English-first
-  documentation rule.
+- **Everything that is not a French documentation page is in English.** Code comments,
+  identifiers, script output, error messages, `Makefile`, CI workflows, `.gitignore`,
+  `Vagrantfile`, `lab.env.example` and `docs/build.py` — all English. The repo used to keep
+  its comments in French; that is no longer the case, so do not "restore" French in a script
+  you touch.
+- **The only French left is the FR documentation mirrors** (`LISEZ-MOI.md`, `DEPANNAGE.md`,
+  `talos/MISE-A-JOUR.md`) — their prose, not the output they quote. Three deliberate
+  exceptions inside otherwise English code:
+  - the `fr` values of `LABELS` in `docs/build.py` (they *are* the French UI);
+  - the FR menu titles of `GROUPS` and of `OTHER`, same reason;
+  - the **French markers of the `CALLOUTS` table** (`"attention"`, `"jamais"`, `"astuce"`,
+    `"conseil"`, `"remarque"`…). These are not labels, they *parse* the French pages to pick a
+    callout's colour. Translating them silently turns every French callout grey — the kind of
+    breakage no test catches. Note the callout *kinds* (`danger`/`tip`/`info`) are English
+    because they become CSS classes (`.callout-tip`).
+- When a French page quotes script output, quote the **English** string the script now prints.
+  A French page documenting an English-output tool is the expected result, not an oversight.
 
 ### ⚠️ Adding a component = propagating it EVERYWHERE
 

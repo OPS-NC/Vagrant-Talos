@@ -1,44 +1,44 @@
 #!/usr/bin/env bash
 #
-# cluster-up.sh — enchaîne les commandes talosctl pour monter le cluster
-# (gen config -> apply-config -> bootstrap -> kubeconfig) après un `vagrant up`.
+# cluster-up.sh — chains the talosctl commands that bring the cluster up
+# (gen config -> apply-config -> bootstrap -> kubeconfig) after a `vagrant up`.
 #
-# À lancer depuis la racine du dépôt :
+# Run it from the repository root:
 #     ./talos/cluster-up.sh
 #
-# Adapter la topologie via des variables d'environnement (mêmes valeurs que le
-# Vagrantfile). Ex. pour le mode HA :
+# Adjust the topology through environment variables (same values as the
+# Vagrantfile). For HA mode, for instance:
 #     CONTROL_PLANES=3 WORKERS=2 ./talos/cluster-up.sh
 #
 set -euo pipefail
 
-# --- Topologie : source unique lab.env (partagée avec le Vagrantfile) -------
-# Chargée sans écraser une variable déjà exportée (override CLI prioritaire).
+# --- Topology: single source lab.env (shared with the Vagrantfile) ----------
+# Loaded without overwriting an already exported variable (a CLI override wins).
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# ⚠️ Trois détails NON négociables dans cette boucle, chacun couvrant une panne réelle :
-#   1. `|| [ -n "$key" ]` : sans lui, `read` renvoie faux sur une dernière ligne SANS saut
-#      de ligne final et la clé est PERDUE en silence. Un lab.env édité par un outil qui
-#      ne termine pas le fichier perdrait sa dernière valeur.
-#   2. Le nom de clé est validé AVANT tout `eval` : un lab.env bricolé ne doit pas pouvoir
-#      exécuter du code arbitraire.
-#   3. `eval ": \${$key:=\$val}"` et NON `:=\"$val\"` : avec la valeur entre guillemets
-#      DANS la chaîne évaluée, `LAB_DOMAIN=$(cmd)` fait exécuter `cmd`. En référençant la
-#      variable shell `$val`, la valeur n'est jamais ré-évaluée.
-# Ces trois règles sont celles de kubeadm/cluster-up.sh (dépôt Vagrant-kubeadm) : les deux
-# parseurs doivent rester identiques, sinon le même lab.env se lit différemment d'un lab
-# à l'autre.
+# ⚠️ Three NON-negotiable details in this loop, each covering a real failure:
+#   1. `|| [ -n "$key" ]`: without it, `read` returns false on a last line with NO
+#      trailing newline and the key is silently LOST. A lab.env edited by a tool that
+#      does not terminate the file would lose its last value.
+#   2. The key name is validated BEFORE any `eval`: a hand-mangled lab.env must not be
+#      able to run arbitrary code.
+#   3. `eval ": \${$key:=\$val}"` and NOT `:=\"$val\"`: with the value quoted INSIDE
+#      the evaluated string, `LAB_DOMAIN=$(cmd)` runs `cmd`. Referencing the shell
+#      variable `$val` means the value is never re-evaluated.
+# These three rules are the ones in kubeadm/cluster-up.sh (Vagrant-kubeadm repo): both
+# parsers must stay identical, otherwise the same lab.env reads differently from one lab
+# to the other.
 if [ -f "${REPO_DIR}/lab.env" ]; then
   while IFS='=' read -r key val || [ -n "$key" ]; do
-    case "$key" in ''|\#*) continue ;; esac             # lignes vides et commentaires
+    case "$key" in ''|\#*) continue ;; esac             # blank lines and comments
     case "$key" in [A-Za-z_]*) ;; *) continue ;; esac
     printf '%s' "$key" | grep -qE '^[A-Za-z_][A-Za-z0-9_]*$' || continue
-    val="${val%%#*}"                                    # commentaire de fin de ligne
-    val="$(printf '%s' "$val" | tr -d '[:space:]"'"'")" # espaces et guillemets
-    eval ": \${$key:=\$val}"                            # := : ne pose que si non défini
+    val="${val%%#*}"                                    # trailing comment
+    val="$(printf '%s' "$val" | tr -d '[:space:]"'"'")" # whitespace and quotes
+    eval ": \${$key:=\$val}"                            # := : only set when unset
   done < "${REPO_DIR}/lab.env"
 fi
 
-# --- Paramètres (défauts = filet si lab.env absent) -------------------------
+# --- Parameters (defaults = safety net if lab.env is missing) ---------------
 CONTROL_PLANES="${CONTROL_PLANES:-3}"
 WORKERS="${WORKERS:-3}"
 NETWORK="${NETWORK:-192.168.56}"
@@ -46,85 +46,85 @@ VIP="${VIP:-${NETWORK}.5}"
 CLUSTER_NAME="${CLUSTER_NAME:-talos-lab}"
 INSTALL_DISK="${INSTALL_DISK:-/dev/sda}"
 OUT="${OUT:-_out}"
-# Schéma d'adressage (défini dans lab.env) :
+# Addressing scheme (defined in lab.env):
 #   control plane i -> NETWORK.(CP_IP_START + (i-1)*CP_IP_STEP)  => .10, .20, .30
 #   worker       i  -> NETWORK.(WK_IP_START + (i-1)*WK_IP_STEP)  => .101, .102, ...
 CP_IP_START="${CP_IP_START:-10}"  ; CP_IP_STEP="${CP_IP_STEP:-10}"
 WK_IP_START="${WK_IP_START:-101}" ; WK_IP_STEP="${WK_IP_STEP:-1}"
-# Intention de CNI (cf. lab.env.example) : "cilium" (défaut du dépôt) et "calico"
-# bootstrapent SANS CNI — c'est _k8s/platform-up.sh qui installe ensuite le chart ;
-# "flannel" est le seul posé par Talos lui-même ; "none" ne pose rien du tout.
-# Ce défaut DOIT rester aligné sur lab.env.example et sur _k8s/platform-up.sh :
-# deux défauts divergents installent deux CNI concurrents (réseau pod cassé).
+# CNI intent (see lab.env.example): "cilium" (the repo default) and "calico" bootstrap
+# WITHOUT a CNI — _k8s/platform-up.sh installs the chart afterwards; "flannel" is the
+# only one Talos lays down itself; "none" lays down nothing at all.
+# This default MUST stay aligned with lab.env.example and with _k8s/platform-up.sh:
+# two diverging defaults install two competing CNIs (broken pod network).
 CNI="${CNI:-cilium}"
-# Version Talos = ISO (Vagrant) ET image d'installeur épinglée ci-dessous : sans ce
-# pin, la version INSTALLÉE suivait celle du binaire talosctl (skew avec l'ISO).
+# Talos version = ISO (Vagrant) AND the installer image pinned below: without that
+# pin, the INSTALLED version followed the talosctl binary (skew with the ISO).
 TALOS_VERSION="${TALOS_VERSION:-v1.13.7}"
 INSTALLER_IMAGE="${INSTALLER_IMAGE:-ghcr.io/siderolabs/installer:${TALOS_VERSION}}"
-# Version de Kubernetes — INDÉPENDANTE de la version de Talos (cf. talos/UPGRADE.md §2).
-# Vide (défaut) = celle qu'embarque le binaire talosctl (v1.36.2 pour talosctl v1.13.7) ;
-# renseignée, elle épingle les images du plan de contrôle (kube-apiserver, -scheduler,
-# -controller-manager, kube-proxy) ET celle du kubelet. Le « v » de tête est toléré, pour
-# rester homogène avec TALOS_VERSION.
+# Kubernetes version — INDEPENDENT of the Talos version (see talos/UPGRADE.md §2).
+# Empty (the default) = whatever the talosctl binary ships (v1.36.2 for talosctl
+# v1.13.7); set, it pins the control-plane images (kube-apiserver, -scheduler,
+# -controller-manager, kube-proxy) AND the kubelet image. A leading `v` is tolerated,
+# to stay consistent with TALOS_VERSION.
 KUBERNETES_VERSION="${KUBERNETES_VERSION:-}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-# --- Pré-requis -------------------------------------------------------------
+# --- Prerequisites ----------------------------------------------------------
 for bin in talosctl kubectl; do
-  command -v "$bin" >/dev/null 2>&1 || { echo "ERREUR : '$bin' introuvable dans le PATH." >&2; exit 1; }
+  command -v "$bin" >/dev/null 2>&1 || { echo "ERROR: '$bin' not found in PATH." >&2; exit 1; }
 done
 
-# --- Calcul des IP (CP: .10/.20/.30 ; workers: .101/.102/... — cf. schéma ci-dessus)
+# --- IP computation (CP: .10/.20/.30 ; workers: .101/.102/... — see scheme above)
 cp_ips=() ; worker_ips=()
 for ((i = 1; i <= CONTROL_PLANES; i++)); do cp_ips+=("${NETWORK}.$((CP_IP_START + (i - 1) * CP_IP_STEP))"); done
 for ((i = 1; i <= WORKERS;        i++)); do worker_ips+=("${NETWORK}.$((WK_IP_START + (i - 1) * WK_IP_STEP))"); done
 first_cp="${cp_ips[0]}"
 
-echo "==> Topologie : ${CONTROL_PLANES} control plane(s) [${cp_ips[*]}] + ${WORKERS} worker(s) [${worker_ips[*]:-aucun}]"
-echo "==> VIP API   : https://${VIP}:6443"
+echo "==> Topology  : ${CONTROL_PLANES} control plane(s) [${cp_ips[*]}] + ${WORKERS} worker(s) [${worker_ips[*]:-none}]"
+echo "==> API VIP   : https://${VIP}:6443"
 
-# Attente BORNÉE : libellé, timeout (s), puis la commande à retenter.
-# Une boucle infinie ici est le piège historique du lab : un node déjà installé
-# (mode sécurisé) ne répond JAMAIS à `--insecure`, et le script restait bloqué
-# sans rien dire. On échoue donc, avec un message qui dit quoi regarder.
-attendre() {
-  local libelle="$1" timeout="$2" ; shift 2
-  local fin=$((SECONDS + timeout))
-  printf '    - %s ' "$libelle"
+# BOUNDED wait: label, timeout (s), then the command to retry.
+# An infinite loop here is this lab's historical trap: an already installed node
+# (secure mode) NEVER answers `--insecure`, and the script used to hang forever
+# without saying anything. So we fail, with a message telling you what to look at.
+wait_for() {
+  local label="$1" timeout="$2" ; shift 2
+  local deadline=$((SECONDS + timeout))
+  printf '    - %s ' "$label"
   until "$@" >/dev/null 2>&1; do
-    if [ "$SECONDS" -ge "$fin" ]; then printf ' ÉCHEC (%ss)\n' "$timeout" ; return 1 ; fi
+    if [ "$SECONDS" -ge "$deadline" ]; then printf ' FAILED (%ss)\n' "$timeout" ; return 1 ; fi
     printf '.' ; sleep 5
   done
   echo ' OK'
 }
 
-WAIT_MAINTENANCE="${WAIT_MAINTENANCE:-300}"   # boot de la VM + mode maintenance
-WAIT_SECURE="${WAIT_SECURE:-600}"             # install sur disque + reboot en mode sécurisé
+WAIT_MAINTENANCE="${WAIT_MAINTENANCE:-300}"   # VM boot + maintenance mode
+WAIT_SECURE="${WAIT_SECURE:-600}"             # disk install + reboot into secure mode
 
 wait_maintenance() {
   local ip="$1"
-  attendre "attente du mode maintenance sur $ip" "$WAIT_MAINTENANCE" \
+  wait_for "waiting for maintenance mode on $ip" "$WAIT_MAINTENANCE" \
     talosctl -n "$ip" get disks --insecure && return 0
   cat >&2 <<EOF
-ERREUR : ${ip} ne répond pas en mode maintenance après ${WAIT_MAINTENANCE}s.
-  Les deux causes, par fréquence :
-    1. le node est DÉJÀ installé (mode sécurisé) : il ne répondra jamais à
-       --insecure. Ne relance pas cluster-up.sh sur un cluster en route — pour
-       l'agrandir, cf. README §6.1.
-    2. la VM n'est pas démarrée, ou n'a pas pris son IP host-only (cf. README §7) :
+ERROR: ${ip} does not answer in maintenance mode after ${WAIT_MAINTENANCE}s.
+  The two causes, by frequency:
+    1. the node is ALREADY installed (secure mode): it will never answer
+       --insecure. Do not re-run cluster-up.sh against a running cluster — to
+       grow it, see README §6.1.
+    2. the VM is not started, or did not take its host-only IP (see README §7):
        vagrant status ; talosctl -n ${ip} get disks --insecure
-  Node lent plutôt que bloqué ? WAIT_MAINTENANCE=600 ./talos/cluster-up.sh
+  Slow node rather than a stuck one? WAIT_MAINTENANCE=600 ./talos/cluster-up.sh
 EOF
   exit 1
 }
 
-# Applique une config en fixant un hostname DÉTERMINISTE passé en argument
-# (talos-cp1/cp2/... pour les control planes, talos-w1/w2/... pour les workers)
-# au lieu du nom auto-généré par Talos (talos-xxxxx). Depuis Talos 1.13 le hostname
-# vit dans un document `HostnameConfig` distinct : on désactive la génération auto
-# (`auto: "off"`) et on pose le nom fixe (les deux sont exclusifs).
+# Applies a config while setting a DETERMINISTIC hostname passed as an argument
+# (talos-cp1/cp2/... for the control planes, talos-w1/w2/... for the workers)
+# instead of the name Talos auto-generates (talos-xxxxx). Since Talos 1.13 the hostname
+# lives in a separate `HostnameConfig` document: we disable auto-generation
+# (`auto: "off"`) and set the fixed name (the two are mutually exclusive).
 apply_config() {
   local ip="$1" file="$2" hostname="$3"
   printf '    - %s -> hostname %s\n' "$ip" "$hostname"
@@ -132,25 +132,26 @@ apply_config() {
     --config-patch "$(printf 'apiVersion: v1alpha1\nkind: HostnameConfig\nauto: "off"\nhostname: %s\n' "$hostname")"
 }
 
-# --- 1. Génération de la configuration --------------------------------------
-# ATTENTION : `talosctl gen config` génère de NOUVEAUX secrets/CA à chaque fois.
-# Régénérer par-dessus un cluster déjà bootstrapé le casse. On régénère donc
-# seulement si la config est absente, ou explicitement via FORCE=1 (typiquement
-# après un `vagrant destroy`). Sinon on réutilise la config existante.
+# --- 1. Configuration generation --------------------------------------------
+# CAREFUL: `talosctl gen config` generates NEW secrets/CAs every time.
+# Regenerating over an already bootstrapped cluster breaks it. So we only
+# regenerate when the config is missing, or explicitly through FORCE=1 (typically
+# after a `vagrant destroy`). Otherwise we reuse the existing config.
 if [ "${FORCE:-0}" = "1" ] || [ ! -f "${OUT}/controlplane.yaml" ]; then
-  echo "==> [1/5] Génération de la config Talos (${OUT}/) — CNI=${CNI}, Kubernetes=${KUBERNETES_VERSION:-défaut talosctl}"
-  [ -f "talos/cni-${CNI}.yaml" ] || { echo "ERREUR : CNI '${CNI}' inconnu (talos/cni-${CNI}.yaml absent)." >&2; exit 1; }
+  echo "==> [1/5] Generating the Talos config (${OUT}/) — CNI=${CNI}, Kubernetes=${KUBERNETES_VERSION:-talosctl default}"
+  [ -f "talos/cni-${CNI}.yaml" ] || { echo "ERROR: unknown CNI '${CNI}' (talos/cni-${CNI}.yaml missing)." >&2; exit 1; }
   sans="${VIP}"
   for ip in "${cp_ips[@]}"; do sans="${sans},${ip}"; done
-  # Drapeau ajouté SEULEMENT si la version est demandée, et ce n'est PAS cosmétique :
-  # `--kubernetes-version ""` ne renvoie aucune erreur, mais génère une config où les
-  # champs `image:` du plan de contrôle et du kubelet sont COMMENTÉS — donc aucune image
-  # épinglée. Drapeau absent = défaut de talosctl, explicitement épinglé (v1.36.2 en 1.13.7).
+  # The flag is added ONLY when the version is requested, and that is NOT cosmetic:
+  # `--kubernetes-version ""` returns no error, but generates a config where the
+  # `image:` fields of the control plane and of the kubelet are COMMENTED OUT — so no
+  # image is pinned. No flag = talosctl's default, explicitly pinned (v1.36.2 on 1.13.7).
   k8s_args=()
   if [ -n "$KUBERNETES_VERSION" ]; then
     k8s_args+=(--kubernetes-version "${KUBERNETES_VERSION#v}")
   fi
-  # Le CNI est piloté par le patch talos/cni-${CNI}.yaml (flannel = défaut ; none = Cilium & co).
+  # The CNI is driven by the talos/cni-${CNI}.yaml patch (flannel = laid down by Talos;
+  # none = Cilium & co).
   talosctl gen config "${CLUSTER_NAME}" "https://${VIP}:6443" \
     --install-disk "${INSTALL_DISK}" \
     --install-image "${INSTALLER_IMAGE}" \
@@ -161,16 +162,16 @@ if [ "${FORCE:-0}" = "1" ] || [ ! -f "${OUT}/controlplane.yaml" ]; then
     --config-patch-control-plane "@talos/cni-${CNI}.yaml" \
     --output-dir "${OUT}" --force
 else
-  echo "==> [1/5] Config existante réutilisée (${OUT}/)."
-  echo "    /!\\ Un changement de CONTROL_PLANES/WORKERS/VIP/INSTALL_DISK/KUBERNETES_VERSION/patches n'est PAS"
-  echo "        pris en compte ici. Pour repartir propre :"
-  echo "        vagrant destroy -f && rm -rf ${OUT} kubeconfig   (puis relancer)"
-  echo "        ou : FORCE=1 ./talos/cluster-up.sh   (régénère, nouveaux secrets)"
+  echo "==> [1/5] Existing config reused (${OUT}/)."
+  echo "    /!\\ A change to CONTROL_PLANES/WORKERS/VIP/INSTALL_DISK/KUBERNETES_VERSION/patches is NOT"
+  echo "        taken into account here. To start clean:"
+  echo "        vagrant destroy -f && rm -rf ${OUT} kubeconfig   (then run again)"
+  echo "        or: FORCE=1 ./talos/cluster-up.sh   (regenerates, new secrets)"
 fi
 export TALOSCONFIG="${ROOT_DIR}/${OUT}/talosconfig"
 
-# --- 2. Application de la config (mode maintenance, --insecure) --------------
-echo "==> [2/5] Application de la config aux control planes"
+# --- 2. Applying the config (maintenance mode, --insecure) ------------------
+echo "==> [2/5] Applying the config to the control planes"
 n=0
 for ip in "${cp_ips[@]}"; do
   n=$((n + 1))
@@ -179,7 +180,7 @@ for ip in "${cp_ips[@]}"; do
 done
 
 if [ "${WORKERS}" -gt 0 ]; then
-  echo "==> [2/5] Application de la config aux workers"
+  echo "==> [2/5] Applying the config to the workers"
   n=0
   for ip in "${worker_ips[@]}"; do
     n=$((n + 1))
@@ -188,58 +189,58 @@ if [ "${WORKERS}" -gt 0 ]; then
   done
 fi
 
-# --- 3. Endpoints / node par défaut -----------------------------------------
-echo "==> [3/5] Configuration des endpoints talosctl"
+# --- 3. Endpoints / default node --------------------------------------------
+echo "==> [3/5] Configuring the talosctl endpoints"
 talosctl config endpoint "${cp_ips[@]}"
 talosctl config node "${first_cp}"
 
-# --- 4. Bootstrap etcd (UNE seule fois, sur le 1er control plane) -----------
-echo "==> [4/5] Bootstrap etcd sur ${first_cp} (peut prendre 1-2 min)"
-attendre "attente du retour de ${first_cp} en mode sécurisé" "$WAIT_SECURE" \
+# --- 4. etcd bootstrap (ONCE only, on the 1st control plane) ----------------
+echo "==> [4/5] Bootstrapping etcd on ${first_cp} (can take 1-2 min)"
+wait_for "waiting for ${first_cp} to come back in secure mode" "$WAIT_SECURE" \
   talosctl -n "${first_cp}" version || {
   cat >&2 <<EOF
-ERREUR : ${first_cp} n'est pas revenu en mode sécurisé après ${WAIT_SECURE}s.
-  Le node installe Talos sur disque puis reboote : c'est l'étape la plus longue.
-  À regarder : la console de la VM (VirtualBox) pour une erreur d'installation,
-  et le disque attaché (cf. le piège de la sentinelle .vdi dans CLAUDE.md).
-  Node lent plutôt que bloqué ? WAIT_SECURE=1200 ./talos/cluster-up.sh
+ERROR: ${first_cp} did not come back in secure mode after ${WAIT_SECURE}s.
+  The node installs Talos on disk then reboots: this is the longest step.
+  What to look at: the VM console (VirtualBox) for an install error, and the
+  attached disk (see the .vdi sentinel trap in CLAUDE.md).
+  Slow node rather than a stuck one? WAIT_SECURE=1200 ./talos/cluster-up.sh
 EOF
   exit 1
 }
 
-# `talosctl version` peut répondre (apid up) AVANT qu'etcd soit prêt à être
-# bootstrapé : Talos renvoie alors "bootstrap is not available yet"
-# (FailedPrecondition) le temps qu'etcd finisse son pre-state. On retente donc
-# jusqu'à ce que ça passe (ou que ce soit déjà bootstrapé), au lieu d'échouer.
+# `talosctl version` can answer (apid up) BEFORE etcd is ready to be bootstrapped:
+# Talos then returns "bootstrap is not available yet" (FailedPrecondition) while etcd
+# finishes its pre state. So we retry until it goes through (or until it is already
+# bootstrapped), instead of failing.
 bootstrapped=0
 for _ in $(seq 1 30); do
   if err="$(talosctl bootstrap -n "${first_cp}" 2>&1)"; then
     bootstrapped=1 ; break
   fi
   if echo "$err" | grep -qiE "already|AlreadyExists"; then
-    echo "    - etcd déjà bootstrapé, on continue" ; bootstrapped=1 ; break
+    echo "    - etcd already bootstrapped, moving on" ; bootstrapped=1 ; break
   fi
   if echo "$err" | grep -qiE "not available yet|FailedPrecondition|Unavailable|connection refused"; then
-    printf '    - etcd pas encore prêt, nouvelle tentative...\n' ; sleep 5 ; continue
+    printf '    - etcd not ready yet, retrying...\n' ; sleep 5 ; continue
   fi
-  echo "$err" >&2 ; exit 1   # erreur non transitoire => on s'arrête
+  echo "$err" >&2 ; exit 1   # non-transient error => we stop
 done
-[ "$bootstrapped" = 1 ] || { echo "ERREUR : bootstrap etcd échoué après plusieurs tentatives." >&2 ; exit 1 ; }
+[ "$bootstrapped" = 1 ] || { echo "ERROR: etcd bootstrap failed after several attempts." >&2 ; exit 1 ; }
 
-# --- 5. Kubeconfig + santé --------------------------------------------------
-echo "==> [5/5] Récupération du kubeconfig"
+# --- 5. Kubeconfig + health -------------------------------------------------
+echo "==> [5/5] Fetching the kubeconfig"
 talosctl kubeconfig -n "${first_cp}" "${ROOT_DIR}/kubeconfig" --force
 export KUBECONFIG="${ROOT_DIR}/kubeconfig"
 
-echo "==> Attente de la santé du cluster..."
-# -e = endpoint de l'API Talos : on cible une IP de node RÉELLE, pas la VIP
-# (la VIP est réservée à kube-apiserver, cf. doc Talos sur la VIP).
+echo "==> Waiting for cluster health..."
+# -e = the Talos API endpoint: we target a REAL node IP, not the VIP
+# (the VIP is reserved for kube-apiserver, see the Talos docs on the VIP).
 talosctl health --wait-timeout 10m -n "${first_cp}" -e "${first_cp}" || \
-  echo "    (health a expiré ou échoué — vérifier avec 'talosctl dmesg' / 'kubectl get nodes')"
+  echo "    (health timed out or failed — check with 'talosctl dmesg' / 'kubectl get nodes')"
 
 echo
 echo "================================================================"
-echo " Cluster prêt."
+echo " Cluster ready."
 echo "   export TALOSCONFIG=${ROOT_DIR}/${OUT}/talosconfig"
 echo "   export KUBECONFIG=${ROOT_DIR}/kubeconfig"
 echo "   kubectl get nodes -o wide"

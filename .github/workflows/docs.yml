@@ -1,11 +1,11 @@
-# Publie la documentation du lab sur GitHub Pages.
+# Publishes the lab documentation to GitHub Pages.
 #
-# La page est construite par docs/build.py (markdown-it-py + Pygments, dépendances
-# déclarées en PEP 723 → installées par uv). L'artefact n'est PAS versionné : il est
-# régénéré à chaque push sur main, ce qui évite un diff de ~500 Ko par changement de doc.
+# The page is built by docs/build.py (markdown-it-py + Pygments, dependencies declared
+# in PEP 723 → installed by uv). The artifact is NOT versioned: it is regenerated on
+# every push to main, which avoids a ~500 KB diff for every documentation change.
 #
-# Prérequis côté dépôt, à faire UNE FOIS : Settings → Pages → Source = « GitHub Actions ».
-# URL publiée : https://<owner>.github.io/<repo>/
+# Repository prerequisite, to do ONCE: Settings → Pages → Source = "GitHub Actions".
+# Published URL: https://<owner>.github.io/<repo>/
 name: docs
 
 on:
@@ -17,13 +17,13 @@ on:
       - .github/workflows/docs.yml
   workflow_dispatch: {}
 
-# Droits minimaux : lecture du code, écriture Pages, et l'OIDC exigé par deploy-pages.
+# Minimal rights: read the code, write Pages, and the OIDC that deploy-pages requires.
 permissions:
   contents: read
   pages: write
   id-token: write
 
-# Un seul déploiement à la fois, sans annuler celui en cours (Pages n'aime pas).
+# One deployment at a time, without cancelling the running one (Pages dislikes that).
 concurrency:
   group: pages
   cancel-in-progress: false
@@ -34,24 +34,24 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # astral-sh/setup-uv ne publie plus de tag majeur flottant au-delà de v7 :
-      # on épingle la version exacte (un `@v9` n'existe pas et fait échouer le job).
-      - name: Installer uv
+      # astral-sh/setup-uv no longer publishes a floating major tag beyond v7:
+      # we pin the exact version (a `@v9` does not exist and fails the job).
+      - name: Install uv
         uses: astral-sh/setup-uv@v9.0.0
         with:
           enable-cache: true
 
-      # build.py interroge git (ls-files, check-ignore, log -1) : le checkout suffit.
-      - name: Générer la page
+      # build.py queries git (ls-files, check-ignore, log -1): the checkout is enough.
+      - name: Generate the page
         run: uv run docs/build.py --out _site/index.html
 
-      # Garde-fou : aucun secret ne doit se retrouver dans la page publiée.
-      - name: Vérifier l'absence de secrets
+      # Safety rail: no secret may end up in the published page.
+      - name: Check for the absence of secrets
         run: |
           if grep -qE 'hvs\.[A-Za-z0-9]{15,}|cfat_[A-Za-z0-9]{15,}|-----BEGIN [A-Z ]*PRIVATE KEY' _site/index.html; then
-            echo "::error::Un motif de secret a été détecté dans la page générée." && exit 1
+            echo "::error::A secret pattern was detected in the generated page." && exit 1
           fi
-          echo "✅ aucun motif de secret détecté"
+          echo "✅ no secret pattern detected"
 
       - uses: actions/upload-pages-artifact@v5
         with:
@@ -62,7 +62,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: github-pages
-      url: ${{ steps.deploiement.outputs.page_url }}
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - id: deploiement
+      - id: deployment
         uses: actions/deploy-pages@v5

@@ -89,8 +89,8 @@ DRY_RUN=1 ./talos/virtualbox-cleanup.sh   # montre ce qui serait supprimé
 
 > 💡 Un `destroy` qui rapporte un **succès** peut tout de même laisser ces dossiers derrière lui,
 > chacun contenant un petit snapshot `.vmdk`. Lance donc la purge après **chaque** `destroy`, pas
-> seulement après un échec visible. En dry-run les dossiers apparaissent « CONSERVÉ (contient des
-> fichiers) » : c'est normal, le vrai passage supprime d'abord le `.vmdk` puis les trouve vides.
+> seulement après un échec visible. En dry-run les dossiers apparaissent en `KEPT (holds files)` :
+> c'est normal, le vrai passage supprime d'abord le `.vmdk` puis les trouve vides.
 
 ### `vagrant up` échoue sur `storagectl ... --remove SAS`
 

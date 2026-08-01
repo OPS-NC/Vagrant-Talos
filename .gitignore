@@ -1,15 +1,15 @@
 .vagrant
 harbor.txt
 
-# Topologie locale : partir de lab.env.example (cp lab.env.example lab.env)
+# Local topology: start from lab.env.example (cp lab.env.example lab.env)
 /lab.env
 
-# Projet Terraform Proxmox : lab local, non versionné (state, secrets, images, tfvars)
+# Proxmox Terraform project: local lab, not versioned (state, secrets, images, tfvars)
 /proxmox
 
-# Addon databasement : local uniquement. values.yaml porte une clé applicative
-# Laravel (appKey) en clair — le dossier n'était que « untracked », donc un
-# `git add -A` l'aurait commitée.
+# databasement addon: local only. Its values.yaml carries a Laravel application
+# key (appKey) in the clear — the directory was merely "untracked", so a
+# `git add -A` would have committed it.
 
 # Talos
 iso/
@@ -17,7 +17,7 @@ _out/
 kubeconfig
 talosconfig
 
-# Documentation générée : reconstruite par `make docs` en local et par la GitHub
-# Action à chaque push sur main (~500 Ko, inutile de la versionner).
+# Generated documentation: rebuilt by `make docs` locally and by the GitHub
+# Action on every push to main (~500 KB, no point versioning it).
 /docs/index.html
 /_site/

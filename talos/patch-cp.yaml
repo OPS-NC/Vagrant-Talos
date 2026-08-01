@@ -1,13 +1,13 @@
-# Patch appliqué UNIQUEMENT aux control planes.
+# Patch applied to the control planes ONLY.
 #
-# - Pose la VIP (Virtual IP) de l'API Kubernetes sur la carte host-only.
-#   La VIP flotte entre les control planes (élection via etcd) : c'est elle
-#   qui sert d'endpoint stable https://192.168.56.5:6443, aussi bien en
-#   single (1 CP) qu'en HA (3 CP).
-# - On cible la carte par busPath et PAS par nom : depuis Talos 1.5 les
-#   interfaces ont des noms "prédictibles" (la host-only n'est donc PAS "eth1"
-#   mais "enp0s8"). busPath "0000:00:08.0" = 2e carte VirtualBox (host-only),
-#   indépendamment du nom. Vérifier au besoin : talosctl -n <ip> get links
+# - Sets the Kubernetes API VIP (Virtual IP) on the host-only NIC.
+#   The VIP floats between the control planes (election through etcd): it is what
+#   serves as the stable endpoint https://192.168.56.5:6443, in single (1 CP) as
+#   well as in HA (3 CP).
+# - We target the NIC by busPath and NOT by name: since Talos 1.5 interfaces get
+#   "predictable" names (so the host-only one is NOT "eth1" but "enp0s8").
+#   busPath "0000:00:08.0" = 2nd VirtualBox NIC (host-only), whatever the name.
+#   Check it if needed: talosctl -n <ip> get links
 machine:
   network:
     interfaces:
@@ -18,11 +18,11 @@ machine:
           ip: 192.168.56.5
 
 cluster:
-  # etcd s'annonce et écoute sur le réseau host-only (et pas sur l'IP NAT).
+  # etcd advertises and listens on the host-only network (not on the NAT IP).
   etcd:
     advertisedSubnets:
       - 192.168.56.0/24
 
-# NB : le choix du CNI n'est PAS ici — il est piloté par un patch dédié
-# (talos/cni-flannel.yaml par défaut, talos/cni-none.yaml pour Cilium & co),
-# sélectionné par la variable CNI de cluster-up.sh. Voir README §9.
+# NB: the CNI choice is NOT here — it is driven by a dedicated patch
+# (talos/cni-flannel.yaml by default, talos/cni-none.yaml for Cilium & co),
+# selected by the CNI variable of cluster-up.sh. See README §9.

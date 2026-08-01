@@ -1,22 +1,22 @@
-# CNI = Cilium (choix recommandé du lab, `CNI=cilium` dans lab.env).
+# CNI = Cilium (the lab's recommended choice, `CNI=cilium` in lab.env).
 #
-# Talos n'installe AUCUN CNI au bootstrap : c'est `./_k8s/platform-up.sh` qui pose
-# Cilium juste après, avec le chart épinglé et le pool d'IP LoadBalancer L2
-# (cf. _k8s/cilium/README.md).
+# Talos installs NO CNI at bootstrap: `./_k8s/platform-up.sh` lays Cilium down right
+# after, with the pinned chart and the L2 LoadBalancer IP pool
+# (see _k8s/cilium/README.md).
 #
-# Pourquoi ce fichier existe alors qu'il dit la même chose que cni-none.yaml :
-# la variable CNI exprime une INTENTION, pas le champ Talos. `cni-none.yaml` veut
-# dire « je poserai mon CNI moi-même, le lab ne s'en occupe pas » ; `cni-cilium.yaml`
-# veut dire « le lab posera Cilium ». Le dispatch se fait dans platform-up.sh.
+# Why this file exists even though it says the same thing as cni-none.yaml:
+# the CNI variable expresses an INTENT, not the Talos field. `cni-none.yaml` means
+# "I will lay down my own CNI, the lab stays out of it"; `cni-cilium.yaml` means
+# "the lab will lay down Cilium". The dispatch happens in platform-up.sh.
 #
-# Conséquence normale : entre le bootstrap et l'installation de Cilium, les nodes
-# restent `NotReady` et CoreDNS `Pending`. Ce n'est pas une erreur.
+# Normal consequence: between the bootstrap and the Cilium install, the nodes stay
+# `NotReady` and CoreDNS `Pending`. That is not an error.
 cluster:
   network:
     cni:
       name: none
-  # Cilium est installé ici avec kubeProxyReplacement=false : on GARDE le kube-proxy
-  # de Talos. Pour déléguer le service routing à Cilium, décommenter ci-dessous ET
-  # installer Cilium avec kubeProxyReplacement=true + k8sServiceHost/<VIP> :6443.
+  # Cilium is installed here with kubeProxyReplacement=false: we KEEP Talos's
+  # kube-proxy. To delegate service routing to Cilium, uncomment below AND install
+  # Cilium with kubeProxyReplacement=true + k8sServiceHost/<VIP>:6443.
   # proxy:
   #   disabled: true

@@ -1,20 +1,20 @@
-# CNI = Calico (`CNI=calico` dans lab.env).
+# CNI = Calico (`CNI=calico` in lab.env).
 #
-# Talos n'installe AUCUN CNI au bootstrap : c'est `./_k8s/platform-up.sh` qui pose
-# Calico juste après, via l'opérateur Tigera (cf. _k8s/calico/README.md).
+# Talos installs NO CNI at bootstrap: `./_k8s/platform-up.sh` lays Calico down right
+# after, through the Tigera operator (see _k8s/calico/README.md).
 #
-# ⚠️ Calico assure le CNI (réseau pod, routage, NetworkPolicy) mais n'annonce PAS
-# les IP de Service LoadBalancer : il ne sait le faire qu'en BGP, ce qui demande un
-# routeur pair — absent d'un réseau host-only VirtualBox. Sans annonceur L2
-# supplémentaire (MetalLB), le Service du Gateway Envoy reste en
-# `EXTERNAL-IP <pending>` et aucune UI du lab n'est joignable.
-# Voir _k8s/calico/README.md pour la marche à suivre.
+# ⚠️ Calico provides the CNI (pod network, routing, NetworkPolicy) but does NOT
+# advertise LoadBalancer Service IPs: it can only do so over BGP, which requires a
+# peer router — absent from a VirtualBox host-only network. Without an extra L2
+# announcer (MetalLB), the Envoy Gateway Service stays at
+# `EXTERNAL-IP <pending>` and no lab UI is reachable.
+# See _k8s/calico/README.md for the procedure.
 #
-# L'`IPPool` Calico doit couvrir le même CIDR que `cluster.network.podSubnets`
-# (défaut Talos : 10.244.0.0/16) — c'est posé dans _k8s/calico/installation.yaml.
+# The Calico `IPPool` must cover the same CIDR as `cluster.network.podSubnets`
+# (Talos default: 10.244.0.0/16) — that is set in _k8s/calico/installation.yaml.
 #
-# Conséquence normale : entre le bootstrap et l'installation de Calico, les nodes
-# restent `NotReady`. Ce n'est pas une erreur.
+# Normal consequence: between the bootstrap and the Calico install, the nodes stay
+# `NotReady`. That is not an error.
 cluster:
   network:
     cni:
