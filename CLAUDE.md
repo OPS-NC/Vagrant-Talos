@@ -150,6 +150,20 @@ that is the guard to run after renaming a heading or adding a page.
 - **Disk sentinel**: the `Vagrantfile` considers a VM provisioned if
   `.vagrant/talos-disks/<vm>.vdi` exists. A `destroy` that fails and leaves the `.vdi` behind
   makes the next `up` create a VM **with no disk attached**, with an obscure install error.
+- **kube-proxy**: `KUBE_PROXY_REPLACEMENT=true` is the **default**, and it is read in the same
+  two places as `CNI`. `cluster-up.sh` adds `talos/patch-no-kube-proxy.yaml`
+  (`cluster.proxy.disabled: true`) to the generated config, so the bootstrap renders **no
+  kube-proxy manifest**, and k8s-playground's `cilium-up.sh` installs Cilium with
+  `kubeProxyReplacement=true` + `k8sServiceHost=<VIP>:6443` (mandatory: nothing provisions the
+  apiserver ClusterIP any more). This aligns the lab with the kubeadm sibling, where the
+  equivalent is `kubeadm init --skip-phases=addon/kube-proxy`. Three traps:
+  (1) it **requires `CNI=cilium`** — `cluster-up.sh` AND `make validate-talos` refuse any other
+  pair, because without kube-proxy and without a replacement no ClusterIP answers at all,
+  CoreDNS included; (2) like `CNI` it is read **only at generation time**, and it is not a live
+  toggle — destroy, then rebuild; (3) it is a **control-plane** patch: `cluster.proxy` is not
+  part of a worker machine config. On Talos there is no `_out/cluster.env` to turn it into a
+  detected fact, so `lab.env` and the real cluster can silently disagree — the ground truth is
+  `kubectl -n kube-system get ds kube-proxy`.
 - **CNI**: `CNI=cilium|calico|flannel|none` (default `cilium`) expresses an **intent**, read in
   two places — `cluster-up.sh` applies `talos/cni-<CNI>.yaml`, then
   `./_k8s/platform-up.sh` installs the CNI unless Talos already did. Note the two

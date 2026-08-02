@@ -150,6 +150,7 @@ cp lab.env.example lab.env
 | `CP_MEM` / `CP_CPU` | `4096` / `2` | ressources des control planes (**jamais sous `3072`** : etcd) |
 | `WK_MEM` / `WK_CPU` | `2048` / `2` | ressources des workers |
 | `CNI` | `cilium` | `cilium`, `calico`, `flannel` ou `none` (cf. §9) |
+| `KUBE_PROXY_REPLACEMENT` | `true` | remplacement eBPF de kube-proxy par Cilium — **exige `CNI=cilium`** (cf. §9) |
 | `LAB_DOMAIN` | `talos.lab.example.io` | domaine des UI (`*.<domaine>` : wildcard TLS + `HTTPRoute`) |
 | `SELF_SIGNED` | `true` | mode TLS : `true` = wildcard signé par une AC locale (`openssl`, sans domaine ni token), `false` = cert-manager + Let's Encrypt |
 | `LAB_DNS_ZONE` | *(vide → 2 derniers labels)* | zone DNS du solveur ACME DNS-01 |
@@ -170,7 +171,9 @@ Variables lues par `cluster-up.sh` mais absentes du modèle (toutes ont un défa
 > tu perds l'image d'installeur Image Factory (extensions iscsi), donc Longhorn. Garde la
 > valeur de `CNI` dans `lab.env` cohérente avec ce que tu veux vraiment : `cluster-up.sh`
 > décide de ce que pose Talos, `platform-up.sh` de ce qu'installe Helm ensuite, et
-> deux valeurs divergentes donnent deux CNI concurrents — réseau pod cassé.
+> deux valeurs divergentes donnent deux CNI concurrents — réseau pod cassé. Même chose pour
+> `KUBE_PROXY_REPLACEMENT` (défaut `true` des deux côtés) : elle décide au bootstrap si le
+> cluster a un kube-proxy du tout, et `platform-up.sh` doit installer Cilium en conséquence.
 
 > ☸️ **`KUBERNETES_VERSION` : la version de Kubernetes ne suit pas celle de Talos.** Laissée
 > vide (le défaut du modèle), le cluster tourne dans la version qu'embarque le binaire
@@ -291,6 +294,7 @@ talosctl gen config talos-lab https://192.168.56.5:6443 \
   --config-patch               @talos/patch-all.yaml \
   --config-patch-control-plane @talos/patch-cp.yaml \
   --config-patch-control-plane "@talos/cni-${CNI:-cilium}.yaml" \
+  --config-patch-control-plane @talos/patch-no-kube-proxy.yaml \
   --output-dir _out
 
 export TALOSCONFIG="$PWD/_out/talosconfig"
@@ -313,6 +317,13 @@ kube-apiserver est la **VIP** `192.168.56.5`, en single comme en HA.
 > `cni-cilium.yaml` (le défaut), `cni-calico.yaml`, `cni-flannel.yaml`, `cni-none.yaml` — d'où
 > le `${CNI}` ci-dessus, lu dans `lab.env` comme le fait `cluster-up.sh`. Omettre ce patch
 > laisse le CNI par défaut de Talos, sans le correctif VXLAN host-only (cf. §9).
+
+> ⚠️ **`patch-no-kube-proxy.yaml` est conditionnel.** `cluster-up.sh` ne l'ajoute que si
+> `KUBE_PROXY_REPLACEMENT=true` — le défaut de `lab.env`. Il pose `cluster.proxy.disabled: true`,
+> donc le bootstrap ne rend **aucun manifeste kube-proxy** et Cilium sert les Services en eBPF.
+> Retire la ligne ci-dessus si tu passes `KUBE_PROXY_REPLACEMENT=false`, et ne la garde **jamais**
+> avec `CNI=calico|flannel|none` : plus rien ne remplacerait kube-proxy et aucune ClusterIP ne
+> répondrait, CoreDNS compris (cf. §9).
 
 > ℹ️ La VIP sert **uniquement** à kube-apiserver (`:6443`). Pour l'**API Talos**
 > (`-e/--endpoints`, `:50000`) on cible toujours des IP de nodes **réelles** (ex.
@@ -625,7 +636,11 @@ Les problèmes propres à un addon sont documentés avec les addons eux-mêmes, 
   node (`auto: "off"` + `hostname:` fixe) au lieu du nom auto-généré (`talos-xxxxx`). Les VMs
   VirtualBox portent le **même** nom.
 - **VIP / HA** → `talos/patch-cp.yaml` pose une VIP partagée entre control planes (élection
-  via etcd) : l'endpoint kube-apiserver reste stable même si un CP tombe.
+  via etcd) : l'endpoint kube-apiserver reste stable même si un CP tombe. C'est aussi l'adresse
+  vers laquelle pointe Cilium (`k8sServiceHost`) une fois kube-proxy retiré.
+- **Pas de kube-proxy** → `talos/patch-no-kube-proxy.yaml` (ajouté quand
+  `KUBE_PROXY_REPLACEMENT=true`, le défaut) pose `cluster.proxy.disabled: true` : le bootstrap ne
+  rend aucun manifeste kube-proxy et Cilium sert les Services en eBPF (cf. §9).
 - **Discovery online** → `talos/patch-all.yaml` active le service `discovery.talos.dev` et
   **désactive** le registre `kubernetes`, déprécié et incompatible avec Kubernetes ≥ 1.32.
 - **Route par défaut via le NAT** → volontaire (accès Internet). Ce qui doit être host-only,
@@ -668,7 +683,7 @@ CNI=calico ./talos/cluster-up.sh && ./_k8s/platform-up.sh
 | Réseau pod + NetworkPolicy | ✅ | ✅ | ⚠️ pas de NetworkPolicy |
 | Services `LoadBalancer` | ✅ annonce L2 | ❌ MetalLB requis | ❌ |
 | Couche `_k8s/` (Envoy, UI HTTPS) | ✅ | ⚠️ après MetalLB | ❌ inutilisable |
-| Remplacement de kube-proxy | ✅ possible | ❌ | ❌ |
+| Remplacement de kube-proxy | ✅ **actif par défaut** (`KUBE_PROXY_REPLACEMENT=true`) | ❌ | ❌ |
 | Observabilité réseau | Hubble | — | — |
 
 **En pratique : garde `cilium`.** C'est le seul choix qui rend le lab utilisable de bout en
@@ -679,6 +694,48 @@ L'installation de Cilium (chart épinglé `1.19.6`, pool L2, `--set devices=enp0
 documentée et scriptée dans
 **[`cilium/` de k8s-playground](https://github.com/OPS-NC/k8s-playground/blob/main/cilium/LISEZ-MOI.md)**
 — c'est la source de vérité, `platform-up.sh` l'appelle pour toi.
+
+### kube-proxy : remplacé par Cilium en eBPF (le défaut)
+
+`KUBE_PROXY_REPLACEMENT` (dans `lab.env`, défaut **`true`**) est lue aux deux mêmes endroits que
+`CNI`, et ce lab se comporte désormais exactement comme le
+[lab kubeadm jumeau](https://github.com/OPS-NC/Vagrant-kubeadm) :
+
+1. **`talos/cluster-up.sh`** ajoute `talos/patch-no-kube-proxy.yaml` à la config machine générée
+   — `cluster.proxy.disabled: true`, donc le bootstrap Talos ne rend **aucun manifeste
+   kube-proxy** ;
+2. **`./_k8s/platform-up.sh`** installe Cilium avec `kubeProxyReplacement=true` et
+   `k8sServiceHost=<VIP> k8sServicePort=6443` (obligatoire : sans kube-proxy plus rien ne
+   provisionne la ClusterIP de l'apiserver, l'agent ne pourrait pas s'amorcer via
+   `kubernetes.default`).
+
+| `KUBE_PROXY_REPLACEMENT=` | Bootstrap Talos | Services servis par |
+|---|---|---|
+| **`true`** *(défaut)* | `cluster.proxy.disabled: true` — aucun DaemonSet kube-proxy | Cilium, en eBPF |
+| `false` | Talos pose kube-proxy comme d'habitude | kube-proxy (iptables), Cilium par-dessus |
+
+```bash
+kubectl -n kube-system get ds kube-proxy      # NotFound avec le défaut : c'est normal
+kubectl -n kube-system exec ds/cilium -c cilium-agent -- cilium-dbg status --verbose \
+  | grep KubeProxyReplacement                 # doit afficher True
+```
+
+> ⚠️ **`KUBE_PROXY_REPLACEMENT=true` exige `CNI=cilium`**, et `cluster-up.sh` refuse de démarrer
+> sur toute autre combinaison — `make validate-talos` aussi. Rien d'autre dans ce lab ne remplace
+> kube-proxy : sans lui ET sans remplaçant, **plus aucune ClusterIP ne répond**, CoreDNS compris.
+> Avec `CNI=calico|flannel|none`, il faut poser `KUBE_PROXY_REPLACEMENT=false`.
+
+> ⚠️ **Ça se décide au bootstrap, ce n'est pas un interrupteur à chaud.** Comme `CNI`, la valeur
+> n'est lue qu'à la **génération** de la config : la changer sur un `_out/` existant ne fait rien,
+> et la changer sur un cluster qui tourne n'est pas supporté. `vagrant destroy -f`, puis
+> reconstruction.
+
+> ℹ️ **Pourquoi la VIP et pas KubePrism.** La page Talos de Cilium suggère
+> `k8sServiceHost=localhost k8sServicePort=7445` (KubePrism, activé par défaut dans la config
+> générée). Le lab garde la VIP `192.168.56.5:6443` : c'est l'endpoint que tout le reste utilise
+> déjà, elle est dans les SAN du certificat de l'apiserver, et ça permet aux deux labs de
+> partager un seul chemin de code dans `cilium-up.sh`. KubePrism reste disponible si tu veux
+> basculer.
 
 > ⚠️ **Calico n'annonce pas les IP de Service `LoadBalancer`.** Il ne sait le faire qu'en
 > **BGP**, ce qui suppose un routeur pair — inexistant sur un réseau host-only VirtualBox.

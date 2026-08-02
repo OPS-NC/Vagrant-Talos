@@ -57,6 +57,14 @@ WK_IP_START="${WK_IP_START:-101}" ; WK_IP_STEP="${WK_IP_STEP:-1}"
 # This default MUST stay aligned with lab.env.example and with _k8s/platform-up.sh:
 # two diverging defaults install two competing CNIs (broken pod network).
 CNI="${CNI:-cilium}"
+# kube-proxy replacement by Cilium in eBPF — same variable, same default and same guard
+# rail as the kubeadm sibling lab. `true` adds talos/patch-no-kube-proxy.yaml to the
+# generated config (`cluster.proxy.disabled`), so the Talos bootstrap renders NO kube-proxy
+# manifest at all and Cilium serves the Services in eBPF (_k8s/platform-up.sh installs it
+# with `kubeProxyReplacement=true`, read from this very variable).
+# Like CNI, this is only read when the config is GENERATED, and it is NOT switchable on a
+# live cluster: destroy, then rebuild.
+KUBE_PROXY_REPLACEMENT="${KUBE_PROXY_REPLACEMENT:-true}"
 # Talos version = ISO (Vagrant) AND the installer image pinned below: without that
 # pin, the INSTALLED version followed the talosctl binary (skew with the ISO).
 TALOS_VERSION="${TALOS_VERSION:-v1.13.7}"
@@ -71,6 +79,28 @@ KUBERNETES_VERSION="${KUBERNETES_VERSION:-}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+# --- Consistency checks -----------------------------------------------------
+KUBE_PROXY_REPLACEMENT="$(printf '%s' "$KUBE_PROXY_REPLACEMENT" | tr '[:upper:]' '[:lower:]')"
+case "$KUBE_PROXY_REPLACEMENT" in true|false) ;; *)
+  echo "ERROR: KUBE_PROXY_REPLACEMENT='${KUBE_PROXY_REPLACEMENT}' unknown (true|false)." >&2 ; exit 1 ;; esac
+
+# Without kube-proxy AND without a replacement, NO Service answers — not even CoreDNS, so
+# the cluster is unusable rather than degraded. Only Cilium replaces it in this lab, so we
+# refuse the pair HERE, before generating a config that would produce that cluster. Same
+# guard rail as kubeadm/cluster-up.sh in the sibling lab.
+if [ "$KUBE_PROXY_REPLACEMENT" = "true" ] && [ "$CNI" != "cilium" ]; then
+  cat >&2 <<EOF
+ERROR: KUBE_PROXY_REPLACEMENT=true requires CNI=cilium (currently CNI=${CNI}).
+  With that combination Talos would render no kube-proxy manifest
+  (cluster.proxy.disabled) while ${CNI} cannot replace it: no ClusterIP would answer
+  any more, CoreDNS included.
+  Pick one, in lab.env:
+    - CNI=cilium                     (the lab default)
+    - KUBE_PROXY_REPLACEMENT=false   (keep kube-proxy and ${CNI})
+EOF
+  exit 1
+fi
+
 # --- Prerequisites ----------------------------------------------------------
 for bin in talosctl kubectl; do
   command -v "$bin" >/dev/null 2>&1 || { echo "ERROR: '$bin' not found in PATH." >&2; exit 1; }
@@ -84,6 +114,7 @@ first_cp="${cp_ips[0]}"
 
 echo "==> Topology  : ${CONTROL_PLANES} control plane(s) [${cp_ips[*]}] + ${WORKERS} worker(s) [${worker_ips[*]:-none}]"
 echo "==> API VIP   : https://${VIP}:6443"
+echo "==> CNI       : ${CNI} — kube-proxy $([ "$KUBE_PROXY_REPLACEMENT" = true ] && echo 'REPLACED by Cilium (eBPF)' || echo 'installed by Talos')"
 
 # BOUNDED wait: label, timeout (s), then the command to retry.
 # An infinite loop here is this lab's historical trap: an already installed node
@@ -138,7 +169,7 @@ apply_config() {
 # regenerate when the config is missing, or explicitly through FORCE=1 (typically
 # after a `vagrant destroy`). Otherwise we reuse the existing config.
 if [ "${FORCE:-0}" = "1" ] || [ ! -f "${OUT}/controlplane.yaml" ]; then
-  echo "==> [1/5] Generating the Talos config (${OUT}/) — CNI=${CNI}, Kubernetes=${KUBERNETES_VERSION:-talosctl default}"
+  echo "==> [1/5] Generating the Talos config (${OUT}/) — CNI=${CNI}, KUBE_PROXY_REPLACEMENT=${KUBE_PROXY_REPLACEMENT}, Kubernetes=${KUBERNETES_VERSION:-talosctl default}"
   [ -f "talos/cni-${CNI}.yaml" ] || { echo "ERROR: unknown CNI '${CNI}' (talos/cni-${CNI}.yaml missing)." >&2; exit 1; }
   sans="${VIP}"
   for ip in "${cp_ips[@]}"; do sans="${sans},${ip}"; done
@@ -150,6 +181,13 @@ if [ "${FORCE:-0}" = "1" ] || [ ! -f "${OUT}/controlplane.yaml" ]; then
   if [ -n "$KUBERNETES_VERSION" ]; then
     k8s_args+=(--kubernetes-version "${KUBERNETES_VERSION#v}")
   fi
+  # kube-proxy: `true` adds the patch that sets `cluster.proxy.disabled`, so the bootstrap
+  # renders NO kube-proxy manifest and Cilium takes the Services over in eBPF. A
+  # CONTROL-PLANE patch, because `cluster.proxy` is not part of a worker machine config.
+  proxy_args=()
+  if [ "$KUBE_PROXY_REPLACEMENT" = "true" ]; then
+    proxy_args+=(--config-patch-control-plane @talos/patch-no-kube-proxy.yaml)
+  fi
   # The CNI is driven by the talos/cni-${CNI}.yaml patch (flannel = laid down by Talos;
   # none = Cilium & co).
   talosctl gen config "${CLUSTER_NAME}" "https://${VIP}:6443" \
@@ -160,10 +198,12 @@ if [ "${FORCE:-0}" = "1" ] || [ ! -f "${OUT}/controlplane.yaml" ]; then
     --config-patch               @talos/patch-all.yaml \
     --config-patch-control-plane @talos/patch-cp.yaml \
     --config-patch-control-plane "@talos/cni-${CNI}.yaml" \
+    "${proxy_args[@]}" \
     --output-dir "${OUT}" --force
 else
   echo "==> [1/5] Existing config reused (${OUT}/)."
-  echo "    /!\\ A change to CONTROL_PLANES/WORKERS/VIP/INSTALL_DISK/KUBERNETES_VERSION/patches is NOT"
+  echo "    /!\\ A change to CONTROL_PLANES/WORKERS/VIP/INSTALL_DISK/KUBERNETES_VERSION/CNI/"
+  echo "        KUBE_PROXY_REPLACEMENT/patches is NOT"
   echo "        taken into account here. To start clean:"
   echo "        vagrant destroy -f && rm -rf ${OUT} kubeconfig   (then run again)"
   echo "        or: FORCE=1 ./talos/cluster-up.sh   (regenerates, new secrets)"

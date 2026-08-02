@@ -1,0 +1,29 @@
+# Patch applied to the control planes ONLY, and only when KUBE_PROXY_REPLACEMENT=true
+# (the lab default — see lab.env.example).
+#
+# `cluster.proxy.disabled: true` tells the Talos bootstrap NOT to render the kube-proxy
+# manifest: the cluster comes up with NO service proxy at all. Cilium then takes the
+# Services over in eBPF (`kubeProxyReplacement=true`), which `./_k8s/platform-up.sh`
+# does at step [1/4]. Same intent, same variable and same default as the kubeadm sibling
+# lab, where the equivalent is `kubeadm init --skip-phases=addon/kube-proxy`.
+#
+# ⚠️ Only valid with CNI=cilium. Nothing else in this lab knows how to replace kube-proxy
+#    (Calico could, in its eBPF dataplane — ruled out in k8s-playground's `calico/`), and
+#    without kube-proxy AND without a replacement NO ClusterIP answers at all, CoreDNS
+#    included: the cluster is unusable rather than degraded. `cluster-up.sh` refuses that
+#    pair before it even generates the config.
+#
+# ⚠️ Read ONLY when the config is GENERATED. Flipping the variable against an existing
+#    `_out/` changes nothing (cluster-up.sh reuses the config), and flipping it on a
+#    RUNNING cluster is not supported: `vagrant destroy -f`, then rebuild.
+#
+# Why a file of its own rather than a line in cni-cilium.yaml: the CNI patch is selected by
+# the `CNI` variable, this one by `KUBE_PROXY_REPLACEMENT`. Two intents, two files — and
+# `cni-cilium.yaml` stays correct for KUBE_PROXY_REPLACEMENT=false (Cilium on top of the
+# kube-proxy Talos installed).
+#
+# NB: control planes only. `cluster.proxy` is not part of a worker machine config — the
+# kube-proxy manifest is rendered by the bootstrap, on the control plane.
+cluster:
+  proxy:
+    disabled: true

@@ -285,3 +285,33 @@ and unblocks them. Only `flannel` is laid down by Talos itself, at bootstrap tim
 If they are **still** `NotReady` after the CNI install, look at the CNI pods first
 (`kubectl -n kube-system get pods` for Cilium, `kubectl -n calico-system get pods` for Calico),
 then the addon's own page on <https://ops-nc.github.io/k8s-playground/>.
+
+### There is no `kube-proxy` DaemonSet
+
+**Expected**, and it is the lab default. `KUBE_PROXY_REPLACEMENT=true` (`lab.env`) makes
+`cluster-up.sh` add `talos/patch-no-kube-proxy.yaml` (`cluster.proxy.disabled: true`), so the
+bootstrap renders no kube-proxy manifest at all and Cilium serves the Services in eBPF. Check:
+
+```bash
+kubectl -n kube-system get ds kube-proxy      # NotFound => expected
+kubectl -n kube-system exec ds/cilium -c cilium-agent -- cilium-dbg status --verbose \
+  | grep KubeProxyReplacement                 # must say True
+```
+
+### No `ClusterIP` answers any more (CoreDNS included)
+
+The pathological case of the previous entry: kube-proxy is gone **and** nothing replaced it.
+It happens when `KUBE_PROXY_REPLACEMENT` and the CNI actually installed disagree — typically a
+`lab.env` edited *after* the bootstrap, or a Cilium installed by hand with
+`kubeProxyReplacement=false` on a cluster bootstrapped with `true`.
+
+```bash
+kubectl -n kube-system get ds kube-proxy                      # absent?
+grep -A2 '^    proxy:' _out/controlplane.yaml                 # what the bootstrap really did
+kubectl -n kube-system exec ds/cilium -c cilium-agent -- cilium-dbg status | grep KubeProxy
+```
+
+The machine config and `cilium-dbg` are the ground truth, **not** `lab.env`. Realign Cilium
+(`./_k8s/cilium/cilium-up.sh` with the right value), or rebuild the cluster — the bootstrap
+decision itself cannot be changed live. See
+[`README.md` §9](README.md#9-cni-cilium-calico-or-flannel).

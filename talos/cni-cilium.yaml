@@ -11,12 +11,12 @@
 #
 # Normal consequence: between the bootstrap and the Cilium install, the nodes stay
 # `NotReady` and CoreDNS `Pending`. That is not an error.
+#
+# The kube-proxy decision is NOT here: it lives in `talos/patch-no-kube-proxy.yaml`,
+# which cluster-up.sh adds to the generated config when KUBE_PROXY_REPLACEMENT=true
+# (the lab default). Two intents, two patches — this file would otherwise be wrong
+# for KUBE_PROXY_REPLACEMENT=false.
 cluster:
   network:
     cni:
       name: none
-  # Cilium is installed here with kubeProxyReplacement=false: we KEEP Talos's
-  # kube-proxy. To delegate service routing to Cilium, uncomment below AND install
-  # Cilium with kubeProxyReplacement=true + k8sServiceHost/<VIP>:6443.
-  # proxy:
-  #   disabled: true

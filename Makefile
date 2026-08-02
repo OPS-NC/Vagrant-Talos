@@ -100,10 +100,17 @@ validate-talos: ## Generate the Talos config in a throwaway directory then valid
 	vip="$${VIP:-$$(lab_get VIP)}"                   ; vip="$${vip:-$$net.5}"; \
 	disk="$${INSTALL_DISK:-$$(lab_get INSTALL_DISK)}"; disk="$${disk:-/dev/sda}"; \
 	kver="$${KUBERNETES_VERSION:-$$(lab_get KUBERNETES_VERSION)}"; \
+	kpr="$${KUBE_PROXY_REPLACEMENT:-$$(lab_get KUBE_PROXY_REPLACEMENT)}"; kpr="$${kpr:-true}"; \
+	kpr="$$(printf '%s' "$$kpr" | tr '[:upper:]' '[:lower:]')"; \
+	case "$$kpr" in true|false) ;; *) echo "❌ KUBE_PROXY_REPLACEMENT='$$kpr' unknown (true|false)"; exit 1 ;; esac; \
 	[ -f "talos/cni-$$cni.yaml" ] || { echo "❌ unknown CNI '$$cni' (talos/cni-$$cni.yaml missing)"; exit 1; }; \
+	if [ "$$kpr" = true ] && [ "$$cni" != cilium ]; then \
+	  echo "❌ KUBE_PROXY_REPLACEMENT=true requires CNI=cilium (here CNI=$$cni) — cluster-up.sh would refuse to start"; exit 1; \
+	fi; \
 	out="$$(mktemp -d)"; \
 	trap 'rm -rf "$$out"' EXIT; \
 	kargs=(); [ -z "$$kver" ] || kargs=(--kubernetes-version "$${kver#v}"); \
+	pargs=(); [ "$$kpr" != true ] || pargs=(--config-patch-control-plane @talos/patch-no-kube-proxy.yaml); \
 	talosctl gen config validate-only "https://$$vip:6443" \
 	  --install-disk "$$disk" \
 	  --additional-sans "$$vip,$$net.10,$$net.20,$$net.30" \
@@ -111,11 +118,12 @@ validate-talos: ## Generate the Talos config in a throwaway directory then valid
 	  --config-patch               @talos/patch-all.yaml \
 	  --config-patch-control-plane @talos/patch-cp.yaml \
 	  --config-patch-control-plane "@talos/cni-$$cni.yaml" \
+	  "$${pargs[@]}" \
 	  --output-dir "$$out" --force >/dev/null 2>&1 \
 	  || { echo "❌ gen config failed (invalid KUBERNETES_VERSION='$$kver'?)"; exit 1; }; \
 	talosctl validate --config "$$out/controlplane.yaml" --mode metal; \
 	talosctl validate --config "$$out/worker.yaml" --mode metal; \
-	echo "   (CNI=$$cni, VIP=$$vip, Kubernetes=$${kver:-talosctl default})"
+	echo "   (CNI=$$cni, VIP=$$vip, Kubernetes=$${kver:-talosctl default}, kube-proxy=$$([ "$$kpr" = true ] && echo 'replaced by Cilium' || echo 'installed by Talos'))"
 
 # A submodule ALWAYS records a precise commit in the parent repo — that is how git
 # guarantees a clone gives exactly the same tree. "Follow main" is therefore declared

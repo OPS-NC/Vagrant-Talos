@@ -4,12 +4,12 @@
 # After the bootstrap, the nodes stay NotReady until a CNI is installed
 # (that is normal). See README §9 to install Cilium in VXLAN mode.
 #
-# Common option with Cilium: delegate kube-proxy to Cilium. If you want that,
-# uncomment `proxy.disabled: true` below AND install Cilium with
-# kubeProxyReplacement=true + k8sServiceHost=<VIP> k8sServicePort=6443.
+# Delegating kube-proxy to Cilium is driven by KUBE_PROXY_REPLACEMENT (lab.env), which
+# makes cluster-up.sh add `talos/patch-no-kube-proxy.yaml` — but that variable REQUIRES
+# CNI=cilium, so with `CNI=none` kube-proxy is always the one Talos installed. If you
+# lay down a CNI that replaces it yourself, apply that patch by hand and install your CNI
+# with kubeProxyReplacement=true + k8sServiceHost=<VIP> k8sServicePort=6443.
 cluster:
   network:
     cni:
       name: none
-  # proxy:
-  #   disabled: true

@@ -294,3 +294,34 @@ réseau pod ne passe jamais `Ready`. `./_k8s/install.sh platform` l'installe à 
 S'ils sont **toujours** `NotReady` après l'installation du CNI, regarder d'abord les pods du CNI
 (`kubectl -n kube-system get pods` pour Cilium, `kubectl -n calico-system get pods` pour
 Calico), puis la page de l'addon sur <https://ops-nc.github.io/k8s-playground/>.
+
+### Il n'y a aucun DaemonSet `kube-proxy`
+
+**C'est normal**, et c'est le défaut du lab. `KUBE_PROXY_REPLACEMENT=true` (`lab.env`) fait
+ajouter à `cluster-up.sh` le patch `talos/patch-no-kube-proxy.yaml`
+(`cluster.proxy.disabled: true`) : le bootstrap ne rend aucun manifeste kube-proxy et Cilium sert
+les Services en eBPF. Vérification :
+
+```bash
+kubectl -n kube-system get ds kube-proxy      # NotFound => normal
+kubectl -n kube-system exec ds/cilium -c cilium-agent -- cilium-dbg status --verbose \
+  | grep KubeProxyReplacement                 # doit afficher True
+```
+
+### Plus aucune `ClusterIP` ne répond (CoreDNS compris)
+
+Le cas pathologique de l'entrée précédente : kube-proxy a disparu **et** rien ne l'a remplacé.
+Ça arrive quand `KUBE_PROXY_REPLACEMENT` et le CNI réellement installé divergent — typiquement un
+`lab.env` modifié *après* le bootstrap, ou un Cilium posé à la main avec
+`kubeProxyReplacement=false` sur un cluster bootstrapé avec `true`.
+
+```bash
+kubectl -n kube-system get ds kube-proxy                      # absent ?
+grep -A2 '^    proxy:' _out/controlplane.yaml                 # ce que le bootstrap a vraiment fait
+kubectl -n kube-system exec ds/cilium -c cilium-agent -- cilium-dbg status | grep KubeProxy
+```
+
+La config machine et `cilium-dbg` font foi, **pas** `lab.env`. Réaligner Cilium
+(`./_k8s/cilium/cilium-up.sh` avec la bonne valeur), ou reconstruire le cluster — la décision
+prise au bootstrap, elle, ne se change pas à chaud. Cf.
+[`LISEZ-MOI.md` §9](LISEZ-MOI.md#9-cni-cilium-calico-ou-flannel).
